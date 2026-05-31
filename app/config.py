@@ -41,6 +41,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "mysql_port": "3306",
     "mysql_database": "",
     "mysql_user": "",
+    "ftp_host": "w0210fa6.kasserver.com",
+    "ftp_port": "21",
+    "ftp_user": "f0185adc",
+    "ftp_remote_routes_path": "/ortschronik.info/ortschronik-api/routes.php",
+    "ftp_local_routes_path": "server/routes.php",
+    "ftp_password_dpapi": "",
     "nextcloud_web_files_url": "https://nx94165.your-storageshare.de/apps/files/files",
     "device_id": "",
 }

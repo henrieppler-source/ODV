@@ -7,7 +7,7 @@ $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 $path = rtrim($path, '/');
 
-const ODV_API_VERSION = 'v83';
+const ODV_API_VERSION = 'v110';
 
 if (!function_exists('get_json_input')) {
     function get_json_input(): array
@@ -1267,6 +1267,179 @@ function latest_backup_info(PDO $pdo): array
     }
     if (!$file) { return []; }
     return ['file' => $file, 'created_at' => $created, 'size' => $size, 'size_human' => human_size($size)];
+}
+
+function list_database_backups(): array
+{
+    $dir = backup_base_dir();
+    $files = glob(rtrim($dir, '/\\') . DIRECTORY_SEPARATOR . 'odv_db_backup_*.sql.gz') ?: [];
+    rsort($files);
+    $items = [];
+    foreach ($files as $path) {
+        $items[] = [
+            'file' => basename($path),
+            'created_at' => date('Y-m-d H:i:s', filemtime($path)),
+            'size' => filesize($path) ?: 0,
+            'size_human' => human_size((int)(filesize($path) ?: 0)),
+        ];
+    }
+    return $items;
+}
+
+function database_backup_path_by_file(string $file): string
+{
+    $file = basename($file);
+    if (!preg_match('/^odv_db_backup_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}\.sql\.gz$/', $file)) {
+        throw new RuntimeException('Ungültiger Backup-Dateiname');
+    }
+    $path = rtrim(backup_base_dir(), '/\\') . DIRECTORY_SEPARATOR . $file;
+    if (!is_file($path)) {
+        throw new RuntimeException('Backup-Datei nicht gefunden');
+    }
+    return $path;
+}
+
+function restore_database_backup(PDO $pdo, string $file): array
+{
+    $path = database_backup_path_by_file($file);
+    $gz = gzopen($path, 'rb');
+    if (!$gz) {
+        throw new RuntimeException('Backup-Datei konnte nicht gelesen werden');
+    }
+    $statement = '';
+    $executed = 0;
+    try {
+        while (!gzeof($gz)) {
+            $line = gzgets($gz);
+            if ($line === false) {
+                break;
+            }
+            $trimmed = trim($line);
+            if ($trimmed === '' || str_starts_with($trimmed, '--')) {
+                continue;
+            }
+            $statement .= $line;
+            if (str_ends_with(rtrim($line), ';')) {
+                $sql = trim($statement);
+                $statement = '';
+                if ($sql !== '') {
+                    $pdo->exec($sql);
+                    $executed++;
+                }
+            }
+        }
+        $rest = trim($statement);
+        if ($rest !== '') {
+            $pdo->exec($rest);
+            $executed++;
+        }
+    } finally {
+        gzclose($gz);
+    }
+    return [
+        'file' => basename($path),
+        'statements_executed' => $executed,
+        'restored_at' => date('Y-m-d H:i:s'),
+    ];
+}
+
+function quote_identifier(string $name): string
+{
+    return '`' . str_replace('`', '``', $name) . '`';
+}
+
+function backup_table_for_version(PDO $pdo, string $tableName, string $fromVersion): ?string
+{
+    if (!db_table_exists($pdo, $tableName)) {
+        return null;
+    }
+    $suffix = preg_replace('/[^A-Za-z0-9_]/', '', $fromVersion);
+    $backupName = $tableName . '_' . $suffix;
+    if (db_table_exists($pdo, $backupName)) {
+        return $backupName;
+    }
+    $source = quote_identifier($tableName);
+    $target = quote_identifier($backupName);
+    $pdo->exec("CREATE TABLE {$target} LIKE {$source}");
+    $pdo->exec("INSERT INTO {$target} SELECT * FROM {$source}");
+    return $backupName;
+}
+
+function ensure_schema_migrations_table(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS odv_schema_migrations (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        migration_key VARCHAR(100) NOT NULL,
+        from_version VARCHAR(20) NOT NULL,
+        to_version VARCHAR(20) NOT NULL,
+        description TEXT DEFAULT NULL,
+        backup_tables TEXT DEFAULT NULL,
+        executed_by_user_id INT DEFAULT NULL,
+        executed_by_name VARCHAR(255) DEFAULT NULL,
+        executed_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_migration_key (migration_key),
+        INDEX idx_schema_migrations_executed_at (executed_at)
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+}
+
+function schema_migration_done(PDO $pdo, string $key): bool
+{
+    if (!db_table_exists($pdo, 'odv_schema_migrations')) {
+        return false;
+    }
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM odv_schema_migrations WHERE migration_key = :k");
+    $stmt->execute([':k' => $key]);
+    return ((int)$stmt->fetchColumn()) > 0;
+}
+
+function record_schema_migration(PDO $pdo, string $key, string $fromVersion, string $toVersion, string $description, array $backupTables, array $currentUser): void
+{
+    ensure_schema_migrations_table($pdo);
+    $stmt = $pdo->prepare("INSERT IGNORE INTO odv_schema_migrations
+        (migration_key, from_version, to_version, description, backup_tables, executed_by_user_id, executed_by_name)
+        VALUES (:migration_key, :from_version, :to_version, :description, :backup_tables, :executed_by_user_id, :executed_by_name)");
+    $stmt->execute([
+        ':migration_key' => $key,
+        ':from_version' => $fromVersion,
+        ':to_version' => $toVersion,
+        ':description' => $description,
+        ':backup_tables' => implode(',', $backupTables),
+        ':executed_by_user_id' => (int)($currentUser['id'] ?? 0),
+        ':executed_by_name' => (string)($currentUser['display_name'] ?? ''),
+    ]);
+}
+
+function available_schema_migrations(PDO $pdo): array
+{
+    return [
+        [
+            'key' => 'v106_schema_migration_framework',
+            'from_version' => 'v105',
+            'to_version' => 'v106',
+            'description' => 'Migrationsprotokoll fuer kuenftige serverseitige Datenbankanpassungen anlegen.',
+            'pending' => !schema_migration_done($pdo, 'v106_schema_migration_framework'),
+            'backup_tables' => [],
+        ],
+    ];
+}
+
+function apply_schema_migrations(PDO $pdo, array $currentUser): array
+{
+    $applied = [];
+    ensure_schema_migrations_table($pdo);
+    if (!schema_migration_done($pdo, 'v106_schema_migration_framework')) {
+        record_schema_migration(
+            $pdo,
+            'v106_schema_migration_framework',
+            'v105',
+            'v106',
+            'Migrationsprotokoll fuer kuenftige serverseitige Datenbankanpassungen angelegt.',
+            [],
+            $currentUser
+        );
+        $applied[] = 'v106_schema_migration_framework';
+    }
+    return $applied;
 }
 
 
@@ -3242,6 +3415,72 @@ if ($method === 'GET' && $path === '/api/admin/backup-status') {
         }
     }
     json_response(['success' => true, 'latest' => $latest, 'age_hours' => $ageHours, 'warning' => $warning]);
+}
+
+if ($method === 'GET' && $path === '/api/admin/backups') {
+    $currentUser = require_role(['superadmin']);
+    json_response(['success' => true, 'backups' => list_database_backups()]);
+}
+
+if ($method === 'POST' && $path === '/api/admin/restore-backup') {
+    $currentUser = require_role(['superadmin']);
+    $input = get_json_input();
+    $file = trim((string)($input['file'] ?? ''));
+    $confirm = trim((string)($input['confirm_text'] ?? ''));
+    if ($confirm !== 'BACKUP ZURUECKSICHERN') {
+        json_response(['success' => false, 'error' => 'Sicherheitsabfrage nicht erfüllt'], 400);
+    }
+    if ($file === '') {
+        json_response(['success' => false, 'error' => 'Keine Backup-Datei ausgewählt'], 400);
+    }
+    $pdo = db();
+    try {
+        $before = create_pdo_database_backup($pdo, $currentUser);
+        $restore = restore_database_backup($pdo, $file);
+        api_log('warning', 'Datenbankbackup zurückgesichert', ['by_user_id' => $currentUser['id'], 'file' => $file, 'before_backup' => $before['file'] ?? '']);
+        json_response(['success' => true, 'before_backup' => $before, 'restore' => $restore]);
+    } catch (Throwable $e) {
+        api_log('error', 'Backup-Rücksicherung fehlgeschlagen', ['by_user_id' => $currentUser['id'], 'file' => $file, 'error' => $e->getMessage()]);
+        json_response(['success' => false, 'error' => 'Backup-Rücksicherung fehlgeschlagen: ' . $e->getMessage()], 500);
+    }
+}
+
+if ($method === 'GET' && $path === '/api/admin/schema-migrations') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    $migrations = available_schema_migrations($pdo);
+    $pending = array_values(array_filter($migrations, fn($m) => !empty($m['pending'])));
+    json_response([
+        'success' => true,
+        'api_version' => ODV_API_VERSION,
+        'migrations' => $migrations,
+        'pending_count' => count($pending),
+        'latest_backup' => latest_backup_info($pdo),
+    ]);
+}
+
+if ($method === 'POST' && $path === '/api/admin/schema-migrations/apply') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    try {
+        $backup = create_pdo_database_backup($pdo, $currentUser);
+        $applied = apply_schema_migrations($pdo, $currentUser);
+        $migrations = available_schema_migrations($pdo);
+        $pending = array_values(array_filter($migrations, fn($m) => !empty($m['pending'])));
+        api_log('warning', 'Datenbankmigrationen ausgefuehrt', ['by_user_id' => $currentUser['id'], 'applied' => $applied]);
+        json_response([
+            'success' => true,
+            'api_version' => ODV_API_VERSION,
+            'backup' => $backup,
+            'latest_backup' => $backup,
+            'applied' => $applied,
+            'migrations' => $migrations,
+            'pending_count' => count($pending),
+        ]);
+    } catch (Throwable $e) {
+        api_log('error', 'Datenbankmigration fehlgeschlagen', ['by_user_id' => $currentUser['id'], 'error' => $e->getMessage()]);
+        json_response(['success' => false, 'error' => 'Datenbankmigration fehlgeschlagen: ' . $e->getMessage()], 500);
+    }
 }
 
 if ($method === 'POST' && $path === '/api/admin/reset-database') {

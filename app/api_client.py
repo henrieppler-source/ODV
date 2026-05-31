@@ -180,6 +180,21 @@ class APIClient:
     def backup_status(self, token: str) -> dict:
         return self.request("GET", "/admin/backup-status", token=token)
 
+    def list_database_backups(self, token: str) -> dict:
+        return self.request("GET", "/admin/backups", token=token)
+
+    def restore_database_backup(self, token: str, file: str, confirm_text: str) -> dict:
+        return self.request("POST", "/admin/restore-backup", {
+            "file": file,
+            "confirm_text": confirm_text,
+        }, token=token)
+
+    def schema_migrations(self, token: str) -> dict:
+        return self.request("GET", "/admin/schema-migrations", token=token)
+
+    def apply_schema_migrations(self, token: str) -> dict:
+        return self.request("POST", "/admin/schema-migrations/apply", {}, token=token)
+
     def reset_database(self, token: str, confirm_text: str, include_mail_history: bool = True) -> dict:
         return self.request("POST", "/admin/reset-database", {
             "confirm_text": confirm_text,

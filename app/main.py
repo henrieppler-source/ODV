@@ -21,6 +21,8 @@ import uuid
 import socket
 import getpass
 import threading
+import ftplib
+import posixpath
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
@@ -67,13 +69,14 @@ from .models import UploadMetadata, HistoryEntry, PersonMark
 from .person_tagger import PersonTagger
 from .api_client import APIClient, ApiError
 from .openai_client import OpenAIClient, OpenAIError
+from .secure_store import SecureStoreError, protect_text, unprotect_text
 from .app_logging import app_log, app_log_exception
 from .upload_tab import UploadTabMixin
 from PIL import Image, ImageTk, ImageDraw, ImageFont, ExifTags
 
 APP_NAME = "Ortschronisten-Datei-Verwaltung"
 APP_SHORT_NAME = "ODV"
-APP_VERSION = "v103"
+APP_VERSION = "v110"
 
 TRANSCRIPTION_TYPE_OPTIONS = [
     "",
@@ -368,7 +371,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         self.refresh_history()
         self.load_folders_from_config()
         self.refresh_window_title()
-        self.after(500, self.show_startup_system_check)
+        self.after(500, self.show_startup_action_warnings)
         if not self.skip_update_check_once:
             self.after(7600, self.check_app_update_on_startup)
         else:
@@ -748,17 +751,37 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         if self.current_role() == "Superadmin":
             admin_menu = tk.Menu(menubar, tearoff=False)
             admin_menu.add_command(label="Admin-Einstellungen...", command=self.open_admin_settings_dialog)
-            admin_menu.add_command(label="Benutzer verwalten...", command=self.open_user_management_dialog)
-            admin_menu.add_command(label="Ortsordner-Stammdaten...", command=self.open_place_folder_dialog)
-            admin_menu.add_command(label="Archiv/Sammlung-Stammdaten...", command=self.open_archive_collection_dialog)
-            admin_menu.add_command(label="Vorhandene Dateien einlesen...", command=self.open_import_existing_files_dialog)
-            admin_menu.add_separator()
-            admin_menu.add_command(label="Datenbank sichern...", command=self.open_database_backup_dialog)
-            admin_menu.add_command(label="Datenbank zurücksetzen...", command=self.open_database_reset_dialog)
-            admin_menu.add_command(label="Wartungsmodus / Datenbanksperre...", command=self.open_maintenance_dialog)
-            admin_menu.add_separator()
-            admin_menu.add_command(label="ODV-Updatefreigabe verwalten...", command=self.open_app_update_admin_dialog)
-            admin_menu.add_command(label="Lokale Sicherungsdateien prüfen/bereinigen...", command=self.open_local_backup_cleanup_dialog)
+
+            user_admin_menu = tk.Menu(admin_menu, tearoff=False)
+            user_admin_menu.add_command(label="Benutzer verwalten...", command=self.open_user_management_dialog)
+            admin_menu.add_cascade(label="Benutzerverwaltung", menu=user_admin_menu)
+
+            masterdata_menu = tk.Menu(admin_menu, tearoff=False)
+            masterdata_menu.add_command(label="Ortsordner-Stammdaten...", command=self.open_place_folder_dialog)
+            masterdata_menu.add_command(label="Archiv/Sammlung-Stammdaten...", command=self.open_archive_collection_dialog)
+            admin_menu.add_cascade(label="Stammdaten", menu=masterdata_menu)
+
+            file_admin_menu = tk.Menu(admin_menu, tearoff=False)
+            file_admin_menu.add_command(label="Vorhandene Dateien einlesen...", command=self.open_import_existing_files_dialog)
+            file_admin_menu.add_command(label="Lokale Sicherungsdateien prüfen/bereinigen...", command=self.open_local_backup_cleanup_dialog)
+            admin_menu.add_cascade(label="Dateien", menu=file_admin_menu)
+
+            database_menu = tk.Menu(admin_menu, tearoff=False)
+            database_menu.add_command(label="Wartungsmodus / Datenbanksperre...", command=self.open_maintenance_dialog)
+            database_menu.add_command(label="Datenbankmigrationen prüfen/ausführen...", command=self.open_database_migrations_dialog)
+            database_menu.add_command(label="Datenbank zurücksetzen...", command=self.open_database_reset_dialog)
+            database_menu.add_separator()
+            database_menu.add_command(label="Datenbank sichern...", command=self.open_database_backup_dialog)
+            database_menu.add_command(label="Backup zurücksichern...", command=self.open_database_restore_dialog)
+            admin_menu.add_cascade(label="Datenbank", menu=database_menu)
+
+            server_menu = tk.Menu(admin_menu, tearoff=False)
+            server_menu.add_command(label="routes.php sichern/hochladen...", command=self.open_routes_deploy_dialog)
+            admin_menu.add_cascade(label="Server", menu=server_menu)
+
+            update_menu = tk.Menu(admin_menu, tearoff=False)
+            update_menu.add_command(label="ODV-Updatefreigabe verwalten...", command=self.open_app_update_admin_dialog)
+            admin_menu.add_cascade(label="Updates", menu=update_menu)
             menubar.add_cascade(label="Admin", menu=admin_menu)
 
         # Punkte: alles rund um automatische und manuelle Punkte
@@ -798,6 +821,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
 
         help_menu = tk.Menu(menubar, tearoff=False)
         help_menu.add_command(label="Info", command=lambda: messagebox.showinfo(APP_NAME, f"{APP_NAME} ({APP_SHORT_NAME}) {APP_VERSION}\nNextcloud, API/MySQL\n(c) Henri Eppler, 2026"))
+        help_menu.add_command(label="Systemstatus...", command=self.open_system_status_dialog)
         help_menu.add_command(label="Nach ODV-Update suchen...", command=lambda: self.check_app_update(interactive=True))
         menubar.add_cascade(label="Hilfe", menu=help_menu)
         self.config(menu=menubar)
@@ -3328,6 +3352,12 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
                     lines.append("Letzte Datenbanksicherung: keine gefunden")
             except Exception as exc:
                 lines.append(f"Backup-Status: nicht abrufbar ({exc})")
+            try:
+                migrations = self.api.schema_migrations(self.api_token)
+                pending = int(migrations.get("pending_count") or 0)
+                lines.append(f"Datenbankmigrationen offen: {pending}")
+            except Exception as exc:
+                lines.append(f"Datenbankmigrationen: nicht abrufbar ({exc})")
         try:
             update = self.get_app_update_info()
             if update:
@@ -3352,31 +3382,86 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             lines.append(f"Ortsordner-Prüfung: nicht möglich ({exc})")
         return lines
 
-    def show_startup_system_check(self) -> None:
-        """Zeigt nach dem Login kurz den Betriebsstatus an."""
+    def startup_action_warnings(self) -> list[str]:
+        warnings: list[str] = []
+        if self.current_role() != "Superadmin":
+            return warnings
+        api_version = "?"
+        try:
+            status = self.api.status()
+            api_version = str(status.get("api_version") or status.get("version") or "?")
+            if api_version != "?" and api_version != APP_VERSION:
+                warnings.append(
+                    f"Server-routes.php ist vermutlich nicht aktuell: App {APP_VERSION}, API {api_version}.\n"
+                    "Bitte unter Admin > Server-routes.php sichern/hochladen... aktualisieren."
+                )
+        except Exception as exc:
+            warnings.append(f"API-Status konnte nicht geprüft werden: {exc}")
+            return warnings
+        if api_version == APP_VERSION and self.api_token:
+            try:
+                migrations = self.api.schema_migrations(self.api_token)
+                pending = int(migrations.get("pending_count") or 0)
+                if pending > 0:
+                    warnings.append(
+                        f"Es gibt {pending} offene Datenbankmigration(en).\n"
+                        "Bitte unter Admin > Datenbankmigrationen prüfen/ausführen... ausführen."
+                    )
+            except Exception as exc:
+                warnings.append(f"Datenbankmigrationen konnten nicht geprüft werden: {exc}")
+        return warnings
+
+    def show_startup_action_warnings(self) -> None:
+        try:
+            warnings = self.startup_action_warnings()
+            if not warnings:
+                return
+            messagebox.showwarning(
+                "ODV-Handlungsbedarf",
+                "\n\n".join(warnings),
+                parent=self,
+            )
+        except Exception as exc:
+            app_log_exception("Start-Hinweise konnten nicht geprüft werden", exc)
+
+    def open_system_status_dialog(self) -> None:
+        """Zeigt den ausführlichen Betriebsstatus auf Wunsch über das Hilfe-Menü."""
         try:
             lines = self.startup_system_check_lines()
             dialog = tk.Toplevel(self)
-            dialog.title("ODV-Systemprüfung")
-            try: self.track_window_geometry(dialog, "ODV-Systemprüfung")
+            dialog.title("ODV-Systemstatus")
+            try: self.track_window_geometry(dialog, "ODV-Systemstatus")
             except Exception: pass
             dialog.transient(self)
-            dialog.resizable(False, False)
+            dialog.resizable(True, True)
+            dialog.columnconfigure(0, weight=1)
+            dialog.rowconfigure(0, weight=1)
             frame = ttk.Frame(dialog, padding=14)
             frame.grid(row=0, column=0, sticky="nsew")
-            ttk.Label(frame, text="Systemprüfung beim Start", font=("", 11, "bold")).pack(anchor="w", pady=(0, 8))
-            text = tk.Text(frame, width=88, height=min(10, max(6, len(lines)+1)), wrap="word")
-            text.pack(fill="both", expand=True)
+            frame.columnconfigure(0, weight=1)
+            frame.rowconfigure(1, weight=1)
+            ttk.Label(frame, text="Systemstatus", font=("", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 8))
+            text = tk.Text(frame, width=92, height=min(18, max(8, len(lines)+1)), wrap="word")
+            text.grid(row=1, column=0, sticky="nsew")
             text.insert("1.0", "\n".join(lines))
             text.configure(state="disabled")
-            ttk.Button(frame, text="Schließen", command=dialog.destroy).pack(anchor="e", pady=(8, 0))
+            buttons = ttk.Frame(frame)
+            buttons.grid(row=2, column=0, sticky="e", pady=(8, 0))
+            ttk.Button(buttons, text="Aktualisieren", command=lambda: self.refresh_system_status_text(text)).pack(side="left", padx=4)
+            ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
             dialog.update_idletasks()
             x = self.winfo_rootx() + max(60, (self.winfo_width() - dialog.winfo_width()) // 2)
             y = self.winfo_rooty() + 80
             dialog.geometry(f"+{x}+{y}")
-            dialog.after(6500, lambda: dialog.winfo_exists() and dialog.destroy())
         except Exception as exc:
-            app_log_exception("Systemprüfung beim Start konnte nicht angezeigt werden", exc)
+            app_log_exception("Systemstatus konnte nicht angezeigt werden", exc)
+
+    def refresh_system_status_text(self, text: tk.Text) -> None:
+        lines = self.startup_system_check_lines()
+        text.configure(state="normal")
+        text.delete("1.0", "end")
+        text.insert("1.0", "\n".join(lines))
+        text.configure(state="disabled")
 
 
     def parse_version_number(self, version: str) -> int:
@@ -3783,6 +3868,319 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             messagebox.showinfo("Backup-Status", "\n".join(lines), parent=self)
         except Exception as exc:
             messagebox.showerror("Backup-Status", f"Backup-Status konnte nicht geladen werden:\n{exc}", parent=self)
+
+    def resolve_local_routes_path(self) -> Path:
+        configured = str(self.config_data.get("ftp_local_routes_path", "server/routes.php") or "server/routes.php").strip()
+        candidates: list[Path] = []
+        raw = Path(configured)
+        if raw.is_absolute():
+            candidates.append(raw)
+        else:
+            candidates.append((Path.cwd() / raw).resolve())
+            candidates.append((Path(__file__).resolve().parents[1] / raw).resolve())
+        for path in candidates:
+            if path.exists() and path.is_file():
+                return path
+        return candidates[0]
+
+    def stored_ftp_password(self) -> str:
+        encrypted = str(self.config_data.get("ftp_password_dpapi", "") or "")
+        if not encrypted:
+            return ""
+        return unprotect_text(encrypted)
+
+    def deploy_routes_via_ftp(self) -> dict:
+        host = str(self.config_data.get("ftp_host", "") or "").strip()
+        port = int(str(self.config_data.get("ftp_port", "21") or "21").strip())
+        user = str(self.config_data.get("ftp_user", "") or "").strip()
+        remote_path = str(self.config_data.get("ftp_remote_routes_path", "") or "").strip()
+        password = self.stored_ftp_password()
+        local_path = self.resolve_local_routes_path()
+        if not host or not user or not remote_path:
+            raise RuntimeError("FTP-Server, Benutzer oder Zielpfad fehlen in den Admin-Einstellungen.")
+        if not password:
+            raise RuntimeError("FTP-Passwort ist noch nicht gespeichert. Bitte einmal in den Admin-Einstellungen erfassen.")
+        if not local_path.exists():
+            raise RuntimeError(f"Lokale routes.php nicht gefunden: {local_path}")
+        remote_dir = posixpath.dirname(remote_path)
+        remote_name = posixpath.basename(remote_path)
+        if not remote_dir or not remote_name:
+            raise RuntimeError("FTP-Zielpfad ist ungültig.")
+        stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        stem, ext = posixpath.splitext(remote_name)
+        backup_name = f"{stem}_backup_{APP_VERSION}_{stamp}{ext or '.php'}"
+        with ftplib.FTP() as ftp:
+            ftp.connect(host, port, timeout=30)
+            ftp.login(user, password)
+            ftp.cwd(remote_dir)
+            existing = ftp.nlst()
+            backup_created = False
+            if remote_name in existing:
+                ftp.rename(remote_name, backup_name)
+                backup_created = True
+            with local_path.open("rb") as fh:
+                ftp.storbinary(f"STOR {remote_name}", fh)
+            size = ftp.size(remote_name)
+        return {
+            "host": host,
+            "remote_dir": remote_dir,
+            "remote_name": remote_name,
+            "backup_name": backup_name if backup_created else "",
+            "local_path": str(local_path),
+            "size": size,
+        }
+
+    def open_routes_deploy_dialog(self) -> None:
+        if self.current_role() != "Superadmin":
+            messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Superadmins freigegeben.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Server-routes.php sichern/hochladen")
+        try: self.track_window_geometry(dialog, "Server-routes.php sichern/hochladen")
+        except Exception: pass
+        dialog.geometry("780x430")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=1)
+
+        local_path = self.resolve_local_routes_path()
+        remote_path = str(self.config_data.get("ftp_remote_routes_path", "") or "")
+        server = str(self.config_data.get("ftp_host", "") or "")
+        user = str(self.config_data.get("ftp_user", "") or "")
+        port = str(self.config_data.get("ftp_port", "21") or "21")
+        password_saved = bool(str(self.config_data.get("ftp_password_dpapi", "") or "").strip())
+
+        text = (
+            "ODV sichert die vorhandene routes.php auf dem Webserver und lädt danach die lokale Datei hoch.\n\n"
+            f"Lokal: {local_path}\n"
+            f"Server: {server}:{port}\n"
+            f"Benutzer: {user}\n"
+            f"Ziel: {remote_path}\n"
+            f"Passwort gespeichert: {'ja' if password_saved else 'nein'}"
+        )
+        ttk.Label(dialog, text="Server-routes.php sichern/hochladen", font=("", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+        ttk.Label(dialog, text=text, wraplength=740).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
+        result_var = tk.StringVar(value="")
+        ttk.Label(dialog, textvariable=result_var, wraplength=740).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        def run_deploy() -> None:
+            if not messagebox.askyesno(
+                "routes.php hochladen",
+                "Jetzt die Server-routes.php sichern und die lokale server/routes.php hochladen?",
+                parent=dialog,
+            ):
+                return
+            result_var.set("Upload läuft ...")
+            for child in buttons.winfo_children():
+                child.configure(state="disabled")
+
+            def worker() -> None:
+                try:
+                    info = self.deploy_routes_via_ftp()
+                    lines = [
+                        "Upload abgeschlossen.",
+                        f"Lokale Datei: {info.get('local_path')}",
+                        f"Serverziel: {info.get('remote_dir')}/{info.get('remote_name')}",
+                        f"Größe: {info.get('size')} Byte",
+                    ]
+                    if info.get("backup_name"):
+                        lines.append(f"Backup auf Server: {info.get('backup_name')}")
+                    else:
+                        lines.append("Kein Server-Backup erstellt, weil keine vorhandene routes.php gefunden wurde.")
+                    self.after(0, lambda: result_var.set("\n".join(lines)))
+                    self.after(0, lambda: messagebox.showinfo("routes.php hochladen", "routes.php wurde hochgeladen.", parent=dialog))
+                except Exception as exc:
+                    self.after(0, lambda error=str(exc): result_var.set(f"Upload fehlgeschlagen: {error}"))
+                    self.after(0, lambda error=str(exc): messagebox.showerror("routes.php hochladen", f"Upload fehlgeschlagen:\n{error}", parent=dialog))
+                finally:
+                    self.after(0, lambda: [child.configure(state="normal") for child in buttons.winfo_children()])
+
+            threading.Thread(target=worker, daemon=True).start()
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=3, column=0, sticky="e", padx=12, pady=(10, 12))
+        ttk.Button(buttons, text="Sichern und hochladen", command=run_deploy).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
+
+    def open_database_migrations_dialog(self) -> None:
+        if self.current_role() != "Superadmin":
+            messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Superadmins freigegeben.")
+            return
+        if not self.api_token:
+            messagebox.showerror("API", "Keine API-Anmeldung vorhanden. Bitte neu anmelden.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Datenbankmigrationen")
+        try: self.track_window_geometry(dialog, "Datenbankmigrationen")
+        except Exception: pass
+        dialog.geometry("820x520")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+
+        info_var = tk.StringVar(value="Status wird geladen ...")
+        ttk.Label(dialog, text="Datenbankmigrationen", font=("", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+        ttk.Label(dialog, textvariable=info_var, wraplength=780).grid(row=1, column=0, sticky="new", padx=12, pady=(0, 8))
+        columns = ("key", "from", "to", "status", "description")
+        tree = ttk.Treeview(dialog, columns=columns, show="headings", height=10)
+        tree.heading("key", text="Migration")
+        tree.heading("from", text="Von")
+        tree.heading("to", text="Nach")
+        tree.heading("status", text="Status")
+        tree.heading("description", text="Beschreibung")
+        tree.column("key", width=210)
+        tree.column("from", width=70, anchor="center")
+        tree.column("to", width=70, anchor="center")
+        tree.column("status", width=100, anchor="center")
+        tree.column("description", width=320)
+        tree.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 8))
+        dialog.rowconfigure(2, weight=1)
+
+        last_status: dict = {}
+
+        def render_status(resp: dict) -> None:
+            last_status.clear()
+            last_status.update(resp)
+            for iid in tree.get_children():
+                tree.delete(iid)
+            for migration in resp.get("migrations", []) or []:
+                status = "offen" if migration.get("pending") else "erledigt"
+                tree.insert("", "end", values=(
+                    migration.get("key", ""),
+                    migration.get("from_version", ""),
+                    migration.get("to_version", ""),
+                    status,
+                    migration.get("description", ""),
+                ))
+            backup = resp.get("latest_backup") or resp.get("backup") or {}
+            backup_text = "keine letzte Sicherung"
+            if backup:
+                backup_text = f"letzte Sicherung: {backup.get('created_at','?')} ({backup.get('file','?')})"
+            info_var.set(f"API-Version: {resp.get('api_version', '?')} | offene Migrationen: {resp.get('pending_count', 0)} | {backup_text}")
+
+        def refresh() -> None:
+            try:
+                render_status(self.api.schema_migrations(self.api_token))
+            except Exception as exc:
+                info_var.set(f"Status konnte nicht geladen werden: {exc}")
+
+        def apply() -> None:
+            pending = int(last_status.get("pending_count") or 0)
+            if pending <= 0:
+                messagebox.showinfo("Datenbankmigrationen", "Keine offenen Migrationen vorhanden.", parent=dialog)
+                return
+            warning = (
+                "Migrationen jetzt ausführen?\n\n"
+                "Die API erstellt vorher automatisch eine vollständige Datenbanksicherung. "
+                "Bei künftigen Tabellenänderungen werden betroffene Tabellen zusätzlich mit der vorherigen Versionsnummer kopiert."
+            )
+            if not messagebox.askyesno("Datenbankmigrationen", warning, parent=dialog):
+                return
+            try:
+                resp = self.api.apply_schema_migrations(self.api_token)
+                applied = resp.get("applied", []) or []
+                render_status(resp)
+                messagebox.showinfo("Datenbankmigrationen", "Migration abgeschlossen.\n\nAusgeführt: " + (", ".join(applied) if applied else "keine"), parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Datenbankmigrationen", f"Migration fehlgeschlagen:\n{exc}", parent=dialog)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=3, column=0, sticky="e", padx=12, pady=(0, 12))
+        ttk.Button(buttons, text="Status aktualisieren", command=refresh).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Offene Migrationen ausführen", command=apply).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
+        refresh()
+
+    def open_database_restore_dialog(self) -> None:
+        if self.current_role() != "Superadmin":
+            messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Superadmins freigegeben.")
+            return
+        if not self.api_token:
+            messagebox.showerror("API", "Keine API-Anmeldung vorhanden. Bitte neu anmelden.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Backup zurücksichern")
+        try: self.track_window_geometry(dialog, "Backup zurücksichern")
+        except Exception: pass
+        dialog.geometry("820x520")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(2, weight=1)
+
+        warning = (
+            "Diese Funktion spielt ein serverseitiges Datenbankbackup zurück.\n\n"
+            "Vor der Rücksicherung erstellt die API automatisch ein frisches Backup des aktuellen Stands. "
+            "Danach ersetzt das ausgewählte Backup die aktuelle Datenbankstruktur und Daten."
+        )
+        ttk.Label(dialog, text="Backup zurücksichern", font=("", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 4))
+        ttk.Label(dialog, text=warning, wraplength=780, foreground="#8a0000").grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        columns = ("file", "created_at", "size")
+        tree = ttk.Treeview(dialog, columns=columns, show="headings", height=10)
+        tree.heading("file", text="Backup-Datei")
+        tree.heading("created_at", text="Erstellt")
+        tree.heading("size", text="Größe")
+        tree.column("file", width=430)
+        tree.column("created_at", width=170, anchor="center")
+        tree.column("size", width=100, anchor="e")
+        tree.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 8))
+
+        ttk.Label(dialog, text="Zum Bestätigen exakt eingeben: BACKUP ZURUECKSICHERN").grid(row=3, column=0, sticky="w", padx=12, pady=(4, 2))
+        confirm_var = tk.StringVar()
+        ttk.Entry(dialog, textvariable=confirm_var).grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 8))
+        result_var = tk.StringVar(value="")
+        ttk.Label(dialog, textvariable=result_var, wraplength=780).grid(row=5, column=0, sticky="ew", padx=12, pady=(0, 8))
+
+        def load_backups() -> None:
+            try:
+                resp = self.api.list_database_backups(self.api_token)
+                for iid in tree.get_children():
+                    tree.delete(iid)
+                for item in resp.get("backups", []) or []:
+                    file = str(item.get("file", ""))
+                    if file:
+                        tree.insert("", "end", iid=file, values=(file, item.get("created_at", ""), item.get("size_human", "")))
+                result_var.set(f"{len(tree.get_children())} Backup(s) gefunden.")
+            except Exception as exc:
+                result_var.set(f"Backups konnten nicht geladen werden: {exc}")
+
+        def selected_backup_file() -> str:
+            sel = tree.selection()
+            return str(sel[0]) if sel else ""
+
+        def run_restore() -> None:
+            file = selected_backup_file()
+            if not file:
+                messagebox.showwarning("Backup zurücksichern", "Bitte ein Backup auswählen.", parent=dialog)
+                return
+            if confirm_var.get().strip() != "BACKUP ZURUECKSICHERN":
+                messagebox.showwarning("Sicherheitsabfrage", "Der Bestätigungstext stimmt nicht.", parent=dialog)
+                return
+            if not messagebox.askyesno("Backup endgültig zurücksichern", f"Backup jetzt zurücksichern?\n\n{file}", parent=dialog):
+                return
+            try:
+                resp = self.api.restore_database_backup(self.api_token, file, confirm_var.get().strip())
+                before = resp.get("before_backup") or {}
+                restore = resp.get("restore") or {}
+                msg = [
+                    "Backup wurde zurückgesichert.",
+                    f"Zurückgesichert: {restore.get('file', file)}",
+                    f"Vorheriger Stand gesichert als: {before.get('file', '?')}",
+                    f"SQL-Anweisungen: {restore.get('statements_executed', '?')}",
+                ]
+                result_var.set("\n".join(msg))
+                messagebox.showinfo("Backup zurücksichern", "\n".join(msg), parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Backup zurücksichern", f"Rücksicherung fehlgeschlagen:\n{exc}", parent=dialog)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=6, column=0, sticky="e", padx=12, pady=(0, 12))
+        ttk.Button(buttons, text="Aktualisieren", command=load_backups).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Backup zurücksichern", command=run_restore).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
+        load_backups()
 
     def open_maintenance_dialog(self) -> None:
         if self.current_role() != "Superadmin":
@@ -5407,49 +5805,91 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         except Exception: pass
         dialog.transient(self)
         dialog.grab_set()
-        dialog.geometry("900x760")
-        dialog.minsize(860, 720)
+        dialog.geometry("920x720")
+        dialog.minsize(880, 640)
         dialog.resizable(True, True)
-        dialog.columnconfigure(1, weight=1)
-        dialog.columnconfigure(3, weight=0)
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
 
-        ttk.Label(dialog, text="Admin-Einstellungen", font=("", 12, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 8))
+        header = ttk.Frame(dialog)
+        header.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 6))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="Admin-Einstellungen", font=("", 12, "bold")).grid(row=0, column=0, sticky="w")
 
-        ttk.Label(dialog, text="Metadatenordner unter Nextcloud-Stammverzeichnis:").grid(row=1, column=0, sticky="w", padx=12, pady=6)
+        dirty_var = tk.BooleanVar(value=False)
+        saving_var = tk.BooleanVar(value=False)
+
+        def mark_dirty(*_args) -> None:
+            if not saving_var.get():
+                dirty_var.set(True)
+
+        notebook = ttk.Notebook(dialog)
+        notebook.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 8))
+
+        general_tab = ttk.Frame(notebook, padding=12)
+        api_tab = ttk.Frame(notebook, padding=12)
+        ftp_tab = ttk.Frame(notebook, padding=12)
+        links_tab = ttk.Frame(notebook, padding=12)
+        notebook.add(general_tab, text="Allgemein")
+        notebook.add(api_tab, text="API / OpenAI")
+        notebook.add(ftp_tab, text="FTP-Deployment")
+        notebook.add(links_tab, text="Links / Hinweise")
+        for tab in (general_tab, api_tab, ftp_tab, links_tab):
+            tab.columnconfigure(1, weight=1)
+
+        ttk.Label(general_tab, text="Metadaten und Arbeitsordner", font=("", 10, "bold")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        ttk.Label(general_tab, text="Metadatenordner unter Nextcloud-Stammverzeichnis:").grid(row=1, column=0, sticky="w", pady=6)
         folder_name_var = tk.StringVar(value=self.config_data.get("metadata_folder_name", ".ortschronik_metadaten"))
-        ttk.Entry(dialog, textvariable=folder_name_var, width=42).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
-        ttk.Label(dialog, text="Beispiel: .ortschronik_metadaten").grid(row=1, column=2, sticky="w", padx=6, pady=6)
+        ttk.Entry(general_tab, textvariable=folder_name_var, width=42).grid(row=1, column=1, sticky="ew", padx=6, pady=6)
+        ttk.Label(general_tab, text="Beispiel: .ortschronik_metadaten").grid(row=1, column=2, sticky="w", padx=6, pady=6)
 
-        ttk.Label(dialog, text="Aktueller vollständiger Metadatenpfad:").grid(row=2, column=0, sticky="w", padx=12, pady=6)
+        ttk.Label(general_tab, text="Aktueller vollständiger Metadatenpfad:").grid(row=2, column=0, sticky="w", pady=6)
         meta_preview_var = tk.StringVar(value=self.metadata_folder_var.get())
-        ttk.Label(dialog, textvariable=meta_preview_var).grid(row=2, column=1, columnspan=2, sticky="w", padx=6, pady=6)
+        ttk.Label(general_tab, textvariable=meta_preview_var).grid(row=2, column=1, columnspan=2, sticky="w", padx=6, pady=6)
 
-        ttk.Label(dialog, text="Ordner, die Admins bearbeiten dürfen:").grid(row=3, column=0, sticky="nw", padx=12, pady=(10, 6))
-        work_text = tk.Text(dialog, height=5, width=55)
-        work_text.grid(row=3, column=1, columnspan=2, sticky="ew", padx=6, pady=(10, 6))
+        ttk.Label(general_tab, text="Ordner, die Admins bearbeiten dürfen:").grid(row=3, column=0, sticky="nw", pady=(10, 6))
+        work_text = tk.Text(general_tab, height=8, width=55)
+        work_text.grid(row=3, column=1, columnspan=2, sticky="nsew", padx=6, pady=(10, 6))
         work_text.insert("1.0", "\n".join(sorted(self.admin_work_folder_names)))
-        ttk.Label(dialog, text="Ein Ordnername pro Zeile. Es reicht der Ordnername, z. B. 01_ABLAGE_ORTSCHRONIK.", wraplength=620).grid(row=4, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
+        work_text.bind("<<Modified>>", lambda _event: (work_text.edit_modified(False), mark_dirty()))
+        general_tab.rowconfigure(3, weight=1)
+        ttk.Label(general_tab, text="Ein Ordnername pro Zeile. Es reicht der Ordnername, z. B. 01_ABLAGE_ORTSCHRONIK.", wraplength=620).grid(row=4, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
 
-        ttk.Separator(dialog).grid(row=5, column=0, columnspan=4, sticky="ew", padx=12, pady=(8, 8))
-        ttk.Label(dialog, text="Server / Datenbank Testbetrieb", font=("", 10, "bold")).grid(row=6, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 6))
-        ttk.Label(dialog, text="API-URL:").grid(row=7, column=0, sticky="w", padx=12, pady=4)
+        ttk.Label(api_tab, text="Server / API", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(api_tab, text="API-URL:").grid(row=1, column=0, sticky="w", pady=4)
         api_url_var = tk.StringVar(value=self.config_data.get("api_url", "https://ortschronik.info/api"))
-        ttk.Entry(dialog, textvariable=api_url_var).grid(row=7, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(dialog, text="OpenAI API-Schlüssel:").grid(row=8, column=0, sticky="w", padx=12, pady=4)
+        ttk.Entry(api_tab, textvariable=api_url_var).grid(row=1, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+
+        ttk.Label(api_tab, text="MySQL-Host:").grid(row=2, column=0, sticky="w", pady=4)
+        mysql_host_var = tk.StringVar(value=self.config_data.get("mysql_host", "https://ortschronik.info"))
+        ttk.Entry(api_tab, textvariable=mysql_host_var).grid(row=2, column=1, sticky="ew", padx=6, pady=4)
+        ttk.Label(api_tab, text="Port:").grid(row=2, column=2, sticky="w", padx=6, pady=4)
+        mysql_port_var = tk.StringVar(value=self.config_data.get("mysql_port", "3306"))
+        ttk.Entry(api_tab, textvariable=mysql_port_var, width=8).grid(row=2, column=3, sticky="w", padx=6, pady=4)
+        ttk.Label(api_tab, text="Datenbank:").grid(row=3, column=0, sticky="w", pady=4)
+        mysql_database_var = tk.StringVar(value=self.config_data.get("mysql_database", "d047179a"))
+        ttk.Entry(api_tab, textvariable=mysql_database_var).grid(row=3, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(api_tab, text="Datenbank-Benutzer:").grid(row=4, column=0, sticky="w", pady=4)
+        mysql_user_var = tk.StringVar(value=self.config_data.get("mysql_user", "d047179a"))
+        ttk.Entry(api_tab, textvariable=mysql_user_var).grid(row=4, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+
+        ttk.Separator(api_tab).grid(row=5, column=0, columnspan=4, sticky="ew", pady=(12, 10))
+        ttk.Label(api_tab, text="OpenAI", font=("", 10, "bold")).grid(row=6, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(api_tab, text="OpenAI API-Schlüssel:").grid(row=7, column=0, sticky="w", pady=4)
         openai_key_var = tk.StringVar(value=self.config_data.get("openai_api_key", ""))
-        ttk.Entry(dialog, textvariable=openai_key_var, width=42, show="*").grid(row=8, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(dialog, text="OpenAI-Modell:").grid(row=9, column=0, sticky="w", padx=12, pady=4)
+        ttk.Entry(api_tab, textvariable=openai_key_var, width=42, show="*").grid(row=7, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(api_tab, text="OpenAI-Modell:").grid(row=8, column=0, sticky="w", pady=4)
         openai_model_var = tk.StringVar(value=self.config_data.get("openai_model", "gpt-3.5-turbo"))
         openai_model_values = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
         if openai_model_var.get().strip() and openai_model_var.get().strip() not in openai_model_values:
             openai_model_values.append(openai_model_var.get().strip())
-        ttk.Combobox(dialog, textvariable=openai_model_var, values=openai_model_values, state="readonly").grid(row=9, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Combobox(api_tab, textvariable=openai_model_var, values=openai_model_values, state="readonly").grid(row=8, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         openai_pdf_pages_var = tk.StringVar(value=str(self.config_data.get("openai_pdf_sample_pages", 10) or 10))
         openai_text_chars_var = tk.StringVar(value=str(self.config_data.get("openai_text_sample_chars", 4000) or 4000))
         openai_points_var = tk.StringVar(value=str(self.config_data.get("openai_metadata_points", 2) or 2))
-        ttk.Label(dialog, text="OpenAI-Auszug:").grid(row=10, column=0, sticky="w", padx=12, pady=4)
-        openai_limits_frame = ttk.Frame(dialog)
-        openai_limits_frame.grid(row=10, column=1, columnspan=3, sticky="w", padx=6, pady=4)
+        ttk.Label(api_tab, text="OpenAI-Auszug:").grid(row=9, column=0, sticky="w", pady=4)
+        openai_limits_frame = ttk.Frame(api_tab)
+        openai_limits_frame.grid(row=9, column=1, columnspan=3, sticky="w", padx=6, pady=4)
         ttk.Label(openai_limits_frame, text="PDF-Seiten").pack(side="left")
         ttk.Spinbox(openai_limits_frame, from_=1, to=100, textvariable=openai_pdf_pages_var, width=6).pack(side="left", padx=(6, 16))
         ttk.Label(openai_limits_frame, text="max. Zeichen").pack(side="left")
@@ -5463,7 +5903,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         ttk.Button(openai_limits_frame, text="Standard", command=reset_openai_limits).pack(side="left")
         ttk.Label(openai_limits_frame, text="OpenAI-Punkte").pack(side="left", padx=(16, 0))
         ttk.Spinbox(openai_limits_frame, from_=0, to=50, textvariable=openai_points_var, width=6).pack(side="left", padx=(6, 0))
-        ttk.Label(dialog, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. Die OpenAI-Pauschalpunkte werden als Punkteregel openai_metadata gespeichert.", wraplength=720).grid(row=11, column=0, columnspan=4, sticky="w", padx=12, pady=(0, 8))
+        ttk.Label(api_tab, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. Die OpenAI-Pauschalpunkte werden als Punkteregel openai_metadata gespeichert.", wraplength=760).grid(row=10, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         openai_test_status_var = tk.StringVar(value="OpenAI-Schlüssel nicht geprüft")
         openai_balance_var = tk.StringVar(value="Guthaben: n.v.")
@@ -5507,27 +5947,88 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
                     self.after(0, lambda: openai_balance_var.set("Guthaben: k.A."))
             threading.Thread(target=run_check, daemon=True).start()
 
-        ttk.Button(dialog, text="OpenAI-Schlüssel prüfen", command=check_openai_key).grid(row=12, column=0, sticky="w", padx=12, pady=4)
-        ttk.Label(dialog, textvariable=openai_test_status_var, wraplength=520, foreground="#555555").grid(row=12, column=1, columnspan=3, sticky="w", padx=6, pady=4)
-        ttk.Label(dialog, textvariable=openai_balance_var, wraplength=520, foreground="#555555").grid(row=13, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
+        openai_actions = ttk.Frame(api_tab)
+        openai_actions.grid(row=11, column=0, columnspan=4, sticky="ew", pady=4)
+        ttk.Button(openai_actions, text="OpenAI-Schlüssel prüfen", command=check_openai_key).pack(side="left")
+        ttk.Label(openai_actions, textvariable=openai_test_status_var, wraplength=520, foreground="#555555").pack(side="left", padx=(12, 0))
+        ttk.Label(api_tab, textvariable=openai_balance_var, wraplength=520, foreground="#555555").grid(row=12, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
 
-        ttk.Label(dialog, text="MySQL-Host:").grid(row=14, column=0, sticky="w", padx=12, pady=4)
-        mysql_host_var = tk.StringVar(value=self.config_data.get("mysql_host", "https://ortschronik.info"))
-        ttk.Entry(dialog, textvariable=mysql_host_var).grid(row=14, column=1, sticky="ew", padx=6, pady=4)
-        ttk.Label(dialog, text="Port:").grid(row=14, column=2, sticky="w", padx=6, pady=4)
-        mysql_port_var = tk.StringVar(value=self.config_data.get("mysql_port", "3306"))
-        ttk.Entry(dialog, textvariable=mysql_port_var, width=8).grid(row=14, column=3, sticky="w", padx=6, pady=4)
-        ttk.Label(dialog, text="Datenbank:").grid(row=15, column=0, sticky="w", padx=12, pady=4)
-        mysql_database_var = tk.StringVar(value=self.config_data.get("mysql_database", "d047179a"))
-        ttk.Entry(dialog, textvariable=mysql_database_var).grid(row=15, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(dialog, text="Datenbank-Benutzer:").grid(row=16, column=0, sticky="w", padx=12, pady=4)
-        mysql_user_var = tk.StringVar(value=self.config_data.get("mysql_user", "d047179a"))
-        ttk.Entry(dialog, textvariable=mysql_user_var).grid(row=16, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(dialog, text="Nextcloud Web-Dateiansicht:").grid(row=17, column=0, sticky="w", padx=12, pady=4)
+        ttk.Label(ftp_tab, text="FTP-Deployment", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(ftp_tab, text="FTP-Server:").grid(row=1, column=0, sticky="w", pady=4)
+        ftp_host_var = tk.StringVar(value=self.config_data.get("ftp_host", "w0210fa6.kasserver.com"))
+        ttk.Entry(ftp_tab, textvariable=ftp_host_var).grid(row=1, column=1, sticky="ew", padx=6, pady=4)
+        ttk.Label(ftp_tab, text="Port:").grid(row=1, column=2, sticky="w", padx=6, pady=4)
+        ftp_port_var = tk.StringVar(value=self.config_data.get("ftp_port", "21"))
+        ttk.Entry(ftp_tab, textvariable=ftp_port_var, width=8).grid(row=1, column=3, sticky="w", padx=6, pady=4)
+        ttk.Label(ftp_tab, text="FTP-Benutzer:").grid(row=2, column=0, sticky="w", pady=4)
+        ftp_user_var = tk.StringVar(value=self.config_data.get("ftp_user", "f0185adc"))
+        ttk.Entry(ftp_tab, textvariable=ftp_user_var).grid(row=2, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(ftp_tab, text="FTP-Passwort:").grid(row=3, column=0, sticky="w", pady=4)
+        ftp_password_var = tk.StringVar(value="")
+        ttk.Entry(ftp_tab, textvariable=ftp_password_var, show="*").grid(row=3, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ftp_saved = bool(str(self.config_data.get("ftp_password_dpapi", "") or "").strip())
+        ftp_status_var = tk.StringVar(value="FTP-Passwort ist verschlüsselt gespeichert." if ftp_saved else "FTP-Passwort noch nicht gespeichert.")
+        ttk.Label(ftp_tab, text="Leer lassen, um ein bereits gespeichertes Passwort zu behalten.", wraplength=720).grid(row=4, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
+        ttk.Label(ftp_tab, text="Lokale routes.php:").grid(row=5, column=0, sticky="w", pady=4)
+        ftp_local_routes_path_var = tk.StringVar(value=self.config_data.get("ftp_local_routes_path", "server/routes.php"))
+        ttk.Entry(ftp_tab, textvariable=ftp_local_routes_path_var).grid(row=5, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(ftp_tab, text="Zielpfad routes.php:").grid(row=6, column=0, sticky="w", pady=4)
+        ftp_routes_path_var = tk.StringVar(value=self.config_data.get("ftp_remote_routes_path", "/ortschronik.info/ortschronik-api/routes.php"))
+        ttk.Entry(ftp_tab, textvariable=ftp_routes_path_var).grid(row=6, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+
+        def current_ftp_password() -> str:
+            password = ftp_password_var.get()
+            if password:
+                return password
+            encrypted = str(self.config_data.get("ftp_password_dpapi", "") or "")
+            if not encrypted:
+                return ""
+            return unprotect_text(encrypted)
+
+        def check_ftp_connection() -> None:
+            ftp_status_var.set("FTP prüft ...")
+
+            def run_check() -> None:
+                try:
+                    host = ftp_host_var.get().strip()
+                    user = ftp_user_var.get().strip()
+                    port = int(ftp_port_var.get().strip() or "21")
+                    password = current_ftp_password()
+                    if not host or not user or not password:
+                        raise SecureStoreError("Bitte FTP-Server, Benutzer und Passwort erfassen.")
+                    target_dir = posixpath.dirname(ftp_routes_path_var.get().strip())
+                    with ftplib.FTP() as ftp:
+                        ftp.connect(host, port, timeout=20)
+                        ftp.login(user, password)
+                        if target_dir and target_dir != ".":
+                            ftp.cwd(target_dir)
+                    self.after(0, lambda: ftp_status_var.set("FTP: Verbindung OK"))
+                except Exception as exc:
+                    self.after(0, lambda: ftp_status_var.set(f"FTP: {exc}"))
+
+            threading.Thread(target=run_check, daemon=True).start()
+
+        ftp_buttons = ttk.Frame(ftp_tab)
+        ftp_buttons.grid(row=7, column=0, columnspan=4, sticky="ew", pady=(8, 8))
+        ttk.Button(ftp_buttons, text="FTP-Verbindung prüfen", command=check_ftp_connection).pack(side="left")
+        ttk.Label(ftp_buttons, textvariable=ftp_status_var, foreground="#555555", wraplength=620).pack(side="left", padx=(12, 0))
+
+        ttk.Label(links_tab, text="Nextcloud und Hinweise", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(links_tab, text="Nextcloud Web-Dateiansicht:").grid(row=1, column=0, sticky="w", pady=4)
         nc_web_var = tk.StringVar(value=self.config_data.get("nextcloud_web_files_url", "https://nx94165.your-storageshare.de/apps/files/files"))
-        ttk.Entry(dialog, textvariable=nc_web_var).grid(row=17, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        ttk.Label(dialog, text="Beispiel: https://nx94165.your-storageshare.de/apps/files/files  ·  Links zeigen auf den betreffenden Nextcloud-Ordner.", wraplength=720).grid(row=18, column=0, columnspan=4, sticky="w", padx=12, pady=(4, 4))
-        ttk.Label(dialog, text="Hinweis: Das Datenbankpasswort und SMTP-Passwort liegen nur auf dem Server/API, nicht im Client. Die OpenAI-Pauschalpunkte ändern Sie unter Admin > Punkteregeln verwalten > openai_metadata.", wraplength=720).grid(row=19, column=0, columnspan=4, sticky="w", padx=12, pady=(4, 10))
+        ttk.Entry(links_tab, textvariable=nc_web_var).grid(row=1, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(links_tab, text="Beispiel: https://nx94165.your-storageshare.de/apps/files/files  ·  Links zeigen auf den betreffenden Nextcloud-Ordner.", wraplength=760).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 10))
+        ttk.Label(links_tab, text="Das Datenbankpasswort und SMTP-Passwort liegen nur auf dem Server/API. Das FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt. Die OpenAI-Pauschalpunkte ändern Sie unter Admin > Punkteregeln verwalten > openai_metadata.", wraplength=760).grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 10))
+
+        tracked_vars = [
+            folder_name_var, api_url_var, openai_key_var, openai_model_var,
+            openai_pdf_pages_var, openai_text_chars_var, openai_points_var,
+            mysql_host_var, mysql_port_var, mysql_database_var, mysql_user_var,
+            ftp_host_var, ftp_port_var, ftp_user_var, ftp_password_var,
+            ftp_local_routes_path_var, ftp_routes_path_var, nc_web_var,
+        ]
+        for var in tracked_vars:
+            var.trace_add("write", mark_dirty)
 
         def update_preview(*_):
             old = self.config_data.get("metadata_folder_name", ".ortschronik_metadaten")
@@ -5538,21 +6039,24 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             self.ensure_standard_metadata_folder()
         folder_name_var.trace_add("write", update_preview)
 
-        def save_settings():
+        def save_settings(close_after: bool = True) -> bool:
+            saving_var.set(True)
             name = folder_name_var.get().strip() or ".ortschronik_metadaten"
             if not name.startswith("."):
                 name = "." + name
             folders = [line.strip() for line in work_text.get("1.0", "end").splitlines() if line.strip()]
             if not folders:
                 messagebox.showwarning("Admin-Ordner", "Bitte mindestens einen Admin-Bearbeitungsordner erfassen.", parent=dialog)
-                return
+                saving_var.set(False)
+                return False
             try:
                 openai_pdf_pages = max(1, min(100, int(openai_pdf_pages_var.get())))
                 openai_text_chars = max(500, min(100000, int(openai_text_chars_var.get())))
                 openai_points = max(0, min(50, int(openai_points_var.get())))
             except ValueError:
                 messagebox.showwarning("OpenAI-Auszug", "Bitte gültige Zahlen für Seiten, Zeichen und OpenAI-Punkte erfassen.", parent=dialog)
-                return
+                saving_var.set(False)
+                return False
             self.config_data["metadata_folder_name"] = name
             self.admin_work_folder_names = set(folders)
             self.config_data["admin_work_folder_names"] = sorted(self.admin_work_folder_names)
@@ -5566,6 +6070,18 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             self.config_data["mysql_port"] = mysql_port_var.get().strip() or "3306"
             self.config_data["mysql_database"] = mysql_database_var.get().strip()
             self.config_data["mysql_user"] = mysql_user_var.get().strip()
+            self.config_data["ftp_host"] = ftp_host_var.get().strip()
+            self.config_data["ftp_port"] = ftp_port_var.get().strip() or "21"
+            self.config_data["ftp_user"] = ftp_user_var.get().strip()
+            self.config_data["ftp_local_routes_path"] = ftp_local_routes_path_var.get().strip() or "server/routes.php"
+            self.config_data["ftp_remote_routes_path"] = ftp_routes_path_var.get().strip()
+            if ftp_password_var.get():
+                try:
+                    self.config_data["ftp_password_dpapi"] = protect_text(ftp_password_var.get())
+                except SecureStoreError as exc:
+                    messagebox.showwarning("FTP-Passwort", str(exc), parent=dialog)
+                    saving_var.set(False)
+                    return False
             self.config_data["nextcloud_web_files_url"] = nc_web_var.get().strip()
             self.ensure_standard_metadata_folder()
             save_config(self.config_data)
@@ -5583,13 +6099,35 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Admin-Einstellungen geändert", f"Metadatenordner={name}; Admin-Ordner={', '.join(folders)}"))
             self.refresh_history()
             self.refresh_admin_uploads(show_message=False)
+            dirty_var.set(False)
+            saving_var.set(False)
             messagebox.showinfo("Admin-Einstellungen", "Einstellungen wurden gespeichert.", parent=dialog)
+            if close_after:
+                dialog.destroy()
+            return True
+
+        def close_dialog() -> None:
+            if not dirty_var.get():
+                dialog.destroy()
+                return
+            answer = messagebox.askyesnocancel(
+                "Änderungen speichern?",
+                "Es gibt ungespeicherte Änderungen in den Admin-Einstellungen.\n\nSollen sie vor dem Schließen gespeichert werden?",
+                parent=dialog,
+            )
+            if answer is None:
+                return
+            if answer:
+                save_settings(close_after=True)
+                return
             dialog.destroy()
 
-        buttons = ttk.Frame(dialog)
-        buttons.grid(row=0, column=2, columnspan=2, sticky="e", padx=12, pady=(10, 6))
-        ttk.Button(buttons, text="Speichern", command=save_settings).pack(side="left", padx=6)
-        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=6)
+        buttons = ttk.Frame(header)
+        buttons.grid(row=0, column=1, sticky="e")
+        ttk.Button(buttons, text="Speichern", command=lambda: save_settings(close_after=False)).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Schließen", command=close_dialog).pack(side="left", padx=6)
+        dialog.protocol("WM_DELETE_WINDOW", close_dialog)
+        dirty_var.set(False)
 
     def open_place_folder_dialog(self) -> None:
         if self.current_role() != "Superadmin":

@@ -1,11 +1,14 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v103
+# Ortschronisten-Datei-Verwaltung (ODV) v110
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v103`
+- Aktuelle App-Version laut `app/main.py`: `v110`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
+- Dokumentationsregel: Alle künftigen Anpassungen in dieser `README.md` unter `Versionshistorie` dokumentieren.
+- Bei neuer App-Version alle Versionsbezeichnungen passend anheben.
+- Bei Korrekturen innerhalb einer bestehenden Version die Beschreibung direkt bei dieser Version ergänzen.
 - Commit-Regel: Wenn der Nutzer exakt `OK läuft` schreibt, wird der aktuelle sinnvolle Arbeitsstand geprüft und committed.
 - Wichtig: Vorhandene Änderungen im Git-Workspace nicht zurücksetzen oder überschreiben.
 
@@ -15,10 +18,12 @@ Für die nächste Sitzung:
 
 ```text
 Wir machen im ODV-Projekt weiter:
-C:\ODV\v85\ODV-Entwicklung_v85\ODV-Entwicklung
+C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v103.
+Aktuelle App-Version laut README/Code: v110.
+Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
+Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
 Wenn ich exakt `OK läuft` schreibe, bitte den aktuellen sinnvollen Stand committen.
 Vorhandene Änderungen im Git-Workspace nicht zurücksetzen oder überschreiben.
 ```
@@ -64,33 +69,113 @@ Für Verteilung auf andere Macs sollte die App signiert/notarisiert werden.
 - Für den aktuellen App-Stand sollte `server/routes.php` beziehungsweise die zur App passende `server/routes_vXX.php` verwendet werden.
 - In der alten README stand zuletzt noch `server/routes_v81.php`; das ist historisch und muss vor einer echten Serveraktualisierung gegen den aktuellen Code geprüft werden.
 - SQL-Migrationen nur bei Bedarf und passend zur Zielversion importieren.
+- SQL-Ordnerstruktur: `sql/current`, `sql/migrations`, `sql/resets`, `sql/archive`.
+- Vor MySQL-Tabellenaenderungen betroffene Tabellen mit vorheriger Versionsnummer kopieren, z. B. `documents_v104` vor einer Migration auf v105.
 - Reset-Dateien löschen nur Bewegungs-/Testdaten, nicht Benutzer, Rollen/Rechte, Ortsordner, Punkteregeln, Verteiler, Systemeinstellungen oder Nextcloud-Dateien.
 
 Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 
-- `sql/schema_v48_points.sql`
-- `sql/schema_v49_points_folder_scope.sql`
-- `sql/schema_v51_point_rules_ui.sql`
-- `sql/schema_v60_mail_history.sql`
-- `sql/reset_bewegungsdaten_v63.sql`
-- `sql/reset_bewegungsdaten_v64.sql`
-- `sql/reset_bewegungsdaten_v65.sql`
-- `sql/schema_v68_maintenance_backup.sql`
-- `sql/schema_v69_app_update.sql`
-- `sql/schema_v74_sessions_devices_locks.sql`
-- `sql/schema_v76_dragdrop_fileview.sql`
-- `sql/schema_v77_fileview_status_search.sql`
-- `sql/schema_v79_menu_manual_points.sql`
-- `sql/schema_v80_ui_session_state.sql`
-- `sql/schema_v81_ui_window_geometry_fix.sql`
-- `sql/schema_v82_upload_form_layout.sql`
+- `sql/migrations/schema_v48_points.sql`
+- `sql/migrations/schema_v49_points_folder_scope.sql`
+- `sql/migrations/schema_v51_point_rules_ui.sql`
+- `sql/migrations/schema_v60_mail_history.sql`
+- `sql/resets/reset_bewegungsdaten_v63.sql`
+- `sql/resets/reset_bewegungsdaten_v64.sql`
+- `sql/resets/reset_bewegungsdaten_v65.sql`
+- `sql/migrations/schema_v68_maintenance_backup.sql`
+- `sql/migrations/schema_v69_app_update.sql`
+- `sql/migrations/schema_v74_sessions_devices_locks.sql`
+- `sql/migrations/schema_v76_dragdrop_fileview.sql`
+- `sql/migrations/schema_v77_fileview_status_search.sql`
+- `sql/migrations/schema_v79_menu_manual_points.sql`
+- `sql/migrations/schema_v80_ui_session_state.sql`
+- `sql/migrations/schema_v81_ui_window_geometry_fix.sql`
+- `sql/migrations/schema_v82_upload_form_layout.sql`
 
 ## Versionshistorie
+
+### v110 - Datenbankmenü und Backup-Rücksicherung
+
+- Aktuelle App-Version laut `app/main.py`: `v110`.
+- API-Version in `server/routes.php` auf `v110` angehoben.
+- Untermenü `Admin > Datenbank` neu sortiert: Wartungsmodus/Datenbanksperre, Datenbankmigrationen, Datenbank zurücksetzen, danach getrennt Datenbank sichern und Backup zurücksichern.
+- Klarstellung: `Datenbank zurücksetzen` löscht Bewegungs-/Testdaten und ist nicht identisch mit Backup-Rücksicherung.
+- Neuer Menüpunkt `Backup zurücksichern...`.
+- Neue API-Endpunkte `GET /api/admin/backups` und `POST /api/admin/restore-backup`.
+- Vor einer Backup-Rücksicherung erstellt die API automatisch ein frisches Backup des aktuellen Stands.
+- Rücksicherung akzeptiert nur serverseitige Backup-Dateien nach Muster `odv_db_backup_YYYY-MM-DD_HH-MM-SS.sql.gz` aus dem Backup-Ordner und verlangt den Bestätigungstext `BACKUP ZURUECKSICHERN`.
+- Geänderte Dateien: `app/main.py`, `app/api_client.py`, `server/routes.php`, `README.md`
+
+### v109 - Admin-Menü fachlich gegliedert
+
+- Aktuelle App-Version laut `app/main.py`: `v109`.
+- API-Version in `server/routes.php` auf `v109` angehoben.
+- Superadmin-Menü `Admin` in fachliche Untermenüs gegliedert: Benutzerverwaltung, Stammdaten, Dateien, Datenbank, Server, Updates.
+- Datenbankfunktionen sind nun gebündelt: sichern, Migrationen prüfen/ausführen, zurücksetzen, Wartungsmodus/Datenbanksperre.
+- Serverfunktion `routes.php sichern/hochladen` liegt im Untermenü `Server`.
+- Geänderte Dateien: `app/main.py`, `server/routes.php`, `README.md`
+
+### v108 - Start-Hinweise und Systemstatus im Hilfe-Menü
+
+- Aktuelle App-Version laut `app/main.py`: `v108`.
+- API-Version in `server/routes.php` auf `v108` angehoben.
+- Das bisherige automatische Systemstatus-Fenster beim Start wird nicht mehr angezeigt.
+- Beim Start erscheint nur noch ein Hinweis, wenn Handlungsbedarf besteht: Server-`routes.php` nicht passend zur App-Version oder offene Datenbankmigrationen.
+- Neuer Menüpunkt `Hilfe > Systemstatus...` zeigt den ausführlichen Betriebsstatus auf Wunsch.
+- Der Systemstatus enthält zusätzlich die Anzahl offener Datenbankmigrationen.
+- Geänderte Dateien: `app/main.py`, `server/routes.php`, `README.md`
+
+### v107 - routes.php per FTP sichern und hochladen
+
+- Aktuelle App-Version laut `app/main.py`: `v107`.
+- API-Version in `server/routes.php` auf `v107` angehoben.
+- Neuer Superadmin-Menüpunkt `Server-routes.php sichern/hochladen...`.
+- ODV nutzt die in den Admin-Einstellungen gespeicherten FTP-Daten und das lokal per Windows-DPAPI verschluesselte FTP-Passwort.
+- Vor dem Upload wird die vorhandene Server-Datei `routes.php` per FTP mit Zeitstempel und App-Version umbenannt, z. B. `routes_backup_v107_2026-05-31_15-30-00.php`.
+- Danach wird die lokale Datei aus `ftp_local_routes_path`, standardmaessig `server/routes.php`, nach `ftp_remote_routes_path` hochgeladen.
+- Datenbankanpassungen bleiben getrennt und laufen ueber `Admin > Datenbankmigrationen prüfen/ausführen...`.
+- Geänderte Dateien: `app/main.py`, `app/config.py`, `server/routes.php`, `README.md`
+
+### v106 - Serverseitige Datenbankmigrationen
+
+- Aktuelle App-Version laut `app/main.py`: `v106`.
+- API-Version in `server/routes.php` auf `v106` angehoben.
+- Neuer Superadmin-Menüpunkt `Datenbankmigrationen prüfen/ausführen...`.
+- Neuer API-Endpunkt `GET /api/admin/schema-migrations` zeigt offene serverseitige Migrationen, API-Version und letzte Datenbanksicherung.
+- Neuer API-Endpunkt `POST /api/admin/schema-migrations/apply` erstellt zuerst automatisch eine vollständige Datenbanksicherung und führt danach bekannte Migrationen aus.
+- Serverseitiges Migrationsprotokoll `odv_schema_migrations` ergänzt.
+- SQL: `sql/migrations/schema_v106_schema_migrations.sql`
+- Hilfsfunktion für künftige Tabellenänderungen ergänzt: Vor `ALTER TABLE` kann die betroffene Tabelle mit der vorherigen Versionsnummer kopiert werden, z. B. `documents_v105` vor einer Migration auf v106.
+- Keine MySQL-Zugangsdaten im ODV-Client erforderlich; Migrationen laufen über die API mit vorhandener Server-Datenbankverbindung.
+- Geänderte Dateien: `app/main.py`, `app/api_client.py`, `server/routes.php`, `sql/migrations/schema_v106_schema_migrations.sql`, `README.md`
+
+### v105 - Admin-Einstellungen in Reitern
+
+- Aktuelle App-Version laut `app/main.py`: `v105`.
+- Superadmin-Dialog `Admin-Einstellungen` fachlich in Reiter gegliedert: Allgemein, API/OpenAI, FTP-Deployment, Links/Hinweise.
+- Schließen des Dialogs fragt bei ungespeicherten Änderungen, ob gespeichert werden soll.
+- Bewusste Entscheidung gegen automatisches Speichern beim Verlassen einzelner Felder, damit Admin-/Server-/FTP-/OpenAI-Werte erst nach ausdrücklicher Bestätigung übernommen werden.
+- SQL-Ordner aufgeraeumt in `sql/current`, `sql/migrations`, `sql/resets`, `sql/archive`.
+- Migrationsregel dokumentiert: Vor MySQL-Tabellenaenderungen wird die betroffene Tabelle mit der vorherigen Versionsnummer gesichert, z. B. `documents_v104` vor einer Migration auf v105.
+- Geänderte Dateien: `app/main.py`, `README.md`, `sql/README.md`, `sql/*`
+
+### v104 - FTP-Zugang und lokale Passwortverschlüsselung
+
+- Aktuelle App-Version laut `app/main.py`: `v104`.
+- In den Superadmin-Einstellungen gibt es FTP-Deployment-Felder fuer Server, Port, Benutzer, Zielpfad und Passwort.
+- Das FTP-Passwort wird lokal per Windows-DPAPI verschluesselt in der ODV-Konfiguration gespeichert; es muss danach nicht erneut eingegeben werden.
+- Ein vorhandenes gespeichertes FTP-Passwort bleibt erhalten, wenn das Passwortfeld beim Speichern leer bleibt.
+- FTP-Verbindungstest aus den Admin-Einstellungen ergaenzt.
+- Geplanter Server-Deploymentpfad fuer `routes.php`: FTP-Server `w0210fa6.kasserver.com`, Benutzer `f0185adc`, Port `21`, Zielpfad `/ortschronik.info/ortschronik-api/routes.php`, lokale Quelle `server/routes.php`.
+- Verbindungstest am 31.05.2026: DNS loest auf `85.13.162.140` auf, TCP/FTP auf Port `21` ist erreichbar.
+- Geänderte Dateien: `app/main.py`, `app/config.py`, `app/secure_store.py`, `README.md`
 
 ### v103
 
 - Aktuelle App-Version laut `app/main.py`.
 - Keine eigene alte README-Datei für v96-v103 im Projekt gefunden; Änderungen für diese Versionen müssen bei Bedarf aus Code, Git-Historie oder weiteren Notizen rekonstruiert werden.
+- README-Arbeitsregel ergänzt: Künftige Anpassungen werden in der Versionshistorie dokumentiert; neue Versionen heben alle Versionsbezeichnungen an, Korrekturen werden bei der bestehenden Version beschrieben.
+- Erster Verbindungstest am 31.05.2026: DNS loest auf `85.13.162.140` auf, TCP/SFTP auf Port `22` lief von dieser Umgebung in einen Timeout; spaeter als FTP/Port `21` korrigiert.
 
 ### v95 - Metadaten beim Dateiwechsel leeren
 
@@ -205,20 +290,20 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - `Aktueller Dateiname` und `Hochgeladen am` werden bei Dateiauswahl bzw. Drag & Drop vorbelegt.
 - Button `Baum...` in der Dateiansicht optisch vom Verzeichnis-Auswahlfeld abgesetzt.
 - Server: `server/routes_v82.php`
-- SQL: keine strukturelle Änderung; `sql/schema_v82_upload_form_layout.sql` enthält nur Hinweis.
+- SQL: keine strukturelle Änderung; `sql/migrations/schema_v82_upload_form_layout.sql` enthält nur Hinweis.
 
 ### v81 - Fenstergeometrie-Fix
 
 - Fenstergrößen und Fensterpositionen werden zuverlässig lokal gespeichert und beim nächsten Öffnen wiederhergestellt.
 - Server: `server/routes_v81.php`
-- SQL: keine Datenbankänderung; `sql/schema_v81_ui_window_geometry_fix.sql` enthält nur Hinweis.
+- SQL: keine Datenbankänderung; `sql/migrations/schema_v81_ui_window_geometry_fix.sql` enthält nur Hinweis.
 
 ### v80 - Fensterzustand und Sitzungsanzeige
 
 - Lokales Speichern von Fenstergrößen und Fensterpositionen.
 - Aktualisierung der ODV-Version in `Sitzungen und Geräte` nach Start/Login/API-Statusprüfung.
 - Server: `server/routes_v80.php`
-- SQL: `sql/schema_v80_ui_session_state.sql` enthält nur Hinweise; Tabellen stammen aus v74.
+- SQL: `sql/migrations/schema_v80_ui_session_state.sql` enthält nur Hinweise; Tabellen stammen aus v74.
 
 ### v79 - Menüstruktur und manuelle Sonderpunkte
 
@@ -230,8 +315,8 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Standardpunkte pro Stunde: 150, über Superadmin einstellbar.
 - Eigene Tabelle `manual_special_points`.
 - Server: `server/routes_v79.php`
-- SQL: `sql/schema_v79_menu_manual_points.sql` oder `sql/schema_v79_ui_sources_search_mailrules.sql`
-- Reset: `sql/reset_bewegungsdaten_v79.sql`
+- SQL: `sql/migrations/schema_v79_menu_manual_points.sql` oder `sql/migrations/schema_v78_ui_sources_search_mailrules.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v79.sql`
 
 ### v77 - Dateiansicht, Suche, Dokumentstatus und Normierung
 
@@ -244,8 +329,8 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Status `archiviert`, `abgelehnt`, `geloescht` verschiebt Dateien in Archiv-/Papierkorb-Ordner.
 - Reaktivierung über Status `erfasst` versucht, Datei an ursprünglichen Pfad zurückzuschieben.
 - Server: `server/routes_v77.php`
-- SQL: `sql/schema_v77_fileview_status_search.sql`
-- Reset: `sql/reset_bewegungsdaten_v77.sql`
+- SQL: `sql/migrations/schema_v77_fileview_status_search.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v77.sql`
 
 ### v76 - Dateiansicht, Metadatenrechte und Drag & Drop
 
@@ -255,8 +340,8 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Metadatenrechte: Admin/Superadmin dürfen bearbeiten; Bearbeiter bei Ordnerschreibrecht oder eigener erfasster Datei; fehlt `Erfasst von`, reicht Ordnerschreibrecht.
 - Drag & Drop einer Datei aus dem Explorer in den Upload-Reiter möglich; Upload erfolgt erst per Button.
 - Server: `server/routes_v76.php`
-- SQL: `sql/schema_v76_dragdrop_fileview.sql`
-- Reset: `sql/reset_bewegungsdaten_v76.sql`
+- SQL: `sql/migrations/schema_v76_dragdrop_fileview.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v76.sql`
 
 ### v75 - Dateiansicht und Metadatenrechte
 
@@ -278,7 +363,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Dokument-Bearbeitungssperre gegen parallele Metadatenänderungen.
 - Neue Geräte werden nicht blockiert; Superadmins können auffällige Geräte sperren.
 - Server: `server/routes_v74.php`
-- SQL: `sql/schema_v74_sessions_devices_locks.sql`; API legt Tabellen defensiv selbst an, wenn möglich.
+- SQL: `sql/migrations/schema_v74_sessions_devices_locks.sql`; API legt Tabellen defensiv selbst an, wenn möglich.
 
 ### v72 - Konsolidierter Produktivtest-Stand
 
@@ -316,8 +401,8 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Neue Version wird aus dem lokalen Nextcloud-Updateordner nach `%LOCALAPPDATA%\ODV\versions\vXX` kopiert und ZIP-Dateien werden entpackt.
 - Komfort-Updater war noch späterer Ausbauschritt.
 - Server: `server/routes_v69.php`
-- SQL: `sql/schema_v69_app_update.sql`
-- Reset: `sql/reset_bewegungsdaten_v69.sql`
+- SQL: `sql/migrations/schema_v69_app_update.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v69.sql`
 - Zusatzdoku: `docs/V69_AENDERUNGEN.md`
 
 ### v68 - Wartungsmodus, Datenbanksicherung und Systemprüfung
@@ -333,8 +418,8 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Backups liegen standardmäßig serverseitig unter `odv_backup/backups` neben dem API-Verzeichnis und sollten geschützt werden.
 - Rücksicherung bleibt manuell über KAS/phpMyAdmin.
 - Server: `server/routes_v68.php`
-- SQL: `sql/schema_v68_maintenance_backup.sql`
-- Reset: `sql/reset_bewegungsdaten_v68.sql`
+- SQL: `sql/migrations/schema_v68_maintenance_backup.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v68.sql`
 
 ### v67 - Stammdatenblatt, Zugriffsprotokoll und Download
 
@@ -373,7 +458,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Rundmail verlangt nur bei Downloadlink oder Dokumentanlage eine ausgewählte Datei.
 - Server/API akzeptiert neuen Status `erfasst`.
 - Server: `server/routes_v65.php`
-- Reset: `sql/reset_bewegungsdaten_v65.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v65.sql`
 
 ### v64 - Physisch vorhandene Dateien rekursiv anzeigen
 
@@ -384,13 +469,13 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Punkte nur für Dateien in `00_ORTSCHRONIK`, `01_ABLAGE_ORTSCHRONIK` oder `06_ARBEIT_DER_ORTSCHRONISTEN`.
 - Sonderpunkte: `Kinder wie die Zeit vergeht` neu 100 Punkte, nachträglich 20; Jahresblätter neu 50, nachträglich 10.
 - Server: `server/routes_v64.php`
-- Reset: `sql/reset_bewegungsdaten_v64.sql`
+- Reset: `sql/resets/reset_bewegungsdaten_v64.sql`
 - Buildfix: `pyinstaller==6.11.1`, `pyinstaller-hooks-contrib==2024.10`, PyInstaller-Aufruf über `python -m PyInstaller`; bei Long-Path-Fehler Projektordner kurz halten oder Windows Long Path Support aktivieren.
 
 ### v63
 
 - Server: `server/routes_v63.php`
-- Optionaler Testreset: `sql/reset_bewegungsdaten_v63.sql`
+- Optionaler Testreset: `sql/resets/reset_bewegungsdaten_v63.sql`
 
 ### v62 - Robuste Dateiauflösung / Dateiendungen
 
@@ -422,7 +507,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Mail-Versandhistorie: pro Empfänger wird gespeichert, welche Rundmail versendet wurde.
 - Menü `Informationen > Versandhistorie...` für Admin/Superadmin.
 - Server: `server/routes_v60.php`
-- SQL optional/empfohlen: `sql/schema_v60_mail_history.sql`; Route legt Tabelle bei Bedarf automatisch an.
+- SQL optional/empfohlen: `sql/migrations/schema_v60_mail_history.sql`; Route legt Tabelle bei Bedarf automatisch an.
 
 ### v59 - Punkte-Schwellen für Beschreibung und Stichwörter
 
@@ -488,7 +573,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - `Rechte / Nutzung allgemein` ist eine schmale Auswahlliste mit A/B/C/D.
 - Stichwörter sollen durch Komma oder Semikolon getrennt werden.
 - Sonderpunkte können im Dialog aus verwaltbaren Punkteregeln gewählt werden; Punktzahl überschreibbar, Begründung Pflicht.
-- SQL: `sql/schema_v51_point_rules_ui.sql`
+- SQL: `sql/migrations/schema_v51_point_rules_ui.sql`
 - Server: `server/routes_v51.php` entspricht funktional v50.
 
 ### v50 - Punktestand, Ranking und direkte Sonderpunkte
@@ -511,7 +596,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Uploads in eigene Ortsordner erhalten keine Punkte.
 - `documents.points_eligible` wird beim Anlegen gespeichert, auch wenn Admin später verschiebt.
 - Vorhandene Dokumente werden anhand `target_folder` und `current_path` nachklassifiziert.
-- SQL: erst `sql/schema_v48_points.sql`, dann `sql/schema_v49_points_folder_scope.sql`
+- SQL: erst `sql/migrations/schema_v48_points.sql`, dann `sql/migrations/schema_v49_points_folder_scope.sql`
 - Server: `server/routes_v49.php`
 
 ### v48 - Beitrags- und Punkteverwaltung
@@ -525,7 +610,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Manuelle Sonderpunkte mit Begründung.
 - Punkteregeln je Kalenderjahr verwaltbar.
 - Beitragsauswertung mit CSV-Export.
-- SQL: `sql/schema_v48_points.sql`
+- SQL: `sql/migrations/schema_v48_points.sql`
 - Server: `server/routes_v48.php`
 - Bereits vergebene Punkte behalten gespeicherten Wert; Regeländerungen gelten praktisch für zukünftige Punkteereignisse.
 
@@ -614,6 +699,8 @@ python -m app.main
   - Rolle: Superadmin
   - Ort: Milz
 
-## Alte README-Dateien
+## Projektordner
 
-Diese Inhalte wurden aus den vorhandenen `README*.md`-Dateien zusammengeführt. Die alten Dateien bleiben vorerst im Projekt. Wenn der Nutzer exakt `Readme passt` schreibt, dürfen die alten README-Dateien aus dem Projekt gelöscht werden; `README.md` bleibt erhalten.
+- Aktive Entwicklung: `C:\ODV\Entwicklung`
+- Alte Projektstände und Buildpakete: `C:\ODV\Archiv`
+- Die historischen `README*.md`-Dateien wurden in diese zentrale `README.md` übernommen und danach entfernt.
