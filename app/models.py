@@ -36,6 +36,8 @@ class UploadMetadata:
     document_date: str = ""
     event: str = ""
     place: str = ""
+    gps_coordinates: str = ""
+    gps_place: str = ""
     description: str = ""
     document_type: str = ""
     rights_note: str = ""

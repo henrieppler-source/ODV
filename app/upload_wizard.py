@@ -43,6 +43,8 @@ class UploadWizard:
             "document_date": tk.StringVar(),
             "event": tk.StringVar(),
             "place": tk.StringVar(),
+            "gps_coordinates": tk.StringVar(),
+            "gps_place": tk.StringVar(),
             "keywords": tk.StringVar(),
             "copyright_author": tk.StringVar(),
             "rights_holder": tk.StringVar(),
@@ -168,18 +170,39 @@ class UploadWizard:
         ttk.Label(frame, text="Ort:").grid(row=3, column=0, sticky="w", pady=2, padx=(4,0))
         ttk.Entry(frame, textvariable=self.owner.meta_vars["place"]).grid(row=3, column=1, sticky="ew", padx=6, pady=2)
 
-        ttk.Label(frame, text="Ereignis:").grid(row=4, column=0, sticky="nw", pady=2, padx=(4,0))
+        gps_label = ttk.Label(frame, text="GPS-Koordinaten:")
+        gps_label.grid(row=4, column=0, sticky="w", pady=2, padx=(4,0))
+        gps_display = ttk.Label(
+            frame,
+            textvariable=self.owner.meta_vars["gps_coordinates"],
+            anchor="w",
+            foreground="#555555",
+        )
+        gps_display.grid(row=4, column=1, sticky="ew", padx=6, pady=2)
+
+        def refresh_gps_row(*_args):
+            if self.owner.meta_vars["gps_coordinates"].get().strip():
+                gps_label.grid()
+                gps_display.grid()
+            else:
+                gps_label.grid_remove()
+                gps_display.grid_remove()
+
+        self.owner.meta_vars["gps_coordinates"].trace_add("write", refresh_gps_row)
+        refresh_gps_row()
+
+        ttk.Label(frame, text="Ereignis:").grid(row=5, column=0, sticky="nw", pady=2, padx=(4,0))
         event_text = tk.Text(frame, height=2, wrap="word", undo=True)
-        event_text.grid(row=4, column=1, sticky="ew", padx=6, pady=2)
+        event_text.grid(row=5, column=1, sticky="ew", padx=6, pady=2)
         self.bind_multiline_meta_field("event", event_text)
 
-        ttk.Label(frame, text="Stichwörter:").grid(row=5, column=0, sticky="nw", pady=2, padx=(4,0))
+        ttk.Label(frame, text="Stichwörter:").grid(row=6, column=0, sticky="nw", pady=2, padx=(4,0))
         keywords_text = tk.Text(frame, height=4, wrap="word", undo=True)
-        keywords_text.grid(row=5, column=1, sticky="ew", padx=6, pady=2)
+        keywords_text.grid(row=6, column=1, sticky="ew", padx=6, pady=2)
         self.bind_multiline_meta_field("keywords", keywords_text)
 
         transcription_frame = ttk.Frame(frame)
-        transcription_frame.grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 2))
+        transcription_frame.grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 2))
         transcription_frame.columnconfigure(2, weight=1)
         ttk.Label(transcription_frame, text="Transkribiertes Dokument:").grid(row=0, column=0, sticky="w")
         ttk.Label(transcription_frame, text="Art:").grid(row=0, column=1, sticky="w", padx=(12,4))

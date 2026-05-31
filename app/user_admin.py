@@ -1,0 +1,458 @@
+from __future__ import annotations
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+
+from .api_client import ApiError
+from .app_logging import app_log_exception
+from .database import add_history
+from .models import HistoryEntry
+from .users import ROLES, normalize_username, role_allows_user_management
+
+
+class UserAdminMixin:
+    def open_sessions_devices_dialog(self) -> None:
+        if self.current_role() != "Superadmin":
+            messagebox.showwarning("Sitzungen und Geräte", "Nur Superadmins können Sitzungen und Geräte verwalten.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Sitzungen und Geräte")
+        try: self.track_window_geometry(dialog, "Sitzungen und Geräte")
+        except Exception: pass
+        dialog.geometry("1100x620")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(0, weight=1)
+
+        nb = ttk.Notebook(dialog)
+        nb.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        sess_frame = ttk.Frame(nb, padding=8)
+        dev_frame = ttk.Frame(nb, padding=8)
+        nb.add(sess_frame, text="Aktive Sitzungen")
+        nb.add(dev_frame, text="Geräte")
+        for f in (sess_frame, dev_frame):
+            f.columnconfigure(0, weight=1)
+            f.rowconfigure(0, weight=1)
+
+        sess_cols = ("id", "user", "device", "app", "ip", "started", "last", "expires")
+        sess_tree = ttk.Treeview(sess_frame, columns=sess_cols, show="headings")
+        for col, label, width in [
+            ("id", "ID", 60), ("user", "Benutzer", 190), ("device", "Gerät", 190),
+            ("app", "ODV", 80), ("ip", "IP", 130), ("started", "Start", 145),
+            ("last", "Letzte Aktivität", 145), ("expires", "Gültig bis", 145),
+        ]:
+            sess_tree.heading(col, text=label, anchor="w")
+            sess_tree.column(col, width=width, anchor="w")
+        sess_tree.grid(row=0, column=0, sticky="nsew")
+        ttk.Scrollbar(sess_frame, orient="vertical", command=sess_tree.yview).grid(row=0, column=1, sticky="ns")
+
+        dev_cols = ("user_id", "user", "device_id", "device", "windows", "app", "ip", "first", "last", "blocked")
+        dev_tree = ttk.Treeview(dev_frame, columns=dev_cols, show="headings")
+        for col, label, width in [
+            ("user_id", "User-ID", 70), ("user", "Benutzer", 190), ("device_id", "Geräte-ID", 220),
+            ("device", "Gerät", 170), ("windows", "Windows-Benutzer", 140), ("app", "ODV", 80),
+            ("ip", "IP", 120), ("first", "Erstmalig", 145), ("last", "Letzter Login", 145), ("blocked", "Gesperrt", 80),
+        ]:
+            dev_tree.heading(col, text=label, anchor="w")
+            dev_tree.column(col, width=width, anchor="w")
+        dev_tree.grid(row=0, column=0, sticky="nsew")
+        ttk.Scrollbar(dev_frame, orient="vertical", command=dev_tree.yview).grid(row=0, column=1, sticky="ns")
+
+        state = {"devices": [], "sessions": []}
+
+        def refresh():
+            try:
+                data = self.api.list_sessions_and_devices(self.api_token)
+                state["devices"] = list(data.get("devices", []))
+                state["sessions"] = list(data.get("sessions", []))
+            except ApiError as exc:
+                messagebox.showerror("Sitzungen und Geräte", f"Daten konnten nicht geladen werden:\n{exc}", parent=dialog)
+                return
+            for tree in (sess_tree, dev_tree):
+                for iid in tree.get_children():
+                    tree.delete(iid)
+            for row in state["sessions"]:
+                sess_tree.insert("", "end", iid=str(row.get("session_id")), values=(
+                    row.get("session_id", ""), row.get("display_name", ""), row.get("device_name", ""),
+                    row.get("app_version", ""), row.get("ip_address", ""), row.get("started_at", ""),
+                    row.get("last_seen_at", ""), row.get("expires_at", ""),
+                ))
+            for idx, row in enumerate(state["devices"]):
+                dev_tree.insert("", "end", iid=str(idx), values=(
+                    row.get("user_id", ""), row.get("display_name", ""), row.get("device_id", ""),
+                    row.get("device_name", ""), row.get("windows_user", ""), row.get("app_version", ""),
+                    row.get("last_ip", ""), row.get("first_seen_at", ""), row.get("last_login_at", ""),
+                    "ja" if int(row.get("is_blocked", 0) or 0) == 1 else "nein",
+                ))
+
+        def end_selected_session():
+            sel = sess_tree.selection()
+            if not sel:
+                messagebox.showinfo("Sitzung beenden", "Bitte eine Sitzung auswählen.", parent=dialog)
+                return
+            sid = int(sel[0])
+            if not messagebox.askyesno("Sitzung beenden", f"Sitzung {sid} wirklich beenden?", parent=dialog):
+                return
+            try:
+                self.api.end_session(self.api_token, sid)
+                refresh()
+            except ApiError as exc:
+                messagebox.showerror("Sitzung beenden", str(exc), parent=dialog)
+
+        def selected_device() -> dict | None:
+            sel = dev_tree.selection()
+            if not sel:
+                return None
+            try:
+                return state["devices"][int(sel[0])]
+            except Exception:
+                return None
+
+        def set_blocked(blocked: bool):
+            row = selected_device()
+            if not row:
+                messagebox.showinfo("Gerät", "Bitte ein Gerät auswählen.", parent=dialog)
+                return
+            action = "sperren" if blocked else "freigeben"
+            if not messagebox.askyesno("Gerät", f"Gerät für {row.get('display_name','Benutzer')} wirklich {action}?", parent=dialog):
+                return
+            try:
+                self.api.set_device_blocked(self.api_token, int(row.get("user_id")), str(row.get("device_id")), blocked)
+                refresh()
+            except ApiError as exc:
+                messagebox.showerror("Gerät", str(exc), parent=dialog)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        ttk.Button(buttons, text="Aktualisieren", command=refresh).pack(side="left")
+        ttk.Button(buttons, text="Ausgewählte Sitzung beenden", command=end_selected_session).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Gerät sperren", command=lambda: set_blocked(True)).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Gerät freigeben", command=lambda: set_blocked(False)).pack(side="left", padx=8)
+        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right")
+        refresh()
+
+    def open_user_management_dialog(self) -> None:
+        if not role_allows_user_management(self.current_role()):
+            messagebox.showwarning("Keine Berechtigung", "Die Benutzerverwaltung ist nur für Superadmins freigegeben.")
+            return
+        if not self.api_token:
+            messagebox.showerror("Benutzerverwaltung", "Keine API-Anmeldung vorhanden. Bitte neu anmelden.")
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Benutzerverwaltung")
+        try: self.track_window_geometry(dialog, "Benutzerverwaltung")
+        except Exception: pass
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.geometry("1180x620")
+        dialog.columnconfigure(0, weight=0)
+        dialog.columnconfigure(1, weight=1)
+        dialog.rowconfigure(0, weight=1)
+
+        form = ttk.LabelFrame(dialog, text="Benutzer anlegen / bearbeiten", padding=10)
+        form.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=10)
+        form.columnconfigure(1, weight=1)
+
+        list_frame = ttk.LabelFrame(dialog, text="Benutzerliste aus MySQL / API", padding=10)
+        list_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
+        list_frame.columnconfigure(0, weight=1)
+        list_frame.rowconfigure(0, weight=1)
+
+        name_var = tk.StringVar()
+        username_var = tk.StringVar()
+        email_var = tk.StringVar()
+        password_var = tk.StringVar()
+        role_var = tk.StringVar(value="Ortschronist")
+        place_var = tk.StringVar()
+        active_var = tk.BooleanVar(value=True)
+        selected_user_id = {"id": None}
+        api_users: list[dict] = []
+
+        labels = [
+            ("Name:", name_var),
+            ("Benutzername:", username_var),
+            ("E-Mail:", email_var),
+            ("Passwort:", password_var),
+            ("Rolle:", role_var),
+            ("Ort des Ortschronisten:", place_var),
+        ]
+        for row, (label, var) in enumerate(labels):
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=5)
+            if label == "Rolle:":
+                ttk.Combobox(form, textvariable=var, values=ROLES, state="readonly", width=28).grid(row=row, column=1, sticky="ew", padx=6, pady=5)
+            elif label == "Passwort:":
+                pw_frame = ttk.Frame(form)
+                pw_frame.grid(row=row, column=1, sticky="ew", padx=6, pady=5)
+                pw_frame.columnconfigure(0, weight=1)
+                password_entry = ttk.Entry(pw_frame, textvariable=var, show="*", width=34)
+                password_entry.grid(row=0, column=0, sticky="ew")
+                def _show_password(_e=None, entry=password_entry):
+                    entry.configure(show="")
+                def _hide_password(_e=None, entry=password_entry):
+                    entry.configure(show="*")
+                eye_btn = ttk.Button(pw_frame, text="👁", width=3)
+                eye_btn.grid(row=0, column=1, padx=(4, 0))
+                eye_btn.bind("<ButtonPress-1>", _show_password)
+                eye_btn.bind("<ButtonRelease-1>", _hide_password)
+                eye_btn.bind("<Leave>", _hide_password)
+            else:
+                ttk.Entry(form, textvariable=var, width=34).grid(row=row, column=1, sticky="ew", padx=6, pady=5)
+
+        ttk.Checkbutton(form, text="Benutzer aktiv", variable=active_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 4))
+        hint = ttk.Label(
+            form,
+            text=(
+                "Die Benutzerverwaltung arbeitet jetzt direkt mit der zentralen MySQL-Datenbank über die API.\n"
+                "Passwort leer lassen = bestehendes Passwort beibehalten. Bei neuen Benutzern ist ein Passwort Pflicht."
+            ),
+            wraplength=360,
+        )
+        hint.grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 12))
+
+        perm_frame = ttk.LabelFrame(form, text="Rechte / Hinweise", padding=6)
+        perm_frame.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        perm_frame.columnconfigure(0, weight=1)
+        permission_vars: dict[str, tuple[tk.BooleanVar, tk.BooleanVar]] = {}
+        ttk.Label(perm_frame, text="Bereich").grid(row=0, column=0, sticky="w")
+        ttk.Label(perm_frame, text="lesen").grid(row=0, column=1, sticky="w", padx=8)
+        ttk.Label(perm_frame, text="schreiben").grid(row=0, column=2, sticky="w", padx=8)
+        for idx, (group_key, group_label) in enumerate(self.FOLDER_GROUPS, start=1):
+            read_var = tk.BooleanVar(value=False)
+            write_var = tk.BooleanVar(value=False)
+            permission_vars[group_key] = (read_var, write_var)
+            ttk.Label(perm_frame, text=group_label).grid(row=idx, column=0, sticky="w", pady=2)
+            ttk.Checkbutton(perm_frame, variable=read_var).grid(row=idx, column=1, sticky="w", padx=8)
+            ttk.Checkbutton(perm_frame, variable=write_var).grid(row=idx, column=2, sticky="w", padx=8)
+
+        tree = ttk.Treeview(list_frame, columns=("name", "username", "email", "role", "place", "active", "last_login"), show="headings")
+        for col, label, width in [
+            ("name", "Name", 220),
+            ("username", "Benutzername", 150),
+            ("email", "E-Mail", 220),
+            ("role", "Rolle", 120),
+            ("place", "Ort", 140),
+            ("active", "Aktiv", 70),
+            ("last_login", "Letzter Login", 150),
+        ]:
+            tree.heading(col, text=label, anchor="w")
+            tree.column(col, width=width, anchor="w")
+        tree.grid(row=0, column=0, sticky="nsew")
+        vsb = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        def api_role_label(role: str) -> str:
+            return self.api_role_to_local(role)
+
+        def default_permission_values(role_label: str) -> dict[str, dict[str, bool]]:
+            if role_label in ("Admin", "Superadmin"):
+                return {key: {"read": True, "write": True} for key, _ in self.FOLDER_GROUPS}
+            return {
+                "00_ORTSCHRONIK": {"read": True, "write": False},
+                "01_ABLAGE_ORTSCHRONIK": {"read": True, "write": True},
+                "02_AUSTAUSCH": {"read": True, "write": True},
+                "03_INFORMATION": {"read": True, "write": False},
+                "05_ORGA_CHRONISTEN": {"read": False, "write": False},
+                "06_UNSERE_ARBEITEN": {"read": True, "write": True},
+                "OWN_PLACE_FOLDER": {"read": True, "write": True},
+                "OTHER_PLACE_FOLDERS": {"read": False, "write": False},
+            }
+
+        def set_permission_widgets(perms: dict[str, dict[str, bool]]) -> None:
+            for key, (read_var, write_var) in permission_vars.items():
+                row = perms.get(key, {"read": False, "write": False})
+                read_var.set(bool(row.get("read", False)))
+                write_var.set(bool(row.get("write", False)))
+
+        def current_permission_payload() -> list[dict]:
+            rows = []
+            for key, (read_var, write_var) in permission_vars.items():
+                rows.append({
+                    "folder_group": key,
+                    "can_read": bool(read_var.get()),
+                    "can_write": bool(write_var.get()),
+                })
+            return rows
+
+        def load_user_permissions(user_id: int, role_label: str) -> None:
+            set_permission_widgets(default_permission_values(role_label))
+            try:
+                response = self.api.get_folder_permissions(self.api_token, user_id)
+                perms = {}
+                for row in response.get("permissions", []):
+                    key = str(row.get("folder_group", "")).strip()
+                    if key:
+                        perms[key] = {
+                            "read": bool(int(row.get("can_read", 0) or 0)),
+                            "write": bool(int(row.get("can_write", 0) or 0)),
+                        }
+                if perms:
+                    set_permission_widgets(perms)
+            except ApiError as exc:
+                app_log_exception("Logout über API fehlgeschlagen", exc)
+
+        def clear_form():
+            selected_user_id["id"] = None
+            name_var.set("")
+            username_var.set("")
+            email_var.set("")
+            password_var.set("")
+            role_var.set("Ortschronist")
+            place_var.set("")
+            active_var.set(True)
+            set_permission_widgets(default_permission_values("Ortschronist"))
+            try:
+                tree.selection_remove(tree.selection())
+            except tk.TclError:
+                pass
+
+        def refresh_tree(select_id: int | None = None):
+            nonlocal api_users
+            try:
+                response = self.api.list_users(self.api_token)
+                api_users = list(response.get("users", []))
+            except ApiError as exc:
+                messagebox.showerror("Benutzerverwaltung", f"Benutzer konnten nicht geladen werden:\n{exc}", parent=dialog)
+                return
+
+            for item in tree.get_children():
+                tree.delete(item)
+            for user in api_users:
+                uid = str(user.get("id"))
+                tree.insert("", "end", iid=uid, values=(
+                    user.get("display_name", ""),
+                    user.get("username", ""),
+                    user.get("email", "") or "",
+                    api_role_label(str(user.get("role", ""))),
+                    user.get("place", "") or "",
+                    "ja" if int(user.get("is_active", 0) or 0) == 1 else "nein",
+                    user.get("last_login_at", "") or "",
+                ))
+            if select_id is not None and tree.exists(str(select_id)):
+                tree.selection_set(str(select_id))
+                tree.see(str(select_id))
+                load_selected()
+
+        def find_loaded_user(user_id: int) -> dict | None:
+            for user in api_users:
+                if int(user.get("id", 0)) == int(user_id):
+                    return user
+            return None
+
+        def load_selected(_event=None):
+            sel = tree.selection()
+            if not sel:
+                return
+            user_id = int(sel[0])
+            selected_user_id["id"] = user_id
+            user = find_loaded_user(user_id)
+            if not user:
+                return
+            name_var.set(user.get("display_name", ""))
+            username_var.set(user.get("username", ""))
+            email_var.set(user.get("email", "") or "")
+            password_var.set("")
+            role_var.set(api_role_label(str(user.get("role", "ortschronist"))))
+            place_var.set(user.get("place", "") or "")
+            active_var.set(int(user.get("is_active", 0) or 0) == 1)
+            load_user_permissions(user_id, role_var.get())
+
+        def build_payload(include_password: bool) -> dict:
+            name = name_var.get().strip()
+            username = normalize_username(username_var.get().strip())
+            password = password_var.get()
+            role = role_var.get().strip() or "Ortschronist"
+            place = place_var.get().strip()
+            if not name:
+                raise ValueError("Bitte den vollständigen Namen erfassen.")
+            if not username:
+                raise ValueError("Bitte einen Login-Benutzernamen erfassen.")
+            payload = {
+                "display_name": name,
+                "username": username,
+                "email": email_var.get().strip(),
+                "role": self.local_role_to_api(role),
+                "place": place,
+                "is_active": bool(active_var.get()),
+            }
+            if include_password:
+                if not password:
+                    raise ValueError("Bitte für neue Benutzer ein Passwort erfassen.")
+                payload["password"] = password
+            elif password:
+                payload["password"] = password
+            return payload
+
+        def save_user():
+            user_id = selected_user_id.get("id")
+            try:
+                if user_id is None:
+                    payload = build_payload(include_password=True)
+                    response = self.api.create_user(self.api_token, payload)
+                    new_id = int(response.get("user_id", 0) or 0)
+                    if new_id:
+                        self.api.update_folder_permissions(self.api_token, new_id, current_permission_payload())
+                    messagebox.showinfo("Benutzerverwaltung", "Benutzer wurde in der zentralen Datenbank angelegt.", parent=dialog)
+                    refresh_tree(select_id=new_id or None)
+                else:
+                    payload = build_payload(include_password=False)
+                    # Schutz gegen Selbst-Deaktivierung: Der angemeldete Benutzer darf
+                    # sich nicht versehentlich über die Benutzerverwaltung deaktivieren.
+                    current_username = normalize_username(self.username_var.get().strip())
+                    edited_username = normalize_username(username_var.get().strip())
+                    if edited_username == current_username and not bool(payload.get("is_active", True)):
+                        active_var.set(True)
+                        messagebox.showwarning(
+                            "Nicht möglich",
+                            "Der aktuell angemeldete Benutzer kann sich nicht selbst deaktivieren.",
+                            parent=dialog,
+                        )
+                        return
+                    self.api.update_user(self.api_token, int(user_id), payload)
+                    self.api.update_folder_permissions(self.api_token, int(user_id), current_permission_payload())
+                    messagebox.showinfo("Benutzerverwaltung", "Benutzer wurde in der zentralen Datenbank gespeichert.", parent=dialog)
+                    refresh_tree(select_id=int(user_id))
+                add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Benutzerverwaltung API", f"{name_var.get().strip()} / {username_var.get().strip()}"))
+                self.refresh_history()
+            except ValueError as exc:
+                messagebox.showwarning("Benutzerverwaltung", str(exc), parent=dialog)
+            except ApiError as exc:
+                messagebox.showerror("Benutzerverwaltung", str(exc), parent=dialog)
+
+        def deactivate_user():
+            user_id = selected_user_id.get("id")
+            if user_id is None:
+                messagebox.showwarning("Keine Auswahl", "Bitte zuerst einen Benutzer auswählen.", parent=dialog)
+                return
+            if username_var.get().strip() == self.username_var.get().strip():
+                messagebox.showwarning("Nicht möglich", "Der aktuell angemeldete Benutzer kann nicht deaktiviert werden.", parent=dialog)
+                return
+            if not messagebox.askyesno("Benutzer deaktivieren", "Soll der ausgewählte Benutzer wirklich deaktiviert werden?", parent=dialog):
+                return
+            try:
+                payload = build_payload(include_password=False)
+                payload["is_active"] = False
+                self.api.update_user(self.api_token, int(user_id), payload)
+                active_var.set(False)
+                refresh_tree(select_id=int(user_id))
+                add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Benutzer deaktiviert API", username_var.get().strip()))
+                self.refresh_history()
+            except (ValueError, ApiError) as exc:
+                messagebox.showerror("Benutzerverwaltung", str(exc), parent=dialog)
+
+        btns = ttk.Frame(form)
+        btns.grid(row=9, column=0, columnspan=2, sticky="ew", pady=8)
+        ttk.Button(btns, text="Neu", command=clear_form).pack(side="left", padx=4)
+        ttk.Button(btns, text="Benutzer speichern", command=save_user).pack(side="left", padx=4)
+        ttk.Button(btns, text="Benutzer deaktivieren", command=deactivate_user).pack(side="left", padx=4)
+        ttk.Button(btns, text="Liste aktualisieren", command=lambda: refresh_tree()).pack(side="left", padx=4)
+
+        tree.bind("<<TreeviewSelect>>", load_selected)
+        refresh_tree()
+        if tree.get_children():
+            first = tree.get_children()[0]
+            tree.selection_set(first)
+            load_selected()
+

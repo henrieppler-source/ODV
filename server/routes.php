@@ -2098,7 +2098,7 @@ if ($method === 'GET' && $path === '/api/documents') {
             SELECT id, upload_id, original_filename, stored_filename, current_filename, target_folder, current_path,
                    uploaded_by_user_id, uploaded_by_name, uploaded_at, status, document_type, source, original_location, document_date,
                    event, place, description, note, copyright_author, rights_holder, usage_permission, license_note,
-                   rights_note, archive_name, archive_signature, archive_accessed_at, keywords, transcription_done, transcription_type, transcription_note, person_status, created_at, updated_at
+                   rights_note, archive_name, archive_signature, archive_accessed_at, keywords, transcription_done, transcription_type, transcription_note, person_status, json_metadata, created_at, updated_at
             FROM documents
             {$whereSql}
             ORDER BY uploaded_at DESC, id DESC

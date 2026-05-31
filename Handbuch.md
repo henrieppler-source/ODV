@@ -101,11 +101,13 @@ Wichtige Felder:
 | Feld | Empfehlung |
 | --- | --- |
 | Datum / Zeitraum | So genau wie bekannt eintragen. Ungefähre Angaben sind besser als leer. |
-| Ort | Ortsteil oder Bezug eintragen, wenn erkennbar. |
+| Ort | Ortsteil oder Bezug eintragen, wenn erkennbar. Bei Bildern mit GPS-Daten wird hier der ermittelte Ortsname vorbelegt und kann bearbeitet werden. |
+| GPS-Koordinaten | Werden bei Bildern aus EXIF-Daten übernommen und nur dann direkt unter dem Ort angezeigt, mit GPS-Ort in Klammern, z. B. `50.378094, 10.536086 (Milz)`. |
+| GPS-Ort | Wird intern aus den GPS-Koordinaten ermittelt und mit den Metadaten gespeichert. |
 | Ereignis / Thema | Anlass, Thema oder Zusammenhang nennen. |
 | Quelle / Herkunft | Herkunft der Datei möglichst konkret angeben. |
 | Beschreibung | Kurz, aber aussagekräftig beschreiben, was die Datei enthält. |
-| Stichwörter | Suchbegriffe ergänzen, getrennt durch Komma oder Semikolon. |
+| Stichwörter | Suchbegriffe ergänzen, getrennt durch Komma oder Semikolon. ODV filtert technische Dateinamenreste wie Kamerakürzel und Nummern weitgehend heraus. |
 | Rechte / Urheber | Bekannte Rechteinformationen eintragen. Unsicherheit im Hinweisfeld notieren. |
 
 Für gute Beschreibungen hilft die Leitfrage: Was ist zu sehen oder enthalten, wo gehört es hin, wann ist es entstanden und warum ist es für die Ortschronik relevant?

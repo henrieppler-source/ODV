@@ -333,6 +333,20 @@ Sicherheitsregeln:
 - Handbuch und Admin-Handbuch als Markdown ins Hilfe-Menü eingebunden.
 - Updatefreigabe vereinfacht: fertiges Updatepaket auswählen, automatisch in den Nextcloud-Updateordner kopieren und SHA256-Prüfsumme übernehmen.
 - Paketkonvention für Updates festgelegt: `ODV_vXXX.zip` aus dem vollständigen `dist\ODV`-Ordner.
+- Technischer Strukturumbau begonnen: Hilfe-/Markdown-Anzeige liegt in `app/help_docs.py`, Updateprüfung und Updatefreigabe liegen in `app/update_manager.py`.
+- Datenbank-/Serverbetrieb ausgelagert: Backup, Rücksicherung, Migrationen, Wartungsmodus und `routes.php`-Deployment liegen in `app/admin_operations.py`.
+- Punkteverwaltung ausgelagert: Punkteregeln, Punkteübersichten und manuelle Sonderpunkte liegen in `app/points_manager.py`.
+- Mailbereich ausgelagert: Rundmail, Verteilerverwaltung, Versandhistorie, Nextcloud-Mail-Links und Mailanhänge liegen in `app/mail_manager.py`.
+- Benutzerverwaltung ausgelagert: Benutzer, Rechte sowie Sitzungen/Geräte liegen in `app/user_admin.py`.
+- Stammdatenbereich ausgelagert: Ortsordner, Archiv/Sammlung, vorhandene Dateien einlesen und lokale Sicherungsdateien bereinigen liegen in `app/masterdata_manager.py`.
+- Ordner-/Konfigurationslogik ausgelagert: Nextcloud-/Metadatenordner, Zielordnerauswahl, Ordnerbaum und Schreibordnerprüfung liegen in `app/config_folders.py`.
+- Systemstatus-Dialog ausgelagert: Anzeige und Aktualisierung liegen in `app/system_status.py`.
+- Metadaten-Helfer ausgelagert: Metadatenformular, Feldhilfen, Dokumenttyp-/Archiv-/Keyword-Vorschläge und EXIF/GPS-Auswertung liegen in `app/metadata_helpers.py`.
+- EXIF/GPS-Verhalten angepasst: GPS-Koordinaten werden separat gespeichert und ersetzen nicht automatisch das fachliche Feld `Ort`.
+- Startschutz ausgelagert: Single-Instance-Sperre und PyInstaller-Ressourcenpfad liegen in `app/single_instance.py`.
+- GPS-Ort ergänzt: Bei Bildern mit EXIF-GPS-Daten wird zusätzlich ein deutscher Ortsname aus den Koordinaten ermittelt, als `GPS-Ort` in den JSON-Metadaten gespeichert und in der Oberfläche schreibgeschützt hinter den Koordinaten angezeigt; `Ort` bleibt als reiner Ortsname bearbeitbar. Dafür ist keine zusätzliche Tabellenspalte notwendig.
+- Upload-Metadatenmaske angepasst: GPS-Koordinaten werden unter `Ort` als reine Anzeige dargestellt; Stichwortvorschläge aus Dateinamen filtern technische Kamera-/Bildtokens und Ziffernfolgen strenger.
+- GPS-Anzeige weiter reduziert: Die GPS-Zeile erscheint nur bei vorhandenen Koordinaten und wird ohne Rahmen oder Hervorhebung dargestellt.
 
 ## Dokumentationsregel
 

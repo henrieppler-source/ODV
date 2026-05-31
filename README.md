@@ -116,7 +116,22 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Dokumentationsregel erweitert: Künftige fachliche Änderungen werden zusätzlich zur README auch in den passenden Handbuch-Dateien ergänzt.
 - ODV-Updatefreigabe vereinfacht: Superadmins können ein fertiges Updatepaket auswählen; ODV kopiert es automatisch nach `02_AUSTAUSCH/ODV_UPDATE/Windows`, berechnet die SHA256-Prüfsumme und füllt Dateiname, Relativpfad und Hash im Freigabe-Dialog vor.
 - Updatepakete sollen künftig einheitlich als `ODV_vXXX.zip` aus dem vollständigen `dist\ODV`-Ordner erstellt werden; eine spätere Automatisierung soll Build, ZIP-Erstellung, Kopie in den Updateordner, SHA256-Berechnung und Freigabevorbereitung bündeln.
-- Geänderte Dateien: `app/main.py`, `app/config.py`, `server/routes.php`, `sql/migrations/schema_v111_point_rules_optimization.sql`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`, `scripts/docx_to_md.py`, `scripts/add_md_toc.py`
+- Strukturumbau begonnen: Handbuch-/Markdown-Anzeige nach `app/help_docs.py` und ODV-Updateprüfung/-freigabe nach `app/update_manager.py` ausgelagert; `app/main.py` bindet diese Bereiche als Mixins ein.
+- Strukturumbau erweitert: Datenbank-/Serverbetrieb mit Backup, Rücksicherung, Migrationen, Wartungsmodus und `routes.php`-Deployment nach `app/admin_operations.py` ausgelagert.
+- Strukturumbau erweitert: Punkteverwaltung, Punkteübersichten, manuelle Sonderpunkte und Punkteregeln nach `app/points_manager.py` ausgelagert.
+- Strukturumbau erweitert: Rundmail, Verteilerverwaltung, Versandhistorie, Nextcloud-Mail-Links und Mailanhänge nach `app/mail_manager.py` ausgelagert.
+- Strukturumbau erweitert: Benutzerverwaltung sowie Sitzungen/Geräte nach `app/user_admin.py` ausgelagert.
+- Strukturumbau erweitert: Ortsordner-/Archiv-Stammdaten, vorhandene Dateien einlesen und lokale Sicherungsdateien bereinigen nach `app/masterdata_manager.py` ausgelagert.
+- Strukturumbau erweitert: lokale Konfiguration, Nextcloud-/Metadatenordner, Zielordnerauswahl, Ordnerbaum und Schreibordnerprüfung nach `app/config_folders.py` ausgelagert.
+- Strukturumbau korrigiert: Systemstatus-Dialog nach `app/system_status.py` ausgelagert und wieder ins Hilfe-Menü eingebunden.
+- Strukturumbau erweitert: Metadatenformular, Feldhilfen, Dokumenttyp-/Archiv-/Keyword-Vorschläge und EXIF/GPS-Auswertung nach `app/metadata_helpers.py` ausgelagert.
+- EXIF/GPS-Verhalten angepasst: GPS-Koordinaten aus Bildern werden nicht mehr in das fachliche Feld `Ort` geschrieben, sondern separat als `GPS-Koordinaten` gespeichert; der Ort bleibt vom Bearbeiter fachlich zu prüfen.
+- Strukturumbau korrigiert: Startschutz/Single-Instance-Sperre und PyInstaller-Ressourcenpfad liegen in `app/single_instance.py`; ODV startet nach der Auslagerung wieder sichtbar.
+- GPS-Ort ergänzt: Bei Bildern mit EXIF-GPS-Daten wird `GPS-Ort` per deutscher Reverse-Geocoding-Abfrage ermittelt; `Ort` zeigt nur den bearbeitbaren Ortsnamen, `GPS-Koordinaten` zeigt schreibgeschützt die Koordinaten mit GPS-Ort in Klammern, z. B. `50.378094, 10.536086 (Milz)`.
+- Upload-Schritt `Zeit / Ort / Inhalt` umsortiert: Unter dem bearbeitbaren Feld `Ort` kann eine reine GPS-Anzeige erscheinen, danach folgt erst `Ereignis`.
+- GPS-Zeile im Upload-Schritt optisch reduziert: Beschriftung und Wert werden nur bei vorhandenen GPS-Daten angezeigt; die Anzeige hat keinen Rahmen und keine Hervorhebung.
+- Stichwortvorschläge aus Dateinamen verschärft: Technische Kamera-/Bildbestandteile wie `PXL`, `IMG`, Nummern, RAW-/Cover-/MP-Reste und Tokens mit Ziffern werden nicht mehr automatisch als Stichwörter übernommen.
+- Geänderte Dateien: `app/main.py`, `app/config.py`, `app/models.py`, `server/routes.php`, `app/help_docs.py`, `app/system_status.py`, `app/update_manager.py`, `app/admin_operations.py`, `app/points_manager.py`, `app/mail_manager.py`, `app/user_admin.py`, `app/masterdata_manager.py`, `app/config_folders.py`, `app/metadata_helpers.py`, `app/single_instance.py`, `sql/migrations/schema_v111_point_rules_optimization.sql`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`, `scripts/docx_to_md.py`, `scripts/add_md_toc.py`
 
 ### v110 - Datenbankmenü und Backup-Rücksicherung
 
