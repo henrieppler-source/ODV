@@ -1,14 +1,15 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v110
+# Ortschronisten-Datei-Verwaltung (ODV) v111
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v110`
+- Aktuelle App-Version laut `app/main.py`: `v111`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
 - Dokumentationsregel: Alle künftigen Anpassungen in dieser `README.md` unter `Versionshistorie` dokumentieren.
 - Bei neuer App-Version alle Versionsbezeichnungen passend anheben.
 - Bei Korrekturen innerhalb einer bestehenden Version die Beschreibung direkt bei dieser Version ergänzen.
+- Bearbeiterrelevante Änderungen zusätzlich in `Handbuch.md`, admin-/betriebsrelevante Änderungen zusätzlich in `Admin-Handbuch.md` fortschreiben.
 - Commit-Regel: Wenn der Nutzer exakt `OK läuft` schreibt, wird der aktuelle sinnvolle Arbeitsstand geprüft und committed.
 - Wichtig: Vorhandene Änderungen im Git-Workspace nicht zurücksetzen oder überschreiben.
 
@@ -21,8 +22,9 @@ Wir machen im ODV-Projekt weiter:
 C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v110.
+Aktuelle App-Version laut README/Code: v111.
 Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
+Bearbeiterrelevante Änderungen bitte zusätzlich in Handbuch.md, Admin-/Betriebsthemen zusätzlich in Admin-Handbuch.md dokumentieren.
 Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
 Wenn ich exakt `OK läuft` schreibe, bitte den aktuellen sinnvollen Stand committen.
 Vorhandene Änderungen im Git-Workspace nicht zurücksetzen oder überschreiben.
@@ -93,6 +95,28 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - `sql/migrations/schema_v82_upload_form_layout.sql`
 
 ## Versionshistorie
+
+### v111 - Punkteverwaltung optimiert
+
+- Aktuelle App-Version laut `app/main.py`: `v111`.
+- API-Version in `server/routes.php` auf `v111` angehoben.
+- Punkteregeln-Dialog optimiert: Die Übersicht zeigt nur noch Regeln, die serverseitig wirklich ausgewertet werden; veraltete Regeln werden beim Speichern entfernt.
+- Metadatenpunkte werden als Regel aus Metadatenfeld und Wertung gebildet, z. B. `copyright_author_manual` oder `copyright_author_openAI`.
+- Metadatenregeln enthalten Prüftyp und Mindestwert: `characters`, `words`, `count` oder `none`.
+- Metadatenpunkte vereinheitlicht: Manuell befüllte Metadatenfelder zählen standardmäßig 2 Punkte, durch OpenAI befüllte Metadatenfelder standardmäßig 1 Punkt; bei manueller Korrektur wird die OpenAI-Wertung für dieses Feld durch die manuelle Wertung ersetzt.
+- Personenpunkte angepasst: Ein Bild mit Personenmarkierungen zählt 5 Punkte über `persons_image_marked`, zusätzlich zählt jede markierte Person 1 Punkt über `persons_per_person`.
+- Sonderregeln und manuelle Zusatzpunkte werden in der Regelbasis mitgeführt; Sonderregeln bleiben systemseitig vorgegeben.
+- Systemregel `transcription_document` ergänzt: Transkription von Zeitung, Akte oder Urkunde zählt 10 Punkte.
+- Datenbankmigration `v111_point_rules_optimization` ergänzt; vor der Aktualisierung wird `point_rules` als `point_rules_v110` gesichert und die Tabelle um Regeltyp, Metadatenfeld, Wertung, Prüftyp, Mindestwert und Systemkennzeichen erweitert.
+- Bearbeiter-Dokumentation als `Handbuch.md` und Admin-Dokumentation als `Admin-Handbuch.md` aus den bisherigen DOCX-Dokumenten übernommen und bis v111 fortgeschrieben.
+- Beide Markdown-Handbücher haben ein verlinktes Inhaltsverzeichnis; die lokale Browser-Ansicht erzeugt passende Kapitelanker und klickbare interne Links.
+- `Handbuch.md` und `Admin-Handbuch.md` fachlich neu und einheitlich strukturiert: Überblick, Arbeits-/Verwaltungsbereiche, Spezialthemen, Workflows, Checklisten/Fehlerbehebung und Fortschreibung.
+- Hilfe-Menü ergänzt: `Handbuch` für alle Rollen, `Admin-Handbuch` nur für Admin/Superadmin; Markdown wird lokal als Browser-HTML geöffnet.
+- Für Superadmins zeigt das Hilfe-Menü zusätzlich `Versionshistorie`; geöffnet wird die lokale `README.md` im Browser.
+- Dokumentationsregel erweitert: Künftige fachliche Änderungen werden zusätzlich zur README auch in den passenden Handbuch-Dateien ergänzt.
+- ODV-Updatefreigabe vereinfacht: Superadmins können ein fertiges Updatepaket auswählen; ODV kopiert es automatisch nach `02_AUSTAUSCH/ODV_UPDATE/Windows`, berechnet die SHA256-Prüfsumme und füllt Dateiname, Relativpfad und Hash im Freigabe-Dialog vor.
+- Updatepakete sollen künftig einheitlich als `ODV_vXXX.zip` aus dem vollständigen `dist\ODV`-Ordner erstellt werden; eine spätere Automatisierung soll Build, ZIP-Erstellung, Kopie in den Updateordner, SHA256-Berechnung und Freigabevorbereitung bündeln.
+- Geänderte Dateien: `app/main.py`, `app/config.py`, `server/routes.php`, `sql/migrations/schema_v111_point_rules_optimization.sql`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`, `scripts/docx_to_md.py`, `scripts/add_md_toc.py`
 
 ### v110 - Datenbankmenü und Backup-Rücksicherung
 

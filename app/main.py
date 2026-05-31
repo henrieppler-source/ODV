@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import json
+import html
 import hashlib
 import re
 import zipfile
@@ -76,7 +77,7 @@ from PIL import Image, ImageTk, ImageDraw, ImageFont, ExifTags
 
 APP_NAME = "Ortschronisten-Datei-Verwaltung"
 APP_SHORT_NAME = "ODV"
-APP_VERSION = "v110"
+APP_VERSION = "v111"
 
 TRANSCRIPTION_TYPE_OPTIONS = [
     "",
@@ -162,7 +163,6 @@ VALID_POINT_RULES = [
     ("metadata_description", "Aussagekräftige Beschreibung", "metadata", "Beschreibung ab Mindestlänge"),
     ("metadata_keywords", "Stichwörter vergeben", "metadata", "Mindestens 3 Stichwörter"),
     ("metadata_source", "Quelle/Herkunft angegeben", "metadata", "Primär- oder Sekundärquelle vorhanden"),
-    ("openai_metadata", "OpenAI-Metadaten übernommen", "metadata", "Pauschale für übernommene OpenAI-Metadaten"),
     ("archive_signature", "Archivsignatur angegeben", "metadata", "Signaturfeld gefüllt"),
     ("rights_author", "Urheber angegeben", "metadata", "Urheberfeld gefüllt"),
     ("rights_holder", "Rechteinhaber angegeben", "metadata", "Rechteinhaber gefüllt"),
@@ -171,8 +171,9 @@ VALID_POINT_RULES = [
     ("transcription_short", "Kurze Transkription / Auszug", "metadata", "Transkription ja + Art kurz"),
     ("transcription_full", "Vollständige Transkription", "metadata", "Transkription ja + Art vollständig"),
     ("transcription_difficult", "Schwierige Handschrift / alte Schrift", "metadata", "Transkriptionsart schwierige Handschrift"),
-    ("persons_marked", "Personen markiert", "persons", "Personenpunkte vorhanden"),
-    ("persons_named", "Personen mit Namen versehen", "persons", "Personenmarkierungen mit Namen"),
+    ("transcription_document", "Transkription Zeitung / Akte / Urkunde", "metadata", "Transkription einer Zeitung, Akte oder Urkunde"),
+    ("persons_image_marked", "Bild mit Personenmarkierungen", "persons", "Bilddatei enthält mindestens eine Personenmarkierung"),
+    ("persons_per_person", "Personenmarkierung je Person", "persons", "Je markierter Person auf einem Bild"),
     ("manual_archive_research", "Recherche in Archiven", "manual", "Manuell vergebbare Sonderpunkte"),
     ("manual_collection_indexing", "Erschließung von Beständen", "manual", "Manuell vergebbare Sonderpunkte"),
     ("manual_event_organization", "Organisation Veranstaltung", "manual", "Manuell vergebbare Sonderpunkte"),
@@ -820,6 +821,12 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         # Spaltenbreiten werden automatisch gespeichert.
 
         help_menu = tk.Menu(menubar, tearoff=False)
+        help_menu.add_command(label="Handbuch", command=lambda: self.open_markdown_handbook("Handbuch.md", "ODV-Handbuch"))
+        if self.is_current_admin():
+            help_menu.add_command(label="Admin-Handbuch", command=lambda: self.open_markdown_handbook("Admin-Handbuch.md", "ODV-Admin-Handbuch"))
+        if self.current_role() == "Superadmin":
+            help_menu.add_command(label="Versionshistorie", command=lambda: self.open_markdown_handbook("README.md", "ODV-Versionshistorie"))
+        help_menu.add_separator()
         help_menu.add_command(label="Info", command=lambda: messagebox.showinfo(APP_NAME, f"{APP_NAME} ({APP_SHORT_NAME}) {APP_VERSION}\nNextcloud, API/MySQL\n(c) Henri Eppler, 2026"))
         help_menu.add_command(label="Systemstatus...", command=self.open_system_status_dialog)
         help_menu.add_command(label="Nach ODV-Update suchen...", command=lambda: self.check_app_update(interactive=True))
@@ -3424,6 +3431,117 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         except Exception as exc:
             app_log_exception("Start-Hinweise konnten nicht geprüft werden", exc)
 
+    def project_root_path(self) -> Path:
+        candidates = [Path(__file__).resolve().parent.parent, Path.cwd(), Path(getattr(sys, "_MEIPASS", Path.cwd()))]
+        for candidate in candidates:
+            if (candidate / "Handbuch.md").exists() or (candidate / "README.md").exists():
+                return candidate
+        return candidates[0]
+
+    def markdown_to_help_html(self, markdown_text: str, title: str) -> str:
+        body: list[str] = []
+        in_list = False
+        in_table = False
+        heading_counts: dict[str, int] = {}
+
+        def slugify_heading(value: str) -> str:
+            text = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
+            text = re.sub(r"[^a-zA-Z0-9\s-]", "", text).strip().lower()
+            text = re.sub(r"[\s-]+", "-", text).strip("-")
+            base = text or "kapitel"
+            count = heading_counts.get(base, 0) + 1
+            heading_counts[base] = count
+            return base if count == 1 else f"{base}-{count}"
+
+        def inline_markdown(value: str) -> str:
+            result: list[str] = []
+            pos = 0
+            for match in re.finditer(r"\[([^\]]+)\]\((#[^)]+)\)", value):
+                result.append(html.escape(value[pos:match.start()]))
+                label = html.escape(match.group(1))
+                href = html.escape(match.group(2), quote=True)
+                result.append(f'<a href="{href}">{label}</a>')
+                pos = match.end()
+            result.append(html.escape(value[pos:]))
+            return "".join(result)
+
+        def close_blocks() -> None:
+            nonlocal in_list, in_table
+            if in_list:
+                body.append("</ul>")
+                in_list = False
+            if in_table:
+                body.append("</table>")
+                in_table = False
+
+        for raw_line in markdown_text.splitlines():
+            line = raw_line.rstrip()
+            if not line:
+                close_blocks()
+                continue
+            if line.startswith("|") and line.endswith("|"):
+                cells = [inline_markdown(cell.strip()) for cell in line.strip("|").split("|")]
+                if all(set(cell) <= {"-", ":", " "} for cell in cells):
+                    continue
+                if not in_table:
+                    close_blocks()
+                    body.append("<table>")
+                    in_table = True
+                body.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+                continue
+            if line.startswith("#"):
+                close_blocks()
+                level = min(4, max(1, len(line) - len(line.lstrip("#"))))
+                heading_text = line.lstrip("#").strip()
+                body.append(f'<h{level} id="{slugify_heading(heading_text)}">{html.escape(heading_text)}</h{level}>')
+                continue
+            if line.startswith(("- ", "* ")):
+                if in_table:
+                    body.append("</table>")
+                    in_table = False
+                if not in_list:
+                    body.append("<ul>")
+                    in_list = True
+                body.append(f"<li>{inline_markdown(line[2:].strip())}</li>")
+                continue
+            close_blocks()
+            body.append(f"<p>{inline_markdown(line)}</p>")
+        close_blocks()
+        return f"""<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>{html.escape(title)}</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; max-width: 1100px; margin: 32px auto; padding: 0 24px; line-height: 1.55; color: #222; }}
+    h1 {{ font-size: 30px; margin: 0 0 20px; }}
+    h2 {{ margin-top: 32px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }}
+    h3 {{ margin-top: 24px; }}
+    table {{ border-collapse: collapse; width: 100%; margin: 14px 0 20px; }}
+    td, th {{ border: 1px solid #ccc; padding: 7px 9px; vertical-align: top; }}
+    tr:nth-child(even) {{ background: #f7f7f7; }}
+  </style>
+</head>
+<body>
+{chr(10).join(body)}
+</body>
+</html>"""
+
+    def open_markdown_handbook(self, filename: str, title: str) -> None:
+        path = self.project_root_path() / filename
+        if not path.exists():
+            messagebox.showerror("Handbuch", f"Die Datei wurde nicht gefunden:\n{path}", parent=self)
+            return
+        try:
+            markdown_text = path.read_text(encoding="utf-8")
+            out_dir = APP_DIR / "help"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            out_path = out_dir / (Path(filename).stem + ".html")
+            out_path.write_text(self.markdown_to_help_html(markdown_text, title), encoding="utf-8", newline="\n")
+            webbrowser.open(out_path.resolve().as_uri())
+        except Exception as exc:
+            messagebox.showerror("Handbuch", f"Das Handbuch konnte nicht geöffnet werden:\n{exc}", parent=self)
+
     def open_system_status_dialog(self) -> None:
         """Zeigt den ausführlichen Betriebsstatus auf Wunsch über das Hilfe-Menü."""
         try:
@@ -3799,8 +3917,102 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         ttk.Label(frame, text="Release-Hinweise:").grid(row=5, column=0, sticky="nw", pady=4)
         notes_text.grid(row=5, column=1, sticky="ew", pady=4)
         notes_text.insert("1.0", str(current.get("release_notes") or current.get("notes") or ""))
-        hint = "Standardordner: 02_AUSTAUSCH/ODV_UPDATE/Windows. Die Datei muss dort im lokalen Nextcloud-Syncordner vorhanden sein."
+        hint = "Standardordner: 02_AUSTAUSCH/ODV_UPDATE/Windows. Mit 'Updatepaket vorbereiten' wird die Datei dorthin kopiert und die SHA256-Prüfsumme automatisch eingetragen."
         ttk.Label(frame, text=hint, wraplength=620).grid(row=6, column=0, columnspan=2, sticky="w", pady=(8, 4))
+
+        def prepare_update_package() -> None:
+            source_text = filedialog.askopenfilename(
+                title="ODV-Updatepaket auswählen",
+                parent=dialog,
+                filetypes=[
+                    ("Updatepakete", "*.zip *.exe *.msi"),
+                    ("ZIP-Dateien", "*.zip"),
+                    ("Programme", "*.exe"),
+                    ("Installer", "*.msi"),
+                    ("Alle Dateien", "*.*"),
+                ],
+            )
+            if not source_text:
+                return
+            base = self.nextcloud_base_path(show_message=True)
+            if base is None:
+                return
+            source = Path(source_text).expanduser()
+            if not source.exists() or not source.is_file():
+                messagebox.showwarning("ODV-Update", f"Die ausgewählte Datei wurde nicht gefunden:\n{source}", parent=dialog)
+                return
+            relative_folder = Path("02_AUSTAUSCH") / "ODV_UPDATE" / "Windows"
+            target_dir = base / relative_folder
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as exc:
+                messagebox.showerror("ODV-Update", f"Updateordner konnte nicht angelegt werden:\n{target_dir}\n\n{exc}", parent=dialog)
+                return
+            target = target_dir / source.name
+            try:
+                same_file = source.resolve() == target.resolve()
+            except Exception:
+                same_file = False
+            if target.exists() and not same_file:
+                if not messagebox.askyesno(
+                    "ODV-Update",
+                    f"Die Datei existiert im Updateordner bereits:\n{target}\n\nSoll sie überschrieben werden?",
+                    parent=dialog,
+                ):
+                    return
+            try:
+                if not same_file:
+                    shutil.copy2(source, target)
+                checksum = self.sha256_file(target)
+            except Exception as exc:
+                messagebox.showerror("ODV-Update", f"Updatepaket konnte nicht vorbereitet werden:\n{exc}", parent=dialog)
+                return
+
+            file_var.set(target.name)
+            path_var.set(relative_folder.as_posix())
+            sha_var.set(checksum)
+            if not version_var.get().strip():
+                match = re.search(r"v\d+(?:[._-]\d+)?", target.stem, re.IGNORECASE)
+                if match:
+                    version_var.set(match.group(0).replace("_", ".").replace("-", ".").lower())
+            messagebox.showinfo(
+                "ODV-Update",
+                "Updatepaket wurde vorbereitet.\n\n"
+                f"Datei: {target.name}\n"
+                f"Ordner: {relative_folder.as_posix()}\n"
+                "Die Freigabe ist noch nicht gespeichert.",
+                parent=dialog,
+            )
+
+        def calculate_hash_for_configured_file() -> None:
+            base = self.nextcloud_base_path(show_message=True)
+            if base is None:
+                return
+            file_name = file_var.get().strip()
+            rel_text = path_var.get().strip()
+            if not file_name and not rel_text:
+                messagebox.showwarning("ODV-Update", "Bitte zuerst Dateiname oder Relativpfad eintragen.", parent=dialog)
+                return
+            rel_path = Path(rel_text.replace("\\", "/")) if rel_text else Path()
+            candidates: list[Path] = []
+            if rel_path.name and rel_path.suffix and not file_name:
+                candidates.append(base / rel_path)
+            elif rel_text and file_name:
+                candidates.append(base / rel_path / file_name)
+            if file_name:
+                candidates.append(base / "02_AUSTAUSCH" / "ODV_UPDATE" / "Windows" / file_name)
+            for candidate in candidates:
+                if candidate.exists() and candidate.is_file():
+                    try:
+                        sha_var.set(self.sha256_file(candidate))
+                        if not path_var.get().strip():
+                            path_var.set("02_AUSTAUSCH/ODV_UPDATE/Windows")
+                        messagebox.showinfo("ODV-Update", f"SHA256-Prüfsumme wurde berechnet:\n{candidate}", parent=dialog)
+                    except Exception as exc:
+                        messagebox.showerror("ODV-Update", f"Prüfsumme konnte nicht berechnet werden:\n{exc}", parent=dialog)
+                    return
+            messagebox.showwarning("ODV-Update", "Die konfigurierte Updatedatei wurde im lokalen Nextcloud-Ordner nicht gefunden.", parent=dialog)
+
         def save_release() -> None:
             payload = {
                 "version": version_var.get().strip(),
@@ -3824,6 +4036,8 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
                 messagebox.showerror("ODV-Update", f"Updatefreigabe konnte nicht gespeichert werden:\n{exc}", parent=dialog)
         buttons = ttk.Frame(frame)
         buttons.grid(row=7, column=1, sticky="e", pady=(10, 0))
+        ttk.Button(buttons, text="Updatepaket vorbereiten...", command=prepare_update_package).pack(side="left", padx=4)
+        ttk.Button(buttons, text="SHA256 berechnen", command=calculate_hash_for_configured_file).pack(side="left", padx=4)
         ttk.Button(buttons, text="Lokal prüfen", command=lambda: self.check_app_update(interactive=True)).pack(side="left", padx=4)
         ttk.Button(buttons, text="Speichern", command=save_release).pack(side="left", padx=4)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
@@ -5886,7 +6100,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         ttk.Combobox(api_tab, textvariable=openai_model_var, values=openai_model_values, state="readonly").grid(row=8, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         openai_pdf_pages_var = tk.StringVar(value=str(self.config_data.get("openai_pdf_sample_pages", 10) or 10))
         openai_text_chars_var = tk.StringVar(value=str(self.config_data.get("openai_text_sample_chars", 4000) or 4000))
-        openai_points_var = tk.StringVar(value=str(self.config_data.get("openai_metadata_points", 2) or 2))
+        openai_points_var = tk.StringVar(value=str(self.config_data.get("openai_metadata_points", 1) or 1))
         ttk.Label(api_tab, text="OpenAI-Auszug:").grid(row=9, column=0, sticky="w", pady=4)
         openai_limits_frame = ttk.Frame(api_tab)
         openai_limits_frame.grid(row=9, column=1, columnspan=3, sticky="w", padx=6, pady=4)
@@ -5898,12 +6112,12 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         def reset_openai_limits() -> None:
             openai_pdf_pages_var.set("10")
             openai_text_chars_var.set("4000")
-            openai_points_var.set("2")
+            openai_points_var.set("1")
 
         ttk.Button(openai_limits_frame, text="Standard", command=reset_openai_limits).pack(side="left")
-        ttk.Label(openai_limits_frame, text="OpenAI-Punkte").pack(side="left", padx=(16, 0))
+        ttk.Label(openai_limits_frame, text="OpenAI-Punkte je Feld").pack(side="left", padx=(16, 0))
         ttk.Spinbox(openai_limits_frame, from_=0, to=50, textvariable=openai_points_var, width=6).pack(side="left", padx=(6, 0))
-        ttk.Label(api_tab, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. Die OpenAI-Pauschalpunkte werden als Punkteregel openai_metadata gespeichert.", wraplength=760).grid(row=10, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(api_tab, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. OpenAI-Punkte werden je Metadatenfeld in der Punkteverwaltung gepflegt.", wraplength=760).grid(row=10, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         openai_test_status_var = tk.StringVar(value="OpenAI-Schlüssel nicht geprüft")
         openai_balance_var = tk.StringVar(value="Guthaben: n.v.")
@@ -5915,8 +6129,8 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
                 try:
                     resp = self.api.list_point_rules(self.api_token, self._current_points_year())
                     for rule in resp.get("rules", []) or []:
-                        if str(rule.get("rule_key", "")) == "openai_metadata":
-                            self.after(0, lambda value=str(int(rule.get("points", 2) or 0)): openai_points_var.set(value))
+                        if str(rule.get("evaluation_source", "")) == "openAI":
+                            self.after(0, lambda value=str(int(rule.get("points", 1) or 0)): openai_points_var.set(value))
                             break
                 except Exception:
                     pass
@@ -6018,7 +6232,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         nc_web_var = tk.StringVar(value=self.config_data.get("nextcloud_web_files_url", "https://nx94165.your-storageshare.de/apps/files/files"))
         ttk.Entry(links_tab, textvariable=nc_web_var).grid(row=1, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         ttk.Label(links_tab, text="Beispiel: https://nx94165.your-storageshare.de/apps/files/files  ·  Links zeigen auf den betreffenden Nextcloud-Ordner.", wraplength=760).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 10))
-        ttk.Label(links_tab, text="Das Datenbankpasswort und SMTP-Passwort liegen nur auf dem Server/API. Das FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt. Die OpenAI-Pauschalpunkte ändern Sie unter Admin > Punkteregeln verwalten > openai_metadata.", wraplength=760).grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 10))
+        ttk.Label(links_tab, text="Das Datenbankpasswort und SMTP-Passwort liegen nur auf dem Server/API. Das FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt. Die OpenAI-Punkte je Metadatenfeld ändern Sie unter Admin > Punkteregeln verwalten.", wraplength=760).grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 10))
 
         tracked_vars = [
             folder_name_var, api_url_var, openai_key_var, openai_model_var,
@@ -6085,17 +6299,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             self.config_data["nextcloud_web_files_url"] = nc_web_var.get().strip()
             self.ensure_standard_metadata_folder()
             save_config(self.config_data)
-            if self.api_token:
-                try:
-                    self.api.update_point_rules(self.api_token, self._current_points_year(), [{
-                        "rule_key": "openai_metadata",
-                        "label": "OpenAI-Metadaten übernommen",
-                        "category": "metadata",
-                        "points": openai_points,
-                        "is_active": 1,
-                    }])
-                except Exception as exc:
-                    messagebox.showwarning("OpenAI-Punkte", f"Einstellungen wurden lokal gespeichert, aber die OpenAI-Punkteregel konnte nicht gespeichert werden:\n{exc}", parent=dialog)
+            # OpenAI-Punkte werden feldbezogen in der Punkteverwaltung gepflegt.
             add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Admin-Einstellungen geändert", f"Metadatenordner={name}; Admin-Ordner={', '.join(folders)}"))
             self.refresh_history()
             self.refresh_admin_uploads(show_message=False)
@@ -8940,7 +9144,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         dialog.title("Punkteregeln verwalten")
         try: self.track_window_geometry(dialog, "Punkteregeln verwalten")
         except Exception: pass
-        dialog.geometry("1120x600")
+        dialog.geometry("1320x720")
         dialog.transient(self)
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)
@@ -8949,8 +9153,18 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         ttk.Label(top, text="Kalenderjahr:").pack(side="left")
         year_var = tk.StringVar(value=str(self._current_points_year()))
         ttk.Entry(top, textvariable=year_var, width=8).pack(side="left", padx=6)
-        tree = ttk.Treeview(dialog, columns=("key", "label", "category", "points", "active"), show="headings", selectmode="browse")
-        for col, label, width in [("key", "Regel", 180), ("label", "Beschreibung", 380), ("category", "Kategorie", 110), ("points", "Punkte", 90), ("active", "Aktiv", 70)]:
+        tree = ttk.Treeview(dialog, columns=("field", "source", "key", "label", "type", "check", "min", "points", "active"), show="headings", selectmode="browse")
+        for col, label, width in [
+            ("field", "Metadaten-Feld", 150),
+            ("source", "Wertung", 90),
+            ("key", "Regel", 220),
+            ("label", "Beschreibung", 280),
+            ("type", "Typ", 90),
+            ("check", "Prüfung", 90),
+            ("min", "Mindestwert", 90),
+            ("points", "Punkte", 80),
+            ("active", "Aktiv", 60),
+        ]:
             tree.heading(col, text=label, anchor="w", command=lambda c=col: sort_point_rules_tree(c))
             tree.column(col, width=width, anchor="w")
         tree.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
@@ -8965,6 +9179,9 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         field_var = tk.StringVar()
         label_var = tk.StringVar()
         category_var = tk.StringVar()
+        source_var = tk.StringVar()
+        check_type_var = tk.StringVar(value="characters")
+        min_value_var = tk.StringVar(value="1")
         points_var = tk.StringVar()
         active_var = tk.BooleanVar(value=True)
         metadata_fields = [
@@ -8975,9 +9192,6 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             ("document_date", "Datum / Zeitraum"),
             ("event", "Ereignis"),
             ("keywords", "Stichwörter"),
-            ("license_note", "Lizenz / Einschränkungen"),
-            ("original_location", "Standort Original"),
-            ("place", "Ort"),
             ("rights_holder", "Rechteinhaber"),
             ("rights_note", "Rechtehinweis"),
             ("source", "Quelle / Herkunft"),
@@ -8991,20 +9205,24 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
         field_combo.grid(row=0, column=1, sticky="ew", padx=(0,10), pady=3)
         ttk.Label(form, text="Beschreibung:").grid(row=0, column=2, sticky="w", padx=(0,4), pady=3)
         ttk.Entry(form, textvariable=label_var).grid(row=0, column=3, sticky="ew", padx=(0,10), pady=3)
-        ttk.Label(form, text="Kategorie:").grid(row=1, column=0, sticky="w", padx=(0,4), pady=3)
-        category_options = ["metadata", "manual"]
+        ttk.Label(form, text="Typ:").grid(row=1, column=0, sticky="w", padx=(0,4), pady=3)
+        category_options = ["metadata", "system", "manual"]
         category_combo = ttk.Combobox(form, textvariable=category_var, values=category_options, state="readonly")
         category_combo.grid(row=1, column=1, sticky="ew", padx=(0,10), pady=3)
         ttk.Label(form, text="Punkte:").grid(row=1, column=2, sticky="w", padx=(0,4), pady=3)
         ttk.Entry(form, textvariable=points_var).grid(row=1, column=3, sticky="ew", padx=(0,10), pady=3)
         ttk.Label(form, text="Regel:").grid(row=2, column=0, sticky="w", padx=(0,4), pady=3)
         ttk.Entry(form, textvariable=rule_key_var, state="readonly").grid(row=2, column=1, sticky="ew", padx=(0,10), pady=3)
-        ttk.Checkbutton(form, text="Aktiv", variable=active_var).grid(row=2, column=3, sticky="w")
-        valid_rule_map = {key: {"rule_key": key, "label": label, "category": cat, "meaning": meaning} for key, label, cat, meaning in VALID_POINT_RULES}
-
+        ttk.Label(form, text="Wertung:").grid(row=2, column=2, sticky="w", padx=(0,4), pady=3)
+        ttk.Entry(form, textvariable=source_var).grid(row=2, column=3, sticky="ew", padx=(0,10), pady=3)
+        ttk.Label(form, text="Prüfung:").grid(row=3, column=0, sticky="w", padx=(0,4), pady=3)
+        ttk.Combobox(form, textvariable=check_type_var, values=["characters", "words", "count", "none"], state="readonly").grid(row=3, column=1, sticky="ew", padx=(0,10), pady=3)
+        ttk.Label(form, text="Mindestwert:").grid(row=3, column=2, sticky="w", padx=(0,4), pady=3)
+        ttk.Entry(form, textvariable=min_value_var).grid(row=3, column=3, sticky="ew", padx=(0,10), pady=3)
+        ttk.Checkbutton(form, text="Aktiv", variable=active_var).grid(row=3, column=3, sticky="w")
         def source_field_from_rule_key(rule_key: str) -> str:
             key = str(rule_key or "").strip()
-            for suffix in ("_metadata", "_metadaten", "_manual"):
+            for suffix in ("_metadata", "_metadaten", "_manual", "_openAI"):
                 if key.endswith(suffix):
                     return key[:-len(suffix)]
             return self.point_rule_source_field_from_key(key)
@@ -9018,15 +9236,16 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
 
         def update_rule_from_field_category(*_args):
             field_key = selected_field_key()
-            category = category_var.get().strip()
-            if field_key and category in {"metadata", "manual"}:
-                rule_key_var.set(f"{field_key}_{category}")
+            rule_type = category_var.get().strip()
+            source = source_var.get().strip() or "manual"
+            if field_key and rule_type == "metadata" and source in {"manual", "openAI"}:
+                rule_key_var.set(f"{field_key}_{source}")
                 if not label_var.get().strip():
-                    label_var.set(f"{label_by_field.get(field_key, field_key)} {'angegeben' if category == 'metadata' else 'manuell ergänzt'}")
+                    label_var.set(f"{label_by_field.get(field_key, field_key)} angegeben")
 
         def sort_point_rules_tree(column: str) -> None:
             rows = [(tree.set(iid, column), iid) for iid in tree.get_children("")]
-            numeric = column == "points"
+            numeric = column in {"points", "min"}
             reverse = getattr(tree, "_sort_reverse", {}).get(column, False)
             if numeric:
                 rows.sort(key=lambda item: int(float(item[0] or 0)), reverse=reverse)
@@ -9043,10 +9262,45 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
                 tree.delete(item)
             try:
                 resp = self.api.list_point_rules(self.api_token, int(year_var.get()))
-                used_keys = set()
-                for rule in resp.get("rules", []):
-                    used_keys.add(str(rule.get("rule_key", "")))
-                    tree.insert("", "end", values=(rule.get("rule_key", ""), rule.get("label", ""), rule.get("category", ""), rule.get("points", 0), "ja" if int(rule.get("is_active", 1)) else "nein"))
+                valid_rules = resp.get("valid_rules", []) or []
+                valid_by_key = {str(rule.get("rule_key", "")): rule for rule in valid_rules if str(rule.get("rule_key", ""))}
+                current_rules = resp.get("rules", []) or []
+                current_by_key = {str(rule.get("rule_key", "")): rule for rule in current_rules if str(rule.get("rule_key", "")) in valid_by_key}
+                loaded_keys = set()
+                for valid_rule in valid_rules:
+                    rule = dict(valid_rule)
+                    current = current_by_key.get(str(valid_rule.get("rule_key", "")), {})
+                    for keep in ("label", "points", "is_active"):
+                        if keep in current:
+                            rule[keep] = current.get(keep)
+                    key = str(rule.get("rule_key", ""))
+                    loaded_keys.add(key)
+                    tree.insert("", "end", values=(
+                        rule.get("source_field", ""),
+                        rule.get("evaluation_source", rule.get("source", "")),
+                        key,
+                        rule.get("label", ""),
+                        rule.get("rule_type", ""),
+                        rule.get("check_type", "none"),
+                        rule.get("min_value", 0),
+                        rule.get("points", 0),
+                        "ja" if int(rule.get("is_active", 1)) else "nein",
+                    ))
+                for rule in current_rules:
+                    key = str(rule.get("rule_key", ""))
+                    if key in loaded_keys or str(rule.get("rule_type", "")) != "manual":
+                        continue
+                    tree.insert("", "end", values=(
+                        rule.get("source_field", "manual"),
+                        rule.get("evaluation_source", "manual"),
+                        key,
+                        rule.get("label", ""),
+                        "manual",
+                        "none",
+                        0,
+                        rule.get("points", 0),
+                        "ja" if int(rule.get("is_active", 1)) else "nein",
+                    ))
             except Exception as exc:
                 messagebox.showerror("Punkteregeln", str(exc))
 
@@ -9055,31 +9309,41 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             if not sel:
                 return
             vals = tree.item(sel[0], "values")
-            field_key = source_field_from_rule_key(vals[0])
+            field_key = vals[0] or source_field_from_rule_key(vals[2])
             field_var.set(field_label_for_key(field_key))
-            rule_key_var.set(vals[0]); label_var.set(vals[1]); category_var.set(vals[2]); points_var.set(vals[3]); active_var.set(str(vals[4]).lower() in {"ja", "1", "true"})
+            source_var.set(vals[1] if len(vals) > 1 else "")
+            rule_key_var.set(vals[2] if len(vals) > 2 else "")
+            label_var.set(vals[3] if len(vals) > 3 else "")
+            category_var.set(vals[4] if len(vals) > 4 else "")
+            check_type_var.set(vals[5] if len(vals) > 5 else "none")
+            min_value_var.set(vals[6] if len(vals) > 6 else "0")
+            points_var.set(vals[7] if len(vals) > 7 else "0")
+            active_var.set(str(vals[8] if len(vals) > 8 else "ja").lower() in {"ja", "1", "true"})
 
         def apply_to_tree():
             update_rule_from_field_category()
             key = rule_key_var.get().strip()
-            if key in valid_rule_map and not label_var.get().strip():
-                label_var.set(valid_rule_map[key]["label"])
             if not category_var.get().strip():
                 category_var.set("metadata")
-            vals = (key, label_var.get().strip(), category_var.get().strip(), points_var.get().strip() or "0", "ja" if active_var.get() else "nein")
-            if not vals[0] or not vals[1]:
+            if category_var.get().strip() == "system":
+                messagebox.showinfo("Punkteregeln", "Sonderregeln sind Systemvorgaben und können hier nicht bearbeitet werden.")
+                return
+            source_field = selected_field_key() if category_var.get().strip() == "metadata" else source_var.get().strip()
+            vals = (source_field, source_var.get().strip(), key, label_var.get().strip(), category_var.get().strip(), check_type_var.get().strip(), min_value_var.get().strip() or "0", points_var.get().strip() or "0", "ja" if active_var.get() else "nein")
+            if not vals[2] or not vals[3]:
                 messagebox.showwarning("Punkteregeln", "Regel und Beschreibung sind erforderlich.")
                 return
             try:
-                int(float(vals[3]))
+                int(float(vals[6] or 0))
+                int(float(vals[7] or 0))
             except Exception:
-                messagebox.showwarning("Punkteregeln", "Punkte muss eine Zahl sein.")
+                messagebox.showwarning("Punkteregeln", "Mindestwert und Punkte müssen Zahlen sein.")
                 return
             sel = tree.selection()
             if sel:
                 tree.item(sel[0], values=vals)
             else:
-                existing = next((iid for iid in tree.get_children() if str(tree.item(iid, "values")[0]) == key), None)
+                existing = next((iid for iid in tree.get_children() if str(tree.item(iid, "values")[2]) == key), None)
                 if existing:
                     tree.selection_set(existing)
                     tree.item(existing, values=vals)
@@ -9092,6 +9356,9 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             rule_key_var.set("")
             label_var.set("")
             category_var.set("metadata")
+            source_var.set("manual")
+            check_type_var.set("characters")
+            min_value_var.set("1")
             points_var.set("0")
             active_var.set(True)
             update_rule_from_field_category()
@@ -9103,20 +9370,49 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
                 messagebox.showwarning("Punkteregeln", "Bitte zuerst eine Regel in der Liste auswählen.", parent=dialog)
                 return
             vals = tree.item(sel[0], "values")
-            key = str(vals[0] or "")
+            if len(vals) > 4 and str(vals[4]) == "system":
+                messagebox.showinfo("Punkteregeln", "Sonderregeln sind Systemvorgaben und können nicht gelöscht werden.", parent=dialog)
+                return
+            key = str(vals[2] if len(vals) > 2 else vals[0] or "")
             if not messagebox.askyesno("Punkteregeln", f"Regel '{key}' wirklich löschen?\n\nWirksam wird die Löschung erst mit 'Speichern'.", parent=dialog):
                 return
             tree.delete(sel[0])
             rule_key_var.set("")
             label_var.set("")
+            source_var.set("")
+            check_type_var.set("none")
+            min_value_var.set("0")
             points_var.set("")
             active_var.set(True)
 
         def save_rules():
             rules = []
             for iid in tree.get_children():
-                key, label, cat, points, active = tree.item(iid, "values")
-                rules.append({"rule_key": key, "label": label, "category": cat, "points": int(float(points or 0)), "is_active": str(active).lower() in {"ja", "1", "true"}})
+                source_field, source, key, label, rule_type, check_type, min_value, points, active = tree.item(iid, "values")
+                category = "manual" if rule_type == "manual" else ("metadata" if rule_type == "metadata" else source_field or "system")
+                if rule_type == "system":
+                    category = str(source_field or "")
+                    if key in {"persons_image_marked", "persons_per_person"}:
+                        category = "persons"
+                    elif key in {"admin_review_accepted", "admin_file_organization"}:
+                        category = "admin_review"
+                    elif key == "special_collection":
+                        category = "special_collection"
+                    else:
+                        category = "metadata"
+                rules.append({
+                    "rule_key": key,
+                    "label": label,
+                    "category": category,
+                    "rule_type": rule_type,
+                    "source_field": source_field,
+                    "evaluation_source": source,
+                    "check_type": check_type,
+                    "min_value": int(float(min_value or 0)),
+                    "points": int(float(points or 0)),
+                    "is_active": str(active).lower() in {"ja", "1", "true"},
+                    "is_system": rule_type == "system",
+                })
             try:
                 self.api.update_point_rules(self.api_token, int(year_var.get()), rules)
                 messagebox.showinfo("Punkteregeln", "Punkteregeln wurden gespeichert.")
@@ -9431,7 +9727,7 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
 
     def point_rule_source_field_from_key(self, rule_key: str) -> str:
         key = str(rule_key or "").strip()
-        for suffix in ("_metadata", "_metadaten", "_manual"):
+        for suffix in ("_metadata", "_metadaten", "_manual", "_openAI"):
             if key.endswith(suffix):
                 key = key[:-len(suffix)]
                 break
@@ -9443,6 +9739,8 @@ class OrtschronikUploader(UploadTabMixin, TK_BASE_CLASS):
             "rights_usage_permission": "usage_permission",
             "event_topic": "event",
             "openai_metadata": "openai_metadata",
+            "persons_image_marked": "persons",
+            "persons_per_person": "persons",
         }
         return aliases.get(key, key or "manual_bonus")
 

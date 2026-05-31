@@ -35,7 +35,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "openai_model": "gpt-3.5-turbo",
     "openai_pdf_sample_pages": 10,
     "openai_text_sample_chars": 4000,
-    "openai_metadata_points": 2,
+    "openai_metadata_points": 1,
     "archive_collection_options": [],
     "mysql_host": "",
     "mysql_port": "3306",

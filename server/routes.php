@@ -7,7 +7,7 @@ $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 $path = rtrim($path, '/');
 
-const ODV_API_VERSION = 'v110';
+const ODV_API_VERSION = 'v111';
 
 if (!function_exists('get_json_input')) {
     function get_json_input(): array
@@ -567,6 +567,36 @@ function point_rule_key_for_field_category(PDO $pdo, int $year, string $field, s
     return $fallback;
 }
 
+function metadata_point_rule_catalog(): array
+{
+    return [
+        'description' => ['label' => 'Aussagekräftige Beschreibung', 'check_type' => 'characters', 'min_value' => 50],
+        'keywords' => ['label' => 'Stichwörter vergeben', 'check_type' => 'count', 'min_value' => 3],
+        'source' => ['label' => 'Quelle/Herkunft angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'usage_permission' => ['label' => 'Nutzungsfreigabe geklärt', 'check_type' => 'characters', 'min_value' => 3],
+        'rights_note' => ['label' => 'Rechtehinweis angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'copyright_author' => ['label' => 'Urheber angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'rights_holder' => ['label' => 'Rechteinhaber angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'archive_name' => ['label' => 'Archiv/Bestand angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'archive_signature' => ['label' => 'Archivsignatur angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'document_date' => ['label' => 'Datum/Zeitraum angegeben', 'check_type' => 'characters', 'min_value' => 3],
+        'event' => ['label' => 'Ereignis/Thema zugeordnet', 'check_type' => 'characters', 'min_value' => 3],
+    ];
+}
+
+function metadata_point_rule_key(string $field, string $source): string
+{
+    return trim($field) . '_' . ($source === 'openAI' ? 'openAI' : 'manual');
+}
+
+function point_rule_config(PDO $pdo, int $year, string $ruleKey): ?array
+{
+    $stmt = $pdo->prepare("SELECT * FROM point_rules WHERE year = :year AND rule_key = :rule_key AND is_active = 1 LIMIT 1");
+    $stmt->execute([':year' => $year, ':rule_key' => $ruleKey]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
 function normalize_point_path(string $path): string
 {
     return strtolower(str_replace('\\', '/', $path));
@@ -616,13 +646,12 @@ function add_special_collection_points(PDO $pdo, int $documentId, string $upload
         return;
     }
     $isExistingMetadata = ($captureMode === 'existing_file_metadata');
+    $year = current_points_year();
+    $points = point_rule_points($pdo, $year, 'special_collection', 10);
+    $ruleKey = 'special_collection';
     if ($collection === 'kinder_wie_die_zeit_vergeht') {
-        $points = $isExistingMetadata ? 20 : 100;
-        $ruleKey = $isExistingMetadata ? 'kinder_zeit_existing_metadata' : 'kinder_zeit_new_odv';
         $reason = $isExistingMetadata ? 'Kinder wie die Zeit vergeht: nachträgliche Metadatenerfassung' : 'Kinder wie die Zeit vergeht: neu über ODV abgelegt';
     } else {
-        $points = $isExistingMetadata ? 10 : 50;
-        $ruleKey = $isExistingMetadata ? 'jahresblaetter_existing_metadata' : 'jahresblaetter_new_odv';
         $reason = $isExistingMetadata ? 'Jahresblätter: nachträgliche Metadatenerfassung' : 'Jahresblätter: neu über ODV abgelegt';
     }
     add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'special_collection', $ruleKey, $reason, 'current_path', $points, false);
@@ -685,6 +714,23 @@ function db_column_exists(PDO $pdo, string $tableName, string $columnName): bool
     return $cache[$key];
 }
 
+function ensure_point_rules_model_columns(PDO $pdo): void
+{
+    $columns = [
+        'rule_type' => "ALTER TABLE point_rules ADD COLUMN rule_type VARCHAR(40) NOT NULL DEFAULT 'metadata' AFTER category",
+        'source_field' => "ALTER TABLE point_rules ADD COLUMN source_field VARCHAR(120) DEFAULT NULL AFTER rule_type",
+        'evaluation_source' => "ALTER TABLE point_rules ADD COLUMN evaluation_source VARCHAR(30) DEFAULT NULL AFTER source_field",
+        'check_type' => "ALTER TABLE point_rules ADD COLUMN check_type VARCHAR(30) NOT NULL DEFAULT 'none' AFTER evaluation_source",
+        'min_value' => "ALTER TABLE point_rules ADD COLUMN min_value INT NOT NULL DEFAULT 0 AFTER check_type",
+        'is_system' => "ALTER TABLE point_rules ADD COLUMN is_system TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active",
+    ];
+    foreach ($columns as $column => $sql) {
+        if (!db_column_exists($pdo, 'point_rules', $column)) {
+            $pdo->exec($sql);
+        }
+    }
+}
+
 function ensure_points_schema_available(PDO $pdo): void
 {
     $missing = [];
@@ -713,6 +759,7 @@ function ensure_points_schema_available(PDO $pdo): void
     if ($missing) {
         throw new RuntimeException('Punkte-Datenbankschema unvollständig. Bitte SQL-Migrationen v48/v49/v51/v55 prüfen. Fehlend: ' . implode(', ', $missing));
     }
+    ensure_point_rules_model_columns($pdo);
 }
 
 function is_point_eligible_document(array $document): bool
@@ -727,12 +774,22 @@ function document_context_for_points(PDO $pdo, int $documentId): ?array
 {
     $hasPointsEligible = db_column_exists($pdo, 'documents', 'points_eligible');
     $sql = $hasPointsEligible
-        ? "SELECT id, target_folder, current_path, points_eligible FROM documents WHERE id = :id LIMIT 1"
-        : "SELECT id, target_folder, current_path, 0 AS points_eligible FROM documents WHERE id = :id LIMIT 1";
+        ? "SELECT id, original_filename, stored_filename, current_filename, document_type, target_folder, current_path, points_eligible FROM documents WHERE id = :id LIMIT 1"
+        : "SELECT id, original_filename, stored_filename, current_filename, document_type, target_folder, current_path, 0 AS points_eligible FROM documents WHERE id = :id LIMIT 1";
     $stmt = $pdo->prepare($sql);
     $stmt->execute([':id' => $documentId]);
     $row = $stmt->fetch();
     return $row ?: null;
+}
+
+function is_image_document_context(array $document): bool
+{
+    $type = strtolower((string)($document['document_type'] ?? ''));
+    if (str_contains($type, 'bild') || str_contains($type, 'foto') || str_contains($type, 'photo') || str_contains($type, 'image')) {
+        return true;
+    }
+    $name = strtolower((string)($document['current_filename'] ?? $document['stored_filename'] ?? $document['original_filename'] ?? $document['current_path'] ?? ''));
+    return (bool)preg_match('/\.(jpe?g|png|gif|bmp|tiff?|webp)$/i', $name);
 }
 
 
@@ -759,19 +816,40 @@ function points_keyword_count(string $text): int
     return $count;
 }
 
-function points_metadata_field_is_eligible(string $field, string $value): bool
+function points_value_matches_rule(string $field, string $value, string $checkType, int $minValue): bool
 {
     $value = trim($value);
     if ($value === '') {
         return false;
     }
-    if ($field === 'description') {
-        return points_description_is_eligible($value);
+    if ($checkType === 'none') {
+        return true;
     }
-    if ($field === 'keywords') {
-        return points_keyword_count($value) >= 3;
+    if ($checkType === 'words') {
+        $words = preg_split('/\s+/u', $value, -1, PREG_SPLIT_NO_EMPTY);
+        return count($words ?: []) >= max(1, $minValue);
     }
-    return true;
+    if ($checkType === 'count') {
+        return points_keyword_count($value) >= max(1, $minValue);
+    }
+    $length = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+    return $length >= max(1, $minValue);
+}
+
+function points_metadata_field_is_eligible(PDO $pdo, int $year, string $field, string $source, string $value): bool
+{
+    $catalog = metadata_point_rule_catalog();
+    $default = $catalog[$field] ?? ['check_type' => 'characters', 'min_value' => 1];
+    $rule = point_rule_config($pdo, $year, metadata_point_rule_key($field, $source));
+    if (!$rule) {
+        return false;
+    }
+    return points_value_matches_rule(
+        $field,
+        $value,
+        (string)($rule['check_type'] ?? $default['check_type']),
+        (int)($rule['min_value'] ?? $default['min_value'])
+    );
 }
 
 function add_contribution_point(PDO $pdo, int $documentId, string $uploadId, array $beneficiary, array $createdBy, string $category, string $ruleKey, string $reason, string $sourceField, int $points, bool $manual = false): void
@@ -827,6 +905,12 @@ function remove_own_auto_points_for_field(PDO $pdo, int $documentId, int $userId
     $stmt->execute([':document_id' => $documentId, ':user_id' => $userId, ':rule_key' => $ruleKey, ':source_field' => $sourceField]);
 }
 
+function remove_auto_points_for_field(PDO $pdo, int $documentId, string $ruleKey, string $sourceField): void
+{
+    $stmt = $pdo->prepare("DELETE FROM contribution_points WHERE document_id = :document_id AND rule_key = :rule_key AND source_field = :source_field AND is_manual = 0");
+    $stmt->execute([':document_id' => $documentId, ':rule_key' => $ruleKey, ':source_field' => $sourceField]);
+}
+
 function add_correction_point_if_relevant(PDO $pdo, int $documentId, string $uploadId, array $user, string $field, string $old, string $new): void
 {
     $delta = text_change_size($old, $new);
@@ -839,53 +923,29 @@ function add_correction_point_if_relevant(PDO $pdo, int $documentId, string $upl
     add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'metadata', $ruleKey, 'Fachliche Korrektur/Ergänzung: ' . $field, $sourceField, $points, false);
 }
 
-function add_openai_metadata_point_if_relevant(PDO $pdo, int $documentId, string $uploadId, array $user, array $openaiFields): void
-{
-    $fields = array_values(array_unique(array_filter(array_map(static fn($field) => trim((string)$field), $openaiFields))));
-    if (count($fields) === 0) { return; }
-    if (point_exists_for_document_rule($pdo, $documentId, 'openai_metadata', 'openai_metadata', false)) { return; }
-    $year = current_points_year();
-    $points = point_rule_points($pdo, $year, 'openai_metadata', 2);
-    add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'metadata', 'openai_metadata', 'OpenAI-Metadaten übernommen', 'openai_metadata', $points, false);
-}
-
 function add_auto_points_for_metadata(PDO $pdo, int $documentId, string $uploadId, array $user, array $values, ?array $oldValues = null, array $openaiFields = []): void
 {
     $year = current_points_year();
     $openaiFields = array_values(array_unique(array_filter(array_map(static fn($field) => trim((string)$field), $openaiFields))));
     $openaiFieldSet = array_fill_keys($openaiFields, true);
-    add_openai_metadata_point_if_relevant($pdo, $documentId, $uploadId, $user, $openaiFields);
-    $rules = [
-        'description' => ['rule' => 'metadata_description', 'category' => 'metadata', 'label' => 'Aussagekräftige Beschreibung', 'default' => 2],
-        'keywords' => ['rule' => 'metadata_keywords', 'category' => 'metadata', 'label' => 'Stichwörter vergeben', 'default' => 2],
-        'source' => ['rule' => 'metadata_source', 'category' => 'metadata', 'label' => 'Quelle/Herkunft angegeben', 'default' => 2],
-        'usage_permission' => ['rule' => 'rights_usage_permission', 'category' => 'metadata', 'label' => 'Nutzungsfreigabe geklärt', 'default' => 3],
-        'rights_note' => ['rule' => 'rights_note', 'category' => 'metadata', 'label' => 'Rechtehinweis angegeben', 'default' => 2],
-        'copyright_author' => ['rule' => 'rights_author', 'category' => 'metadata', 'label' => 'Urheber angegeben', 'default' => 2],
-        'rights_holder' => ['rule' => 'rights_holder', 'category' => 'metadata', 'label' => 'Rechteinhaber angegeben', 'default' => 2],
-        'archive_name' => ['rule' => 'archive_name', 'category' => 'metadata', 'label' => 'Archiv/Bestand angegeben', 'default' => 1],
-        'archive_signature' => ['rule' => 'archive_signature', 'category' => 'metadata', 'label' => 'Archivsignatur angegeben', 'default' => 2],
-        'document_date' => ['rule' => 'document_date', 'category' => 'metadata', 'label' => 'Datum/Zeitraum angegeben', 'default' => 1],
-        'event' => ['rule' => 'event_topic', 'category' => 'metadata', 'label' => 'Ereignis/Thema zugeordnet', 'default' => 1],
-    ];
+    $rules = metadata_point_rule_catalog();
     foreach ($rules as $field => $info) {
         $new = trim((string)($values[$field] ?? ''));
         $old = $oldValues === null ? '' : trim((string)($oldValues[$field] ?? ''));
-        $newEligible = points_metadata_field_is_eligible($field, $new);
-        $oldEligible = points_metadata_field_is_eligible($field, $old);
-        if ($newEligible && $old === '') {
-            if (isset($openaiFieldSet[$field])) { continue; }
-            $ruleKey = point_rule_key_for_field_category($pdo, $year, $field, 'metadata', $info['rule']);
-            $points = point_rule_points($pdo, $year, $ruleKey, $info['default']);
-            add_contribution_point($pdo, $documentId, $uploadId, $user, $user, $info['category'], $ruleKey, $info['label'], $field, $points, false);
-        } elseif (!$newEligible && $oldEligible) {
-            // Wenn der gleiche Bearbeiter eine eigene punkteauslösende Eingabe wieder entfernt, werden diese Punkte gelöscht.
-            remove_own_auto_points_for_field($pdo, $documentId, (int)$user['id'], $info['rule'], $field);
-            remove_own_auto_points_for_field($pdo, $documentId, (int)$user['id'], $field . '_metadata', $field);
-            remove_own_auto_points_for_field($pdo, $documentId, (int)$user['id'], $field . '_metadaten', $field);
-        } elseif ($newEligible && $oldEligible && $new !== $old) {
-            // Korrekturen/Ergänzungen vorhandener Angaben werden ab >30 Zeichen Unterschied bewertet.
-            add_correction_point_if_relevant($pdo, $documentId, $uploadId, $user, $field, $old, $new);
+        $openAiRuleKey = metadata_point_rule_key($field, 'openAI');
+        $manualRuleKey = metadata_point_rule_key($field, 'manual');
+        $newOpenAiEligible = isset($openaiFieldSet[$field]) && $old === '' && points_metadata_field_is_eligible($pdo, $year, $field, 'openAI', $new);
+        $newManualEligible = !$newOpenAiEligible && points_metadata_field_is_eligible($pdo, $year, $field, 'manual', $new);
+        if ($newOpenAiEligible) {
+            $points = point_rule_points($pdo, $year, $openAiRuleKey, 1);
+            add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'metadata', $openAiRuleKey, $info['label'], $field, $points, false);
+        } elseif ($newManualEligible) {
+            remove_auto_points_for_field($pdo, $documentId, $openAiRuleKey, $field);
+            $points = point_rule_points($pdo, $year, $manualRuleKey, 2);
+            add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'metadata', $manualRuleKey, $info['label'], $field, $points, false);
+        } else {
+            remove_auto_points_for_field($pdo, $documentId, $openAiRuleKey, $field);
+            remove_auto_points_for_field($pdo, $documentId, $manualRuleKey, $field);
         }
     }
     $transDone = (bool)($values['transcription_done'] ?? false);
@@ -894,6 +954,7 @@ function add_auto_points_for_metadata(PDO $pdo, int $documentId, string $uploadI
         $type = strtolower(trim((string)($values['transcription_type'] ?? '')));
         $rule = 'transcription_short'; $default = 3; $label = 'Transkription / Abschrift erstellt';
         if (str_contains($type, 'schwierig') || str_contains($type, 'handschrift')) { $rule = 'transcription_difficult'; $default = 8; $label = 'Schwierige Transkription'; }
+        elseif (str_contains($type, 'zeitung') || str_contains($type, 'akte') || str_contains($type, 'urkunde')) { $rule = 'transcription_document'; $default = 10; $label = 'Transkription Zeitung / Akte / Urkunde'; }
         elseif (str_contains($type, 'voll')) { $rule = 'transcription_full'; $default = 5; $label = 'Vollständige Transkription'; }
         $points = point_rule_points($pdo, $year, $rule, $default);
         add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'metadata', $rule, $label, 'transcription_done', $points, false);
@@ -902,19 +963,24 @@ function add_auto_points_for_metadata(PDO $pdo, int $documentId, string $uploadI
 
 function add_person_points(PDO $pdo, int $documentId, string $uploadId, array $user, array $persons): void
 {
+    $pdo->prepare("DELETE FROM contribution_points WHERE document_id = :document_id AND category = 'persons' AND is_manual = 0")->execute([':document_id' => $documentId]);
     if (count($persons) <= 0) {
         return;
     }
-    $year = current_points_year();
-    add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'persons', 'persons_marked', 'Personen markiert', 'persons', point_rule_points($pdo, $year, 'persons_marked', 1), false);
-    $named = 0;
-    foreach ($persons as $p) {
-        if (is_array($p) && trim((string)($p['display_name'] ?? $p['name'] ?? '')) !== '') {
-            $named++;
-        }
+    $documentContext = document_context_for_points($pdo, $documentId);
+    if (!$documentContext || !is_image_document_context($documentContext)) {
+        return;
     }
-    if ($named > 0) {
-        add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'persons', 'persons_named', 'Personen mit Namen versehen', 'persons_named', point_rule_points($pdo, $year, 'persons_named', 2), false);
+    $year = current_points_year();
+    add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'persons', 'persons_image_marked', 'Bild mit Personenmarkierungen', 'persons_image', point_rule_points($pdo, $year, 'persons_image_marked', 5), false);
+    $index = 0;
+    foreach ($persons as $person) {
+        if (is_array($person)) {
+            $index++;
+            $number = (int)($person['number'] ?? $index);
+            if ($number <= 0) { $number = $index; }
+            add_contribution_point($pdo, $documentId, $uploadId, $user, $user, 'persons', 'persons_per_person', 'Personenmarkierung je Person', 'person_' . $number, point_rule_points($pdo, $year, 'persons_per_person', 1), false);
+        }
     }
 }
 
@@ -1018,32 +1084,20 @@ function recalculate_points_for_document(PDO $pdo, array $doc, array $currentUse
         return $stats;
     }
     $year = current_points_year();
-    $rules = [
-        'description' => ['rule' => 'metadata_description', 'category' => 'metadata', 'label' => 'Aussagekräftige Beschreibung', 'default' => 2],
-        'keywords' => ['rule' => 'metadata_keywords', 'category' => 'metadata', 'label' => 'Stichwörter vergeben', 'default' => 2],
-        'source' => ['rule' => 'metadata_source', 'category' => 'metadata', 'label' => 'Quelle/Herkunft angegeben', 'default' => 2],
-        'usage_permission' => ['rule' => 'rights_usage_permission', 'category' => 'metadata', 'label' => 'Nutzungsfreigabe geklärt', 'default' => 3],
-        'rights_note' => ['rule' => 'rights_note', 'category' => 'metadata', 'label' => 'Rechtehinweis angegeben', 'default' => 2],
-        'copyright_author' => ['rule' => 'rights_author', 'category' => 'metadata', 'label' => 'Urheber angegeben', 'default' => 2],
-        'rights_holder' => ['rule' => 'rights_holder', 'category' => 'metadata', 'label' => 'Rechteinhaber angegeben', 'default' => 2],
-        'archive_name' => ['rule' => 'archive_name', 'category' => 'metadata', 'label' => 'Archiv/Bestand angegeben', 'default' => 1],
-        'archive_signature' => ['rule' => 'archive_signature', 'category' => 'metadata', 'label' => 'Archivsignatur angegeben', 'default' => 2],
-        'document_date' => ['rule' => 'document_date', 'category' => 'metadata', 'label' => 'Datum/Zeitraum angegeben', 'default' => 1],
-        'event' => ['rule' => 'event_topic', 'category' => 'metadata', 'label' => 'Ereignis/Thema zugeordnet', 'default' => 1],
-    ];
+    $rules = metadata_point_rule_catalog();
     foreach ($rules as $field => $info) {
-        if (!points_metadata_field_is_eligible($field, (string)($doc[$field] ?? ''))) { continue; }
+        if (!points_metadata_field_is_eligible($pdo, $year, $field, 'manual', (string)($doc[$field] ?? ''))) { continue; }
         $beneficiary = metadata_field_beneficiary($pdo, $doc, $field);
-        $ruleKey = point_rule_key_for_field_category($pdo, $year, $field, 'metadata', $info['rule']);
-        $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $beneficiary, $currentUser, $info['category'], $ruleKey, $info['label'], $field, point_rule_points($pdo, $year, $ruleKey, $info['default']));
+        $ruleKey = metadata_point_rule_key($field, 'manual');
+        $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $beneficiary, $currentUser, 'metadata', $ruleKey, $info['label'], $field, point_rule_points($pdo, $year, $ruleKey, 2));
         $stats[$result] = ($stats[$result] ?? 0) + 1;
     }
     if ((int)($doc['transcription_done'] ?? 0) === 1) {
         $type = strtolower(trim((string)($doc['transcription_type'] ?? '')));
         $rule = 'transcription_short'; $default = 3; $label = 'Transkription / Abschrift erstellt';
         if (str_contains($type, 'schwierig') || str_contains($type, 'handschrift')) { $rule = 'transcription_difficult'; $default = 8; $label = 'Schwierige Transkription'; }
+        elseif (str_contains($type, 'zeitung') || str_contains($type, 'akte') || str_contains($type, 'urkunde')) { $rule = 'transcription_document'; $default = 10; $label = 'Transkription Zeitung / Akte / Urkunde'; }
         elseif (str_contains($type, 'voll')) { $rule = 'transcription_full'; $default = 5; $label = 'Vollständige Transkription'; }
-        elseif (str_contains($type, 'zeitung') || str_contains($type, 'akte') || str_contains($type, 'urkunde')) { $rule = 'transcription_full'; $default = 5; $label = 'Transkription Zeitung / Akte / Urkunde'; }
         $beneficiary = metadata_field_beneficiary($pdo, $doc, 'transcription_done');
         $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $beneficiary, $currentUser, 'metadata', $rule, $label, 'transcription_done', point_rule_points($pdo, $year, $rule, $default));
         $stats[$result] = ($stats[$result] ?? 0) + 1;
@@ -1068,13 +1122,17 @@ function recalculate_points_for_document(PDO $pdo, array $doc, array $currentUse
             if ((int)($p['created_by_user_id'] ?? 0) > 0) { $personBeneficiary = point_user_array((int)$p['created_by_user_id'], (string)($p['created_by_name'] ?? '')); break; }
         }
         if (!$personBeneficiary) { $personBeneficiary = document_uploader_for_points($doc); }
-        $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $personBeneficiary, $currentUser, 'persons', 'persons_marked', 'Personen markiert', 'persons', point_rule_points($pdo, $year, 'persons_marked', 1));
-        $stats[$result] = ($stats[$result] ?? 0) + 1;
-        $named = false;
-        foreach ($persons as $p) { if (trim((string)($p['display_name'] ?? '')) !== '') { $named = true; break; } }
-        if ($named) {
-            $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $personBeneficiary, $currentUser, 'persons', 'persons_named', 'Personen mit Namen versehen', 'persons_named', point_rule_points($pdo, $year, 'persons_named', 2));
+        if (is_image_document_context($doc)) {
+            $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $personBeneficiary, $currentUser, 'persons', 'persons_image_marked', 'Bild mit Personenmarkierungen', 'persons_image', point_rule_points($pdo, $year, 'persons_image_marked', 5));
             $stats[$result] = ($stats[$result] ?? 0) + 1;
+            $index = 0;
+            foreach ($persons as $p) {
+                $index++;
+                $number = (int)($p['number'] ?? $index);
+                if ($number <= 0) { $number = $index; }
+                $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $personBeneficiary, $currentUser, 'persons', 'persons_per_person', 'Personenmarkierung je Person', 'person_' . $number, point_rule_points($pdo, $year, 'persons_per_person', 1));
+                $stats[$result] = ($stats[$result] ?? 0) + 1;
+            }
         }
     }
     if ((string)($doc['status'] ?? '') === 'uebernommen') {
@@ -1420,6 +1478,14 @@ function available_schema_migrations(PDO $pdo): array
             'pending' => !schema_migration_done($pdo, 'v106_schema_migration_framework'),
             'backup_tables' => [],
         ],
+        [
+            'key' => 'v111_point_rules_optimization',
+            'from_version' => 'v110',
+            'to_version' => 'v111',
+            'description' => 'Punkteregeln auf Metadatenfeld/Wertung, Mindestpruefung, Sonderregeln und manuelle Zusatzpunkte umstellen.',
+            'pending' => !schema_migration_done($pdo, 'v111_point_rules_optimization'),
+            'backup_tables' => ['point_rules_v110'],
+        ],
     ];
 }
 
@@ -1438,6 +1504,49 @@ function apply_schema_migrations(PDO $pdo, array $currentUser): array
             $currentUser
         );
         $applied[] = 'v106_schema_migration_framework';
+    }
+    if (!schema_migration_done($pdo, 'v111_point_rules_optimization')) {
+        $backupTables = [];
+        $backup = backup_table_for_version($pdo, 'point_rules', 'v110');
+        if ($backup) { $backupTables[] = $backup; }
+        ensure_point_rules_model_columns($pdo);
+        $year = current_points_year();
+        $stmt = $pdo->prepare("INSERT INTO point_rules (year, rule_key, label, category, rule_type, source_field, evaluation_source, check_type, min_value, points, is_active, is_system, updated_by_user_id)
+            VALUES (:year, :rule_key, :label, :category, :rule_type, :source_field, :evaluation_source, :check_type, :min_value, :points, 1, :is_system, :updated_by_user_id)
+            ON DUPLICATE KEY UPDATE label = VALUES(label), category = VALUES(category), rule_type = VALUES(rule_type), source_field = VALUES(source_field), evaluation_source = VALUES(evaluation_source), check_type = VALUES(check_type), min_value = VALUES(min_value), points = VALUES(points), is_active = 1, is_system = VALUES(is_system), updated_by_user_id = VALUES(updated_by_user_id)");
+        $keptKeys = [];
+        foreach (valid_point_rules_catalog() as $rule) {
+            $keptKeys[] = $rule['rule_key'];
+            $stmt->execute([
+                ':year' => $year,
+                ':rule_key' => $rule['rule_key'],
+                ':label' => $rule['label'],
+                ':category' => $rule['category'],
+                ':rule_type' => $rule['rule_type'],
+                ':source_field' => $rule['source_field'],
+                ':evaluation_source' => $rule['evaluation_source'],
+                ':check_type' => $rule['check_type'],
+                ':min_value' => (int)($rule['min_value'] ?? 0),
+                ':points' => (int)($rule['points'] ?? 0),
+                ':is_system' => (int)($rule['is_system'] ?? 0),
+                ':updated_by_user_id' => (int)($currentUser['id'] ?? 0),
+            ]);
+        }
+        if ($keptKeys) {
+            $placeholders = implode(',', array_fill(0, count($keptKeys), '?'));
+            $deleteStmt = $pdo->prepare("DELETE FROM point_rules WHERE year = ? AND rule_key NOT IN ($placeholders)");
+            $deleteStmt->execute(array_merge([$year], $keptKeys));
+        }
+        record_schema_migration(
+            $pdo,
+            'v111_point_rules_optimization',
+            'v110',
+            'v111',
+            'Punkteregeln auf Metadatenfeld/Wertung, Mindestpruefung, Sonderregeln und manuelle Zusatzpunkte umgestellt.',
+            $backupTables,
+            $currentUser
+        );
+        $applied[] = 'v111_point_rules_optimization';
     }
     return $applied;
 }
@@ -2485,24 +2594,44 @@ function ensure_mail_group_external_table(PDO $pdo): void
 
 function valid_point_rules_catalog(): array
 {
-    return [
-        ['rule_key'=>'document_date','label'=>'Datum/Zeitraum angegeben','category'=>'metadata','meaning'=>'Datum / Zeitraum ist gefüllt'],
-        ['rule_key'=>'event_topic','label'=>'Ereignis/Thema zugeordnet','category'=>'metadata','meaning'=>'Ereignis/Thema ist gefüllt'],
-        ['rule_key'=>'metadata_description','label'=>'Aussagekräftige Beschreibung','category'=>'metadata','meaning'=>'Beschreibung ab Mindestlänge'],
-        ['rule_key'=>'metadata_keywords','label'=>'Stichwörter vergeben','category'=>'metadata','meaning'=>'Mindestens 3 Stichwörter'],
-        ['rule_key'=>'metadata_source','label'=>'Quelle/Herkunft angegeben','category'=>'metadata','meaning'=>'Primär- oder Sekundärquelle vorhanden'],
-        ['rule_key'=>'openai_metadata','label'=>'OpenAI-Metadaten übernommen','category'=>'metadata','meaning'=>'Pauschale für übernommene OpenAI-Metadaten'],
-        ['rule_key'=>'archive_signature','label'=>'Archivsignatur angegeben','category'=>'metadata','meaning'=>'Archivsignatur ist gefüllt'],
-        ['rule_key'=>'rights_author','label'=>'Urheber angegeben','category'=>'metadata','meaning'=>'Urheberfeld ist gefüllt'],
-        ['rule_key'=>'rights_holder','label'=>'Rechteinhaber angegeben','category'=>'metadata','meaning'=>'Rechteinhaber ist gefüllt'],
-        ['rule_key'=>'rights_usage_permission','label'=>'Nutzungsfreigabe geklärt','category'=>'metadata','meaning'=>'Nutzungsfreigabe ist gefüllt'],
-        ['rule_key'=>'rights_note','label'=>'Rechtehinweis angegeben','category'=>'metadata','meaning'=>'Rechtehinweis ist gefüllt'],
-        ['rule_key'=>'transcription_short','label'=>'Kurze Transkription / Auszug','category'=>'metadata','meaning'=>'Transkription ja + Art kurz'],
-        ['rule_key'=>'transcription_full','label'=>'Vollständige Transkription','category'=>'metadata','meaning'=>'Transkription ja + Art vollständig'],
-        ['rule_key'=>'transcription_difficult','label'=>'Schwierige Handschrift / alte Schrift','category'=>'metadata','meaning'=>'Transkriptionsart schwierige Handschrift'],
-        ['rule_key'=>'persons_marked','label'=>'Personen markiert','category'=>'persons','meaning'=>'Personenpunkte vorhanden'],
-        ['rule_key'=>'persons_named','label'=>'Personen mit Namen versehen','category'=>'persons','meaning'=>'Personenmarkierungen mit Namen'],
-    ];
+    $rules = [];
+    foreach (metadata_point_rule_catalog() as $field => $info) {
+        foreach ([['manual', 2], ['openAI', 1]] as [$source, $points]) {
+            $rules[] = [
+                'rule_key' => metadata_point_rule_key($field, $source),
+                'label' => $info['label'],
+                'category' => 'metadata',
+                'rule_type' => 'metadata',
+                'source_field' => $field,
+                'evaluation_source' => $source,
+                'check_type' => $info['check_type'],
+                'min_value' => $info['min_value'],
+                'meaning' => ($source === 'openAI' ? 'Durch OpenAI befülltes Metadatenfeld' : 'Manuell befülltes Metadatenfeld'),
+                'points' => $points,
+                'source' => $source,
+                'is_system' => 0,
+            ];
+        }
+    }
+    return array_merge($rules, [
+        ['rule_key'=>'transcription_short','label'=>'Kurze Transkription / Auszug','category'=>'metadata','rule_type'=>'system','source_field'=>'transcription_done','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Transkription ja + Art kurz','points'=>3,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'transcription_full','label'=>'Vollständige Transkription','category'=>'metadata','rule_type'=>'system','source_field'=>'transcription_done','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Transkription ja + Art vollständig','points'=>5,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'transcription_difficult','label'=>'Schwierige Handschrift / alte Schrift','category'=>'metadata','rule_type'=>'system','source_field'=>'transcription_done','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Transkriptionsart schwierige Handschrift','points'=>8,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'transcription_document','label'=>'Transkription Zeitung / Akte / Urkunde','category'=>'metadata','rule_type'=>'system','source_field'=>'transcription_done','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Transkription einer Zeitung, Akte oder Urkunde','points'=>10,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'persons_image_marked','label'=>'Bild mit Personenmarkierungen','category'=>'persons','rule_type'=>'system','source_field'=>'persons_image','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Bild hochgeladen und mindestens eine Person markiert','points'=>5,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'persons_per_person','label'=>'Personenmarkierung je Person','category'=>'persons','rule_type'=>'system','source_field'=>'persons','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Zusätzlich je markierter Person auf einem Bild','points'=>1,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'admin_review_accepted','label'=>'Dokument geprüft und übernommen','category'=>'admin_review','rule_type'=>'system','source_field'=>'status','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Admin übernimmt Dokument fachlich','points'=>1,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'admin_file_organization','label'=>'Datei umbenannt oder verschoben','category'=>'admin_review','rule_type'=>'system','source_field'=>'current_path','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Datei wurde organisiert','points'=>1,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'special_collection','label'=>'Besondere Sammlung / Archivordner','category'=>'special_collection','rule_type'=>'system','source_field'=>'current_path','evaluation_source'=>'system','check_type'=>'none','min_value'=>0,'meaning'=>'Dokument liegt in einer besonderen Sammlung','points'=>10,'source'=>'System','is_system'=>1],
+        ['rule_key'=>'manual_archive_research','label'=>'Recherche in Archiven','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_collection_indexing','label'=>'Erschließung von Beständen','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_event_organization','label'=>'Organisation Veranstaltung','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_excursion_organization','label'=>'Organisation Busfahrt / Exkursion','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_exhibition_work','label'=>'Mitarbeit an Ausstellung','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_digitization_support','label'=>'Digitalisierungshilfe','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_lecture_guided_tour','label'=>'Vortrag / Führung','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+        ['rule_key'=>'manual_other','label'=>'Sonstige Tätigkeit','category'=>'manual','rule_type'=>'manual','source_field'=>'manual','evaluation_source'=>'manual','check_type'=>'none','min_value'=>0,'meaning'=>'Manuelle Zusatzpunkte','points'=>0,'source'=>'manuell','is_system'=>0],
+    ]);
 }
 
 if ($method === 'GET' && $path === '/api/mail-groups') {
@@ -3001,7 +3130,8 @@ if ($method === 'GET' && $path === '/api/point-rules') {
     require_role(['superadmin']);
     $year = (int)($_GET['year'] ?? date('Y'));
     $pdo = db();
-    $stmt = $pdo->prepare("SELECT id, year, rule_key, label, category, points, is_active FROM point_rules WHERE year = :year ORDER BY category, rule_key");
+    ensure_point_rules_model_columns($pdo);
+    $stmt = $pdo->prepare("SELECT id, year, rule_key, label, category, rule_type, source_field, evaluation_source, check_type, min_value, points, is_active, is_system FROM point_rules WHERE year = :year ORDER BY rule_type, category, rule_key");
     $stmt->execute([':year' => $year]);
     json_response(['success' => true, 'year' => $year, 'rules' => $stmt->fetchAll(), 'valid_rules' => valid_point_rules_catalog()]);
 }
@@ -3015,7 +3145,8 @@ if ($method === 'PUT' && $path === '/api/point-rules') {
         json_response(['success' => false, 'error' => 'rules muss ein Array sein'], 400);
     }
     $pdo = db();
-    $stmt = $pdo->prepare("\n        INSERT INTO point_rules (year, rule_key, label, category, points, is_active, updated_by_user_id)\n        VALUES (:year, :rule_key, :label, :category, :points, :is_active, :updated_by_user_id)\n        ON DUPLICATE KEY UPDATE label = VALUES(label), category = VALUES(category), points = VALUES(points), is_active = VALUES(is_active), updated_by_user_id = VALUES(updated_by_user_id)\n    ");
+    ensure_point_rules_model_columns($pdo);
+    $stmt = $pdo->prepare("\n        INSERT INTO point_rules (year, rule_key, label, category, rule_type, source_field, evaluation_source, check_type, min_value, points, is_active, is_system, updated_by_user_id)\n        VALUES (:year, :rule_key, :label, :category, :rule_type, :source_field, :evaluation_source, :check_type, :min_value, :points, :is_active, :is_system, :updated_by_user_id)\n        ON DUPLICATE KEY UPDATE label = VALUES(label), category = VALUES(category), rule_type = VALUES(rule_type), source_field = VALUES(source_field), evaluation_source = VALUES(evaluation_source), check_type = VALUES(check_type), min_value = VALUES(min_value), points = VALUES(points), is_active = VALUES(is_active), is_system = VALUES(is_system), updated_by_user_id = VALUES(updated_by_user_id)\n    ");
     $keptKeys = [];
     foreach ($rules as $rule) {
         if (!is_array($rule)) {
@@ -3032,8 +3163,14 @@ if ($method === 'PUT' && $path === '/api/point-rules') {
             ':rule_key' => $key,
             ':label' => $label,
             ':category' => trim((string)($rule['category'] ?? 'metadata')),
+            ':rule_type' => trim((string)($rule['rule_type'] ?? 'metadata')),
+            ':source_field' => trim((string)($rule['source_field'] ?? '')),
+            ':evaluation_source' => trim((string)($rule['evaluation_source'] ?? '')),
+            ':check_type' => trim((string)($rule['check_type'] ?? 'none')),
+            ':min_value' => (int)($rule['min_value'] ?? 0),
             ':points' => (int)($rule['points'] ?? 0),
             ':is_active' => !empty($rule['is_active']) ? 1 : 0,
+            ':is_system' => !empty($rule['is_system']) ? 1 : 0,
             ':updated_by_user_id' => $currentUser['id'],
         ]);
     }
