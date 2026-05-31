@@ -1,0 +1,2 @@
+-- v71: Test-Updateversion auf Basis v70 Buildfix 1; Komfort-Updater arbeitet mit den app_update/system_settings-Strukturen aus v69.
+-- Keine neue Datenbankstruktur erforderlich.

@@ -1,0 +1,4 @@
+-- ODV v80: keine neue Pflichttabelle.
+-- Der neue Endpunkt POST /api/session/device nutzt die bestehenden Tabellen
+-- odv_user_devices und odv_user_sessions aus v74.
+-- Fenstergrößen/-positionen werden lokal in der ODV-Konfiguration gespeichert.

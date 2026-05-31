@@ -1,0 +1,12 @@
+Buildfix 2 fuer ODV v64
+
+Grund:
+Das erste Buildfix-Paket pinnte PyInstaller auf 6.11.1. Diese Version unterstuetzt Python 3.14 nicht.
+Auf dem Testsystem wurde mit Python 3.14 gebaut, daher konnte PyInstaller nicht installiert werden.
+
+Aenderung:
+- Python < 3.14: PyInstaller 6.11.1 + pyinstaller-hooks-contrib 2024.10
+- Python >= 3.14: PyInstaller 6.20.0
+- build_windows.ps1 und build_windows_onefile.ps1 brechen jetzt sauber ab, wenn ein externer Befehl fehlschlaegt.
+
+Das ist kein neues ODV-Release, sondern nur ein Buildfix fuer v64.

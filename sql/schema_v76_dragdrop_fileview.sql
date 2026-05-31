@@ -1,0 +1,3 @@
+-- ODV v76
+-- Keine zwingende Schemaänderung.
+-- Diese Datei dokumentiert die Version für Migrationen/Installationsprüfung.

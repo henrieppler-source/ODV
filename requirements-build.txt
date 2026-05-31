@@ -1,0 +1,8 @@
+-r requirements.txt
+
+# Build-Abhaengigkeiten mit Python-Version-Marker:
+# - Python 3.8 bis 3.13: bewaehrter PyInstaller-Stand ohne Long-Path-Hook-Problem.
+# - Python 3.14: neuer PyInstaller, weil 6.11.1 Python 3.14 nicht unterstuetzt.
+pyinstaller==6.11.1; python_version < "3.14"
+pyinstaller-hooks-contrib==2024.10; python_version < "3.14"
+pyinstaller==6.20.0; python_version >= "3.14"

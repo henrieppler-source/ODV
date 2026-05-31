@@ -1,0 +1,2 @@
+-- ODV v81: UI-Fix für lokale Fenstergeometrie.
+-- Keine Datenbankänderung erforderlich.

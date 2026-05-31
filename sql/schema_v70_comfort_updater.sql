@@ -1,0 +1,2 @@
+-- v70: Komfort-Updater arbeitet mit den app_update/system_settings-Strukturen aus v69.
+-- Keine neue Datenbankstruktur erforderlich.

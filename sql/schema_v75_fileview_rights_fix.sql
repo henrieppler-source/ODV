@@ -1,0 +1,6 @@
+-- ODV v75
+-- Keine neue Tabellenstruktur erforderlich.
+-- Fachliche Änderung in der App:
+-- 1. Dateien anzeigen: rekursive Anzeige unter 00_ORTSCHRONIK für Bearbeiter/Admins.
+-- 2. Metadatenbearbeitung in Dateien anzeigen nur mit Ordnerschreibrecht, bei eigener Datei oder als Admin/Superadmin.
+-- 3. Fehlt „Erfasst von“, dürfen nur Admin/Superadmin Metadaten ändern.

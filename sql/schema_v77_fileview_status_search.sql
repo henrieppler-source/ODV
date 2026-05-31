@@ -1,0 +1,4 @@
+-- ODV v77 - Dateiansicht/Status/Suche
+-- Keine zwingenden neuen Tabellen.
+-- Hinweis: Archivpfade werden im json_metadata des Dokumentdatensatzes gesichert.
+-- Erforderlich sind weiterhin die Schemas bis v76.

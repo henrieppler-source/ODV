@@ -1,0 +1,3 @@
+-- ODV v82: Uploadmaske/Layout
+-- Keine strukturelle Datenbankänderung erforderlich.
+-- Die Version vereinheitlicht die Upload-Metadatenmaske mit Anzeigen/Bearbeiten.
