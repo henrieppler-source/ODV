@@ -1,6 +1,6 @@
 # ODV-Admin-Handbuch
 
-Stand: v111
+Stand: v112
 
 Dieses Handbuch beschreibt Administration, Betrieb und technische Abläufe der Ortschronisten-Datei-Verwaltung (ODV). Es richtet sich an Admins und Superadmins.
 
@@ -112,7 +112,7 @@ Statuslogik:
 
 # 6. Punkteverwaltung
 
-Die Punkteverwaltung ist seit v111 feldbezogen strukturiert.
+Die Punkteverwaltung ist seit v112 feldbezogen strukturiert.
 
 ## Metadatenregeln
 
@@ -142,6 +142,7 @@ Grundregeln:
 - OpenAI-Befüllung zählt standardmäßig 1 Punkt.
 - Korrigiert ein Bearbeiter einen OpenAI-Wert, wird die OpenAI-Wertung durch manuelle Wertung ersetzt.
 - Punkte erhält der tatsächliche Bearbeiter, also auch ein Admin, wenn er fachlich korrigiert.
+- `Mein Punktestand` lädt beim Öffnen und beim Wechsel des ausgewählten Bearbeiters automatisch neu.
 
 ## Sonderregeln
 
@@ -159,6 +160,22 @@ Die Systemregel `transcription_document` bewertet Transkriptionen von Zeitung, A
 ## Manuelle Zusatzpunkte
 
 Manuelle Zusatzpunkte bleiben eigener Regeltyp. Sie können Tätigkeiten wie Archiv-Recherche, Erschließung, Veranstaltungen oder sonstige Arbeit abbilden.
+
+## Jahresabschluss und Prämienbudget
+
+Die Beitragsauswertung kann pro Kalenderjahr mit einem Prämienbudget arbeiten. Der Superadmin kann:
+
+- einen Prämienbetrag je Jahr hinterlegen,
+- den daraus errechneten Wert je Punkt einsehen,
+- ein Punktejahr abschließen,
+- ein Punktejahr nach Bedarf wieder öffnen.
+
+Ein abgeschlossenes Punktejahr ist gesperrt für:
+
+- Punkteregeln,
+- automatische Punktvergabe,
+- manuelle Punkte,
+- Nachberechnungen.
 
 # 7. Mail, Verteiler und Versandhistorie
 
@@ -321,7 +338,7 @@ Sicherheitsregeln:
 - FTP-Passwort lokal per Windows-DPAPI verschlüsselt.
 - Vor Upload wird Serverdatei gesichert.
 
-## v106 bis v111
+## v106 bis v112
 
 - Serverseitige Datenbankmigrationen über API.
 - Migrationsprotokoll `odv_schema_migrations`.
@@ -347,6 +364,9 @@ Sicherheitsregeln:
 - GPS-Ort ergänzt: Bei Bildern mit EXIF-GPS-Daten wird zusätzlich ein deutscher Ortsname aus den Koordinaten ermittelt, als `GPS-Ort` in den JSON-Metadaten gespeichert und in der Oberfläche schreibgeschützt hinter den Koordinaten angezeigt; `Ort` bleibt als reiner Ortsname bearbeitbar. Dafür ist keine zusätzliche Tabellenspalte notwendig.
 - Upload-Metadatenmaske angepasst: GPS-Koordinaten werden unter `Ort` als reine Anzeige dargestellt; Stichwortvorschläge aus Dateinamen filtern technische Kamera-/Bildtokens und Ziffernfolgen strenger.
 - GPS-Anzeige weiter reduziert: Die GPS-Zeile erscheint nur bei vorhandenen Koordinaten und wird ohne Rahmen oder Hervorhebung dargestellt.
+- Historie ausgelagert: Historie-Tab, Aktualisierung, Detailanzeige und `Historie gesehen` liegen in `app/history_manager.py`.
+- UI-Zustand ausgelagert: Mausradbindung, Styles, Tabwechsel, Fenstergeometrie, Pane-Positionen und Spaltenbreiten liegen in `app/ui_state.py`.
+- Punktejahre steuerbar gemacht: Jahresbudget, Jahresabschluss und Wiederöffnung liegen in `app/points_year_manager.py`; abgeschlossene Jahre sperren Punkte-Regeln, manuelle Punkte und Nachberechnungen.
 
 ## Dokumentationsregel
 

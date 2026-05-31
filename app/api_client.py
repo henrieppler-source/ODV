@@ -217,6 +217,21 @@ class APIClient:
     def points_summary(self, token: str, year: int) -> dict:
         return self.request("GET", f"/points/summary?year={int(year)}", token=token)
 
+    def points_year_status(self, token: str, year: int) -> dict:
+        return self.request("GET", f"/points/year-status?year={int(year)}", token=token)
+
+    def set_points_year_budget(self, token: str, year: int, budget: str | float | int) -> dict:
+        return self.request("PUT", "/points/year-budget", {"year": int(year), "budget": budget}, token=token)
+
+    def close_points_year(self, token: str, year: int, note: str = "") -> dict:
+        payload = {"year": int(year)}
+        if note:
+            payload["note"] = note
+        return self.request("POST", "/points/year-close", payload, token=token)
+
+    def reopen_points_year(self, token: str, year: int) -> dict:
+        return self.request("POST", "/points/year-reopen", {"year": int(year)}, token=token)
+
     def my_points(self, token: str, year: int, user_id: int | None = None) -> dict:
         params = {"year": int(year)}
         if user_id is not None:

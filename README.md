@@ -1,8 +1,8 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v111
+# Ortschronisten-Datei-Verwaltung (ODV) v112
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v111`
+- Aktuelle App-Version laut `app/main.py`: `v112`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
@@ -22,7 +22,7 @@ Wir machen im ODV-Projekt weiter:
 C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v111.
+Aktuelle App-Version laut README/Code: v112.
 Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
 Bearbeiterrelevante Änderungen bitte zusätzlich in Handbuch.md, Admin-/Betriebsthemen zusätzlich in Admin-Handbuch.md dokumentieren.
 Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
@@ -104,6 +104,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Metadatenpunkte werden als Regel aus Metadatenfeld und Wertung gebildet, z. B. `copyright_author_manual` oder `copyright_author_openAI`.
 - Metadatenregeln enthalten Prüftyp und Mindestwert: `characters`, `words`, `count` oder `none`.
 - Metadatenpunkte vereinheitlicht: Manuell befüllte Metadatenfelder zählen standardmäßig 2 Punkte, durch OpenAI befüllte Metadatenfelder standardmäßig 1 Punkt; bei manueller Korrektur wird die OpenAI-Wertung für dieses Feld durch die manuelle Wertung ersetzt.
+- `Mein Punktestand` aktualisiert sich beim Öffnen sowie beim Wechsel des Bearbeiters automatisch; der manuelle Aktualisieren-Button entfällt.
 - Personenpunkte angepasst: Ein Bild mit Personenmarkierungen zählt 5 Punkte über `persons_image_marked`, zusätzlich zählt jede markierte Person 1 Punkt über `persons_per_person`.
 - Sonderregeln und manuelle Zusatzpunkte werden in der Regelbasis mitgeführt; Sonderregeln bleiben systemseitig vorgegeben.
 - Systemregel `transcription_document` ergänzt: Transkription von Zeitung, Akte oder Urkunde zählt 10 Punkte.
@@ -131,7 +132,20 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Upload-Schritt `Zeit / Ort / Inhalt` umsortiert: Unter dem bearbeitbaren Feld `Ort` kann eine reine GPS-Anzeige erscheinen, danach folgt erst `Ereignis`.
 - GPS-Zeile im Upload-Schritt optisch reduziert: Beschriftung und Wert werden nur bei vorhandenen GPS-Daten angezeigt; die Anzeige hat keinen Rahmen und keine Hervorhebung.
 - Stichwortvorschläge aus Dateinamen verschärft: Technische Kamera-/Bildbestandteile wie `PXL`, `IMG`, Nummern, RAW-/Cover-/MP-Reste und Tokens mit Ziffern werden nicht mehr automatisch als Stichwörter übernommen.
-- Geänderte Dateien: `app/main.py`, `app/config.py`, `app/models.py`, `server/routes.php`, `app/help_docs.py`, `app/system_status.py`, `app/update_manager.py`, `app/admin_operations.py`, `app/points_manager.py`, `app/mail_manager.py`, `app/user_admin.py`, `app/masterdata_manager.py`, `app/config_folders.py`, `app/metadata_helpers.py`, `app/single_instance.py`, `sql/migrations/schema_v111_point_rules_optimization.sql`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`, `scripts/docx_to_md.py`, `scripts/add_md_toc.py`
+- Strukturumbau erweitert: Historie-Tab, Historienaktualisierung, Detailanzeige und `Historie gesehen` nach `app/history_manager.py` ausgelagert.
+- Strukturumbau erweitert: UI-Zustand mit Mausradbindung, Styles, Tabwechsel, Fenstergeometrie, Pane-Positionen und Spaltenbreiten nach `app/ui_state.py` ausgelagert.
+- Geänderte Dateien: `app/main.py`, `app/config.py`, `app/models.py`, `server/routes.php`, `app/help_docs.py`, `app/history_manager.py`, `app/ui_state.py`, `app/system_status.py`, `app/update_manager.py`, `app/admin_operations.py`, `app/points_manager.py`, `app/mail_manager.py`, `app/user_admin.py`, `app/masterdata_manager.py`, `app/config_folders.py`, `app/metadata_helpers.py`, `app/single_instance.py`, `sql/migrations/schema_v111_point_rules_optimization.sql`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`, `scripts/docx_to_md.py`, `scripts/add_md_toc.py`
+
+### v112 - Punktejahre und Jahresabschluss
+
+- Aktuelle App-Version laut `app/main.py`: `v112`.
+- API-Version in `server/routes.php` auf `v112` angehoben.
+- Beitragsauswertung und Jahressteuerung aus `points_manager.py` in `app/points_year_manager.py` ausgelagert; `main.py` bleibt dadurch weiter schlanker.
+- Superadmin kann pro Kalenderjahr einen Prämienbetrag hinterlegen, den Wert je Punkt anzeigen lassen und das Punktejahr abschließen oder wieder öffnen.
+- Abgeschlossene Punktejahre sperren Punkte-Regeln, automatische Punktvergabe, manuelle Punkte, Punkt-Neuberechnungen und die Jahresfreigabe.
+- Die Beitragsauswertung zeigt Budget, Gesamtpunkte, Teilnehmende und den errechneten Wert je Punkt.
+- Serverseitig wird der Abschluss über `point_year_closures` und das Budget über `system_settings` pro Jahr gespeichert.
+- Dokumentation wird mit den neuen Punkten für Jahresabschluss und Prämienbudget fortgeschrieben.
 
 ### v110 - Datenbankmenü und Backup-Rücksicherung
 

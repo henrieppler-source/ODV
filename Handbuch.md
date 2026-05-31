@@ -1,6 +1,6 @@
 # ODV-Handbuch für Bearbeiter
 
-Stand: v111
+Stand: v112
 
 Dieses Handbuch beschreibt die Arbeit mit der Ortschronisten-Datei-Verwaltung (ODV) aus Sicht von Bearbeiterinnen und Bearbeitern. Es konzentriert sich auf die tägliche Erfassung, Pflege und Suche von Dateien und Metadaten.
 
@@ -172,7 +172,7 @@ Wenn ein anderer Benutzer ein Dokument gerade bearbeitet, kann eine Bearbeitungs
 
 Punkte sollen gute Erfassungsarbeit sichtbar machen. Sie sind kein Selbstzweck und ersetzen keine Qualitätsprüfung.
 
-Grundlogik seit v111:
+Grundlogik seit v112:
 
 - Manuell befüllte Metadatenfelder zählen standardmäßig 2 Punkte.
 - Von OpenAI übernommene Metadatenfelder zählen standardmäßig 1 Punkt.
@@ -180,6 +180,7 @@ Grundlogik seit v111:
 - Mindestanforderungen können je Feld über Zeichen, Wörter, Anzahl oder keine Prüfung festgelegt sein.
 - Eine Transkription von Zeitung, Akte oder Urkunde zählt als besondere Transkriptionsleistung mit 10 Punkten.
 - Bild mit Personenmarkierung und einzelne Personenmarkierungen können eigene Punkte auslösen.
+- `Mein Punktestand` aktualisiert sich beim Öffnen und beim Wechsel des Bearbeiters automatisch; ein manueller Aktualisieren-Button ist nicht mehr nötig.
 
 Unterschied zwischen Prüftypen:
 
@@ -261,5 +262,5 @@ Seit v82 wurden vor allem folgende bearbeiterrelevante Themen verbessert:
 - OCR-PDFs werden als verknüpfte Analysefassung geführt.
 - Dateiansicht, Suche und Vorschau wurden robuster.
 - Fenstergrößen und UI-Zustand werden zuverlässiger gespeichert.
-- Punkte wurden in v111 feldbezogen und nachvollziehbarer strukturiert.
+- Punkte wurden in v112 feldbezogen und nachvollziehbarer strukturiert.
 - Das Handbuch ist direkt über `Hilfe > Handbuch` erreichbar.

@@ -18,7 +18,6 @@ import posixpath
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-import tkinter.font as tkfont
 from tkinter import ttk, filedialog, messagebox
 
 try:
@@ -30,7 +29,7 @@ except Exception:  # Drag & Drop bleibt optional; ohne Bibliothek läuft ODV nor
     TK_BASE_CLASS = tk.Tk
 
 from .config import APP_DIR, load_config, save_config
-from .database import init_db, add_history, list_history
+from .database import init_db, add_history
 from .users import (
     load_users,
     find_user_by_username,
@@ -58,12 +57,15 @@ from .app_logging import app_log, app_log_exception
 from .admin_operations import AdminOperationsMixin
 from .config_folders import ConfigFoldersMixin
 from .help_docs import HelpDocsMixin
+from .history_manager import HistoryManagerMixin
 from .mail_manager import MailManagerMixin
 from .masterdata_manager import MasterdataManagerMixin
 from .metadata_helpers import MetadataHelpersMixin
 from .points_manager import PointsManagerMixin
+from .points_year_manager import PointsYearManagerMixin
 from .single_instance import acquire_single_instance_lock, release_single_instance_lock, resource_path
 from .system_status import SystemStatusMixin
+from .ui_state import UiStateMixin
 from .update_manager import AppUpdateMixin
 from .user_admin import UserAdminMixin
 from .upload_tab import UploadTabMixin
@@ -71,9 +73,9 @@ from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 APP_NAME = "Ortschronisten-Datei-Verwaltung"
 APP_SHORT_NAME = "ODV"
-APP_VERSION = "v111"
+APP_VERSION = "v112"
 
-class OrtschronikUploader(HelpDocsMixin, SystemStatusMixin, AppUpdateMixin, AdminOperationsMixin, PointsManagerMixin, MailManagerMixin, UserAdminMixin, MasterdataManagerMixin, ConfigFoldersMixin, MetadataHelpersMixin, UploadTabMixin, TK_BASE_CLASS):
+class OrtschronikUploader(HelpDocsMixin, HistoryManagerMixin, UiStateMixin, SystemStatusMixin, AppUpdateMixin, AdminOperationsMixin, PointsYearManagerMixin, PointsManagerMixin, MailManagerMixin, UserAdminMixin, MasterdataManagerMixin, ConfigFoldersMixin, MetadataHelpersMixin, UploadTabMixin, TK_BASE_CLASS):
     APP_SHORT_NAME = APP_SHORT_NAME
     APP_VERSION = APP_VERSION
     ADMIN_WORK_FOLDER_NAMES = {"01_ABLAGE_ORTSCHRONIK", "06_ARBEIT_DER_ORTSCHRONISTEN"}
@@ -261,41 +263,6 @@ class OrtschronikUploader(HelpDocsMixin, SystemStatusMixin, AppUpdateMixin, Admi
             return os.path.normpath(text)
         except Exception:
             return text.replace("/", "\\") if os.name == "nt" else text.replace("\\", "/")
-
-    def bind_global_mousewheel(self) -> None:
-        """Mausrad soll in dem Bereich scrollen, über dem der Mauszeiger steht."""
-        def scroll_widget(widget, delta: int):
-            current = widget
-            while current is not None:
-                if hasattr(current, "yview"):
-                    try:
-                        current.yview_scroll(delta, "units")
-                        return "break"
-                    except Exception:
-                        pass
-                current = getattr(current, "master", None)
-            return None
-
-        def on_mousewheel(event):
-            try:
-                widget = self.winfo_containing(event.x_root, event.y_root)
-                # Windows/macOS: delta > 0 bedeutet nach oben.
-                delta = -1 if event.delta > 0 else 1
-                return scroll_widget(widget, delta)
-            except Exception:
-                return None
-
-        def on_button4(event):
-            widget = self.winfo_containing(event.x_root, event.y_root)
-            return scroll_widget(widget, -1)
-
-        def on_button5(event):
-            widget = self.winfo_containing(event.x_root, event.y_root)
-            return scroll_widget(widget, 1)
-
-        self.bind_all("<MouseWheel>", on_mousewheel, add="+")
-        self.bind_all("<Button-4>", on_button4, add="+")
-        self.bind_all("<Button-5>", on_button5, add="+")
 
     def known_top_folder_tokens(self) -> set[str]:
         tokens = {self.normalize_folder_token(key) for key, _label in self.FOLDER_GROUPS if not key.endswith("_FOLDER")}
@@ -613,218 +580,6 @@ class OrtschronikUploader(HelpDocsMixin, SystemStatusMixin, AppUpdateMixin, Admi
         help_menu.add_command(label="Nach ODV-Update suchen...", command=lambda: self.check_app_update(interactive=True))
         menubar.add_cascade(label="Hilfe", menu=help_menu)
         self.config(menu=menubar)
-
-    def create_styles(self) -> None:
-        style = ttk.Style(self)
-        style.configure("Dashboard.TFrame", background="#eeeeee")
-        style.configure("Upload.TFrame", background="#eeeeee")
-        style.configure("Viewer.TFrame", background="#eeeeee")
-        style.configure("Admin.TFrame", background="#eeeeee")
-        style.configure("Hint.TLabel", padding=2)
-        try:
-            default_font = tkfont.nametofont("TkDefaultFont")
-            self.tab_font_normal = default_font.copy()
-            self.tab_font_bold = default_font.copy()
-            self.tab_font_bold.configure(weight="bold")
-            style.map("TNotebook.Tab", font=[("selected", self.tab_font_bold), ("!selected", self.tab_font_normal)])
-        except Exception:
-            pass
-
-    def update_tab_labels(self) -> None:
-        if not hasattr(self, "notebook"):
-            return
-        names = {
-            str(self.history_tab): "Dashboard",
-            str(self.upload_tab_container): "Dateien hochladen",
-            str(self.viewer_tab): "Dateien anzeigen",
-            str(self.admin_tab): "Dateien bearbeiten",
-        }
-        try:
-            selected = self.notebook.select()
-            for tab_id in self.notebook.tabs():
-                base = names.get(tab_id, self.notebook.tab(tab_id, "text").replace("● ", ""))
-                self.notebook.tab(tab_id, text=("● " + base if tab_id == selected else "  " + base))
-        except tk.TclError:
-            pass
-
-    def on_notebook_tab_changed(self, _event=None) -> None:
-        self.update_tab_labels()
-        self.update_connection_status()
-        try:
-            selected = self.notebook.select()
-            if selected == str(self.history_tab):
-                self.refresh_history()
-            if selected == str(self.viewer_tab):
-                self.refresh_file_view_folder_choices()
-                self.refresh_file_view_tree()
-                self.clear_file_view_selection()
-            if selected == str(self.admin_tab) and self.is_current_admin():
-                self.refresh_admin_uploads(show_message=False)
-                self.clear_admin_selection()
-        except Exception as exc:
-            app_log_exception("Reiterwechsel konnte nicht vollständig verarbeitet werden", exc)
-
-    def maximize_window(self) -> None:
-        try:
-            self.state("zoomed")  # Windows
-        except tk.TclError:
-            try:
-                self.attributes("-zoomed", True)  # manche Linux/Tk-Versionen
-            except tk.TclError:
-                pass
-
-    def ui_settings(self) -> dict:
-        data = self.config_data.setdefault("ui_settings", {})
-        if not isinstance(data, dict):
-            data = {}
-            self.config_data["ui_settings"] = data
-        return data
-
-    def _window_state_key(self, key: str) -> str:
-        text = str(key or "window").strip().lower()
-        text = "".join(ch if ch.isalnum() else "_" for ch in text).strip("_")
-        return text or "window"
-
-    def _geometry_is_reasonable(self, geometry: str) -> bool:
-        try:
-            import re
-            m = re.match(r"^(\d+)x(\d+)\+(-?\d+)\+(-?\d+)$", str(geometry or ""))
-            if not m:
-                return False
-            w, h, x, y = map(int, m.groups())
-            if w < 300 or h < 180:
-                return False
-            sw = max(800, int(self.winfo_screenwidth() or 0))
-            sh = max(600, int(self.winfo_screenheight() or 0))
-            # Fenster darf nicht vollständig außerhalb des aktuellen Bildschirms liegen.
-            if x > sw - 80 or y > sh - 80 or x < -max(200, w - 80) or y < -max(120, h - 80):
-                return False
-            return True
-        except Exception:
-            return False
-
-    def restore_window_geometry(self, window: tk.Misc, key: str, default: str | None = None) -> None:
-        try:
-            k = self._window_state_key(key)
-            geometry = str(self.ui_settings().get(k, {}).get("geometry", "") or "")
-            if geometry and self._geometry_is_reasonable(geometry):
-                window.geometry(geometry)
-            elif default:
-                window.geometry(default)
-        except Exception as exc:
-            app_log_exception("Fenstergeometrie konnte nicht wiederhergestellt werden", exc, key=key)
-
-    def save_window_geometry(self, window: tk.Misc, key: str) -> None:
-        try:
-            if not bool(window.winfo_exists()):
-                return
-            k = self._window_state_key(key)
-            geometry = window.winfo_geometry()
-            if not self._geometry_is_reasonable(geometry):
-                return
-            settings = self.ui_settings().setdefault(k, {})
-            settings["geometry"] = geometry
-            save_config(self.config_data)
-        except Exception:
-            pass
-
-    def track_window_geometry(self, window: tk.Misc, key: str, default: str | None = None) -> None:
-        """Merkt Größe/Position eines Dialogs lokal je Gerät und stellt sie beim nächsten Öffnen wieder her.
-
-        v81-Fix: In v80 wurde die Geometrie bei einigen Dialogen nicht zuverlässig gespeichert,
-        weil das Speichern erst beim <Destroy>-Ereignis erfolgen sollte. Zu diesem Zeitpunkt liefert
-        Tk je nach Dialog/Schließweg bereits keine belastbare Fenstergeometrie mehr. Deshalb wird
-        die letzte sinnvolle Geometrie nun bereits bei Größen-/Positionsänderungen gepuffert und
-        verzögert lokal gespeichert. Schließen per X und per Schließen-Button funktionieren dadurch
-        gleichermaßen.
-        """
-        k = self._window_state_key(key)
-
-        # Wiederherstellung erst nach dem Aufbau des Dialogs ausführen. Einige Dialoge setzen nach
-        # track_window_geometry() noch eine Standardgröße; die verzögerte Wiederherstellung gewinnt
-        # dann zuverlässig gegen diese Standardgröße.
-        def _restore_later() -> None:
-            try:
-                self.restore_window_geometry(window, k, default)
-            except Exception:
-                pass
-
-        try:
-            window.after(120, _restore_later)
-        except Exception:
-            _restore_later()
-
-        state = {"after_id": None, "last_geometry": ""}
-
-        def _capture_geometry() -> str:
-            try:
-                if not bool(window.winfo_exists()):
-                    return ""
-                window.update_idletasks()
-                geometry = str(window.winfo_geometry() or "")
-                if self._geometry_is_reasonable(geometry):
-                    state["last_geometry"] = geometry
-                return state["last_geometry"]
-            except Exception:
-                return ""
-
-        def _save_geometry_now() -> None:
-            try:
-                geometry = _capture_geometry()
-                if not geometry:
-                    return
-                settings = self.ui_settings().setdefault(k, {})
-                settings["geometry"] = geometry
-                save_config(self.config_data)
-            except Exception:
-                pass
-
-        def _schedule_save(event=None) -> None:
-            try:
-                if event is not None and event.widget is not window:
-                    return
-                _capture_geometry()
-                old_after = state.get("after_id")
-                if old_after:
-                    try:
-                        window.after_cancel(old_after)
-                    except Exception:
-                        pass
-                state["after_id"] = window.after(500, _save_geometry_now)
-            except Exception:
-                pass
-
-        def _close_window() -> None:
-            _save_geometry_now()
-            try:
-                window.destroy()
-            except Exception:
-                pass
-
-        def _save_on_destroy(event=None):
-            try:
-                if event is not None and event.widget is not window:
-                    return
-                _save_geometry_now()
-            except Exception:
-                pass
-
-        try:
-            window.bind("<Configure>", _schedule_save, add="+")
-        except Exception:
-            pass
-        try:
-            window.bind("<Destroy>", _save_on_destroy, add="+")
-        except Exception:
-            pass
-        try:
-            window.protocol("WM_DELETE_WINDOW", _close_window)
-        except Exception:
-            pass
-
-    def on_main_window_close(self) -> None:
-        self.save_window_geometry(self, "main_window")
-        self.destroy()
 
     def api_role_to_local(self, role: str) -> str:
         mapping = {"ortschronist": "Ortschronist", "admin": "Admin", "superadmin": "Superadmin"}
@@ -1544,43 +1299,6 @@ class OrtschronikUploader(HelpDocsMixin, SystemStatusMixin, AppUpdateMixin, Admi
             return True
         messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Admins freigegeben.")
         return False
-
-    def create_history_tab(self) -> None:
-        self.history_tab.columnconfigure(0, weight=1)
-        self.history_tab.rowconfigure(1, weight=1)
-
-        top = ttk.Frame(self.history_tab)
-        top.grid(row=0, column=0, sticky="ew")
-        self.history_scope_var = tk.StringVar(value=self.config_data.get("history_scope", "all"))
-        ttk.Radiobutton(top, text="Alle Aktionen", variable=self.history_scope_var, value="all", command=self.refresh_history).pack(side="left", padx=(0, 10))
-        ttk.Radiobutton(top, text="Nur eigene Aktionen", variable=self.history_scope_var, value="own", command=self.refresh_history).pack(side="left", padx=(0, 20))
-        try:
-            self.history_scope_var.trace_add("write", lambda *_: self.after_idle(self.refresh_history))
-        except Exception:
-            pass
-
-        table_frame = ttk.Frame(self.history_tab)
-        table_frame.grid(row=1, column=0, sticky="nsew", pady=8)
-        table_frame.columnconfigure(0, weight=1)
-        table_frame.rowconfigure(0, weight=1)
-        self.history_tree = ttk.Treeview(table_frame, columns=("time", "user", "action", "details"), show="headings")
-        configured_widths = self.config_data.get("tree_column_widths", {}).get("history", {})
-        for col, label, width in [
-            ("time", "Zeitpunkt", 150),
-            ("user", "Benutzer", 180),
-            ("action", "Aktion", 170),
-            ("details", "Details", 650),
-        ]:
-            self.history_tree.heading(col, text=label, anchor="w")
-            self.history_tree.column(col, width=int(configured_widths.get(col, width)), anchor="w")
-        self.history_tree.grid(row=0, column=0, sticky="nsew")
-        history_vsb = ttk.Scrollbar(table_frame, orient="vertical", command=self.history_tree.yview)
-        history_hsb = ttk.Scrollbar(table_frame, orient="horizontal", command=self.history_tree.xview)
-        self.history_tree.configure(yscrollcommand=history_vsb.set, xscrollcommand=history_hsb.set)
-        history_vsb.grid(row=0, column=1, sticky="ns")
-        history_hsb.grid(row=1, column=0, sticky="ew")
-        self.history_tree.bind("<ButtonRelease-1>", lambda _e: self.save_tree_column_widths(silent=True))
-        self.history_tree.bind("<Double-1>", lambda _e: self.show_history_metadata_details())
 
     def create_file_view_tab(self) -> None:
         self.viewer_tab.columnconfigure(0, weight=1)
@@ -5129,126 +4847,6 @@ class OrtschronikUploader(HelpDocsMixin, SystemStatusMixin, AppUpdateMixin, Admi
         self.refresh_history()
         self.refresh_admin_uploads(show_message=False)
         messagebox.showinfo("Dateiname", "Dateiname wurde gespeichert." if api_ok else f"Dateiname wurde lokal geändert; MySQL nicht aktualisiert:\n{api_msg}")
-
-
-    def save_pane_positions(self) -> None:
-        try:
-            if hasattr(self, "viewer_outer_pane"):
-                self.config_data["viewer_outer_sash"] = int(self.viewer_outer_pane.sashpos(0))
-            if hasattr(self, "viewer_right_pane"):
-                self.config_data["viewer_right_sash"] = int(self.viewer_right_pane.sashpos(0))
-            if hasattr(self, "admin_outer_pane"):
-                self.config_data["admin_outer_sash"] = int(self.admin_outer_pane.sashpos(0))
-            if hasattr(self, "admin_right_pane"):
-                self.config_data["admin_right_sash"] = int(self.admin_right_pane.sashpos(0))
-            save_config(self.config_data)
-        except Exception:
-            pass
-
-    def restore_pane_positions(self) -> None:
-        try:
-            if hasattr(self, "viewer_outer_pane") and self.config_data.get("viewer_outer_sash"):
-                self.viewer_outer_pane.sashpos(0, int(self.config_data.get("viewer_outer_sash")))
-            if hasattr(self, "viewer_right_pane") and self.config_data.get("viewer_right_sash"):
-                self.viewer_right_pane.sashpos(0, int(self.config_data.get("viewer_right_sash")))
-            if hasattr(self, "admin_outer_pane") and self.config_data.get("admin_outer_sash"):
-                self.admin_outer_pane.sashpos(0, int(self.config_data.get("admin_outer_sash")))
-            if hasattr(self, "admin_right_pane") and self.config_data.get("admin_right_sash"):
-                self.admin_right_pane.sashpos(0, int(self.config_data.get("admin_right_sash")))
-        except Exception:
-            pass
-
-
-    def save_tree_column_widths(self, silent: bool = False) -> None:
-        widths = self.config_data.setdefault("tree_column_widths", {})
-        if hasattr(self, "history_tree"):
-            widths["history"] = {col: int(self.history_tree.column(col, "width")) for col in self.history_tree["columns"]}
-        save_config(self.config_data)
-        if not silent:
-            messagebox.showinfo("Ansicht", "Spaltenbreiten wurden gespeichert.")
-
-    # Historie
-    def refresh_history(self) -> None:
-        if not hasattr(self, "history_tree"):
-            return
-        scope = getattr(self, "history_scope_var", tk.StringVar(value="all")).get()
-        self.config_data["history_scope"] = scope
-        save_config(self.config_data)
-        for item in self.history_tree.get_children():
-            self.history_tree.delete(item)
-        self.history_upload_id_by_item = {}
-
-        # Primär: Dashboard aus MySQL/API laden.
-        if self.api_token:
-            try:
-                response = self.api.list_documents(self.api_token, only_own=(scope == "own"))
-                current_name = (self.display_name_var.get().strip() if hasattr(self, "display_name_var") else "")
-                current_user_id = str((self.current_user or {}).get("id", ""))
-                for doc in response.get("documents", []):
-                    if scope == "own":
-                        doc_user_id = str(doc.get("uploaded_by_user_id") or doc.get("user_id") or "")
-                        doc_user_name = str(doc.get("uploaded_by_name") or doc.get("uploaded_by") or "")
-                        # Server filtert für Ortschronisten bereits, Superadmin/Admin bekommen aber ggf. alles.
-                        # Deshalb zusätzlich lokal sauber filtern.
-                        if current_user_id and doc_user_id and doc_user_id != current_user_id:
-                            continue
-                        if not doc_user_id and current_name and doc_user_name and doc_user_name != current_name:
-                            continue
-                    upload_id = str(doc.get("upload_id", "") or "")
-                    time_text = str(doc.get("updated_at") or doc.get("uploaded_at") or doc.get("created_at") or "")
-                    user_text = str(doc.get("uploaded_by_name") or doc.get("uploaded_by") or "")
-                    action_text = f"Status: {doc.get('status', '')}"
-                    details = f"{doc.get('current_filename') or doc.get('original_filename') or ''} | {doc.get('document_type') or ''} | {doc.get('place') or ''}"
-                    iid = self.history_tree.insert("", "end", values=(time_text, user_text, action_text, details))
-                    self.history_upload_id_by_item[iid] = upload_id
-                return
-            except ApiError as exc:
-                app_log_exception("Logout über API fehlgeschlagen", exc)
-
-        # Fallback: lokale Historie, falls API nicht erreichbar ist.
-        current_name = self.display_name_var.get().strip()
-        for entry in list_history():
-            if scope == "own" and entry.user_display_name != current_name:
-                continue
-            iid = self.history_tree.insert("", "end", values=(entry.timestamp, entry.user_display_name, entry.action, entry.details))
-            self.history_upload_id_by_item[iid] = entry.upload_id
-
-    def show_history_metadata_details(self) -> None:
-        if not hasattr(self, "history_tree"):
-            return
-        sel = self.history_tree.selection()
-        if not sel:
-            return
-        upload_id = getattr(self, "history_upload_id_by_item", {}).get(sel[0])
-        details = self.history_tree.item(sel[0], "values")
-        item = None
-        if upload_id and self.api_token:
-            item = self.api_get_document_item(str(upload_id))
-        if not item and upload_id:
-            for meta in load_metadata_files(self.metadata_folder_path()):
-                if str(meta.get("upload_id", "")) == str(upload_id):
-                    item = meta
-                    break
-        text = self.format_metadata_plain({k: v for k, v in item.items() if k != "_metadata_file"}) if item else "Keine passenden Metadaten gefunden.\n\nHistorieneintrag:\n" + " | ".join(str(v) for v in details)
-        dialog = tk.Toplevel(self)
-        dialog.title("Metadaten zum Historieneintrag")
-        try: self.track_window_geometry(dialog, "Metadaten zum Historieneintrag")
-        except Exception: pass
-        dialog.transient(self)
-        dialog.geometry("900x650")
-        dialog.columnconfigure(0, weight=1)
-        dialog.rowconfigure(0, weight=1)
-        txt, frame = self.make_scrolled_text(dialog, height=25, wrap="none")
-        frame.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-        txt.insert("1.0", text)
-        txt.configure(state="disabled")
-        ttk.Button(dialog, text="Schließen", command=dialog.destroy).grid(row=1, column=0, sticky="e", padx=10, pady=(0, 10))
-
-
-    def mark_history_seen(self) -> None:
-        self.config_data["last_seen_history_at"] = datetime.now().isoformat(timespec="seconds")
-        save_config(self.config_data)
-        messagebox.showinfo("Historie", "Historie wurde als gesehen markiert. Im MVP bleibt die Tabelle trotzdem sichtbar.")
 
 
 def main() -> None:

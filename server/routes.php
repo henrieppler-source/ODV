@@ -7,7 +7,7 @@ $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 $path = rtrim($path, '/');
 
-const ODV_API_VERSION = 'v111';
+const ODV_API_VERSION = 'v112';
 
 if (!function_exists('get_json_input')) {
     function get_json_input(): array
@@ -541,6 +541,63 @@ function current_points_year(): int
     return (int)date('Y');
 }
 
+function ensure_point_year_closures_table(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS point_year_closures (
+        year INT PRIMARY KEY,
+        closed_at DATETIME DEFAULT NULL,
+        closed_by_user_id INT DEFAULT NULL,
+        note TEXT DEFAULT NULL,
+        CONSTRAINT fk_point_year_closed_by FOREIGN KEY (closed_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function points_year_budget_key(int $year): string
+{
+    return 'points_year_budget_' . $year;
+}
+
+function point_year_closure(PDO $pdo, int $year): ?array
+{
+    ensure_point_year_closures_table($pdo);
+    $stmt = $pdo->prepare("\n        SELECT pyc.year, pyc.closed_at, pyc.closed_by_user_id, pyc.note, u.display_name AS closed_by_name\n        FROM point_year_closures pyc\n        LEFT JOIN users u ON u.id = pyc.closed_by_user_id\n        WHERE pyc.year = :year\n        LIMIT 1\n    ");
+    $stmt->execute([':year' => $year]);
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+
+function point_year_is_closed(PDO $pdo, int $year): bool
+{
+    return point_year_closure($pdo, $year) !== null;
+}
+
+function points_year_budget(PDO $pdo, int $year): float
+{
+    $value = setting_get($pdo, points_year_budget_key($year), null);
+    if ($value === null || trim($value) === '') {
+        return 0.0;
+    }
+    return (float)str_replace(',', '.', (string)$value);
+}
+
+function points_year_total(PDO $pdo, int $year): array
+{
+    $stmt = $pdo->prepare("\n        SELECT\n            COALESCE(SUM(cp.points), 0) AS total_points,\n            COUNT(DISTINCT cp.user_id) AS participant_count\n        FROM contribution_points cp\n        LEFT JOIN documents d ON d.id = cp.document_id\n        WHERE cp.points_year = :year\n          AND cp.is_confirmed = 1\n          AND (d.status = 'uebernommen' OR cp.is_manual = 1)\n    ");
+    $stmt->execute([':year' => $year]);
+    $row = $stmt->fetch();
+    return [
+        'total_points' => (int)($row['total_points'] ?? 0),
+        'participant_count' => (int)($row['participant_count'] ?? 0),
+    ];
+}
+
+function require_points_year_editable(PDO $pdo, int $year): void
+{
+    if (point_year_is_closed($pdo, $year)) {
+        json_response(['success' => false, 'error' => 'Das Punktejahr ist abgeschlossen und kann nicht mehr geändert werden.'], 409);
+    }
+}
+
 function point_rule_points(PDO $pdo, int $year, string $ruleKey, int $default = 0): int
 {
     $stmt = $pdo->prepare("SELECT points FROM point_rules WHERE year = :year AND rule_key = :rule_key AND is_active = 1 LIMIT 1");
@@ -862,6 +919,10 @@ function add_contribution_point(PDO $pdo, int $documentId, string $uploadId, arr
         return;
     }
     $year = (int)date('Y');
+    if (point_year_is_closed($pdo, $year)) {
+        api_log('warning', 'Punktevergabe blockiert, Jahr ist abgeschlossen', ['document_id' => $documentId, 'upload_id' => $uploadId, 'rule_key' => $ruleKey, 'year' => $year]);
+        return;
+    }
     try {
         $stmt = $pdo->prepare("\n            INSERT INTO contribution_points (document_id, upload_id, user_id, user_display_name, points_year, category, rule_key, reason, source_field, points, created_by_user_id, created_by_name, is_manual, is_confirmed)\n            VALUES (:document_id, :upload_id, :user_id, :user_display_name, :points_year, :category, :rule_key, :reason, :source_field, :points, :created_by_user_id, :created_by_name, :is_manual, 1)\n        ");
         $stmt->execute([
@@ -1039,6 +1100,7 @@ function add_contribution_point_retro(PDO $pdo, int $documentId, string $uploadI
     if ((int)($beneficiary['id'] ?? 0) <= 0) { return 'skipped_no_user'; }
     $documentContext = document_context_for_points($pdo, $documentId);
     if (!$documentContext || !is_point_eligible_document($documentContext)) { return 'skipped_ineligible'; }
+    if (point_year_is_closed($pdo, current_points_year())) { return 'skipped_closed'; }
     if (point_exists_for_document_rule($pdo, $documentId, $ruleKey, $sourceField, false)) { return 'existing'; }
     add_contribution_point($pdo, $documentId, $uploadId, $beneficiary, $createdBy, $category, $ruleKey, $reason, $sourceField, $points, false);
     return 'created';
@@ -1076,7 +1138,7 @@ function admin_review_beneficiary(PDO $pdo, array $doc, string $field, string $n
 
 function recalculate_points_for_document(PDO $pdo, array $doc, array $currentUser): array
 {
-    $stats = ['created' => 0, 'existing' => 0, 'skipped_ineligible' => 0, 'skipped_no_user' => 0, 'skipped_zero' => 0];
+    $stats = ['created' => 0, 'existing' => 0, 'skipped_ineligible' => 0, 'skipped_no_user' => 0, 'skipped_zero' => 0, 'skipped_closed' => 0];
     $documentId = (int)$doc['id'];
     $uploadId = (string)$doc['upload_id'];
     if (!is_point_eligible_document($doc)) {
@@ -3145,6 +3207,7 @@ if ($method === 'PUT' && $path === '/api/point-rules') {
         json_response(['success' => false, 'error' => 'rules muss ein Array sein'], 400);
     }
     $pdo = db();
+    require_points_year_editable($pdo, $year);
     ensure_point_rules_model_columns($pdo);
     $stmt = $pdo->prepare("\n        INSERT INTO point_rules (year, rule_key, label, category, rule_type, source_field, evaluation_source, check_type, min_value, points, is_active, is_system, updated_by_user_id)\n        VALUES (:year, :rule_key, :label, :category, :rule_type, :source_field, :evaluation_source, :check_type, :min_value, :points, :is_active, :is_system, :updated_by_user_id)\n        ON DUPLICATE KEY UPDATE label = VALUES(label), category = VALUES(category), rule_type = VALUES(rule_type), source_field = VALUES(source_field), evaluation_source = VALUES(evaluation_source), check_type = VALUES(check_type), min_value = VALUES(min_value), points = VALUES(points), is_active = VALUES(is_active), is_system = VALUES(is_system), updated_by_user_id = VALUES(updated_by_user_id)\n    ");
     $keptKeys = [];
@@ -3288,6 +3351,78 @@ if ($method === 'GET' && $path === '/api/points/summary') {
     json_response(['success' => true, 'year' => $year, 'summary' => $stmt->fetchAll()]);
 }
 
+if ($method === 'GET' && $path === '/api/points/year-status') {
+    require_role(['admin', 'superadmin']);
+    $year = (int)($_GET['year'] ?? date('Y'));
+    $pdo = db();
+    ensure_point_year_closures_table($pdo);
+    $closure = point_year_closure($pdo, $year);
+    $budget = points_year_budget($pdo, $year);
+    $totals = points_year_total($pdo, $year);
+    $valuePerPoint = ($budget > 0 && $totals['total_points'] > 0) ? round($budget / max(1, $totals['total_points']), 4) : 0.0;
+    json_response([
+        'success' => true,
+        'year' => $year,
+        'closed' => $closure !== null,
+        'closed_at' => $closure['closed_at'] ?? null,
+        'closed_by_user_id' => $closure['closed_by_user_id'] ?? null,
+        'closed_by_name' => $closure['closed_by_name'] ?? null,
+        'note' => $closure['note'] ?? null,
+        'budget' => $budget,
+        'total_points' => $totals['total_points'],
+        'participant_count' => $totals['participant_count'],
+        'value_per_point' => $valuePerPoint,
+    ]);
+}
+
+if ($method === 'PUT' && $path === '/api/points/year-budget') {
+    $currentUser = require_role(['superadmin']);
+    $input = get_json_input();
+    $year = (int)($input['year'] ?? date('Y'));
+    $budgetRaw = $input['budget'] ?? null;
+    if ($budgetRaw === null || $budgetRaw === '') {
+        json_response(['success' => false, 'error' => 'Bitte einen Prämienbetrag angeben'], 400);
+    }
+    $budget = (float)str_replace(',', '.', (string)$budgetRaw);
+    if ($budget < 0) {
+        json_response(['success' => false, 'error' => 'Der Prämienbetrag darf nicht negativ sein'], 400);
+    }
+    $pdo = db();
+    require_points_year_editable($pdo, $year);
+    setting_set($pdo, points_year_budget_key($year), (string)$budget);
+    api_log('info', 'Punktebudget gespeichert', ['by_user_id' => $currentUser['id'] ?? null, 'year' => $year, 'budget' => $budget]);
+    json_response(['success' => true, 'year' => $year, 'budget' => $budget]);
+}
+
+if ($method === 'POST' && $path === '/api/points/year-close') {
+    $currentUser = require_role(['superadmin']);
+    $input = get_json_input();
+    $year = (int)($input['year'] ?? date('Y'));
+    $note = trim((string)($input['note'] ?? ''));
+    $pdo = db();
+    ensure_point_year_closures_table($pdo);
+    $stmt = $pdo->prepare("\n        INSERT INTO point_year_closures (year, closed_at, closed_by_user_id, note)\n        VALUES (:year, NOW(), :closed_by_user_id, :note)\n        ON DUPLICATE KEY UPDATE closed_at = VALUES(closed_at), closed_by_user_id = VALUES(closed_by_user_id), note = VALUES(note)\n    ");
+    $stmt->execute([
+        ':year' => $year,
+        ':closed_by_user_id' => (int)$currentUser['id'],
+        ':note' => $note !== '' ? $note : null,
+    ]);
+    api_log('info', 'Punktejahr abgeschlossen', ['by_user_id' => $currentUser['id'] ?? null, 'year' => $year]);
+    json_response(['success' => true, 'year' => $year, 'closed' => true]);
+}
+
+if ($method === 'POST' && $path === '/api/points/year-reopen') {
+    $currentUser = require_role(['superadmin']);
+    $input = get_json_input();
+    $year = (int)($input['year'] ?? date('Y'));
+    $pdo = db();
+    ensure_point_year_closures_table($pdo);
+    $stmt = $pdo->prepare("DELETE FROM point_year_closures WHERE year = :year");
+    $stmt->execute([':year' => $year]);
+    api_log('info', 'Punktejahr wieder geöffnet', ['by_user_id' => $currentUser['id'] ?? null, 'year' => $year]);
+    json_response(['success' => true, 'year' => $year, 'closed' => false]);
+}
+
 if ($method === 'GET' && preg_match('#^/api/documents/([^/]+)/points$#', $path, $matches)) {
     require_role(['admin', 'superadmin']);
     $uploadId = urldecode($matches[1]);
@@ -3323,6 +3458,7 @@ if ($method === 'POST' && preg_match('#^/api/documents/([^/]+)/manual-points$#',
     if (!$doc) {
         json_response(['success' => false, 'error' => 'Dokument nicht gefunden'], 404);
     }
+    require_points_year_editable($pdo, current_points_year());
     $userStmt = $pdo->prepare("SELECT id, display_name FROM users WHERE id = :id LIMIT 1");
     $userStmt->execute([':id' => $targetUserId]);
     $beneficiary = $userStmt->fetch();
@@ -3375,6 +3511,7 @@ if ($method === 'POST' && $path === '/api/manual-points') {
     $currentUser = require_role(['admin', 'superadmin']);
     $pdo = db();
     ensure_manual_special_points_table($pdo);
+    require_points_year_editable($pdo, (int)date('Y'));
     $input = get_json_input();
     $targetUserId = (int)($input['user_id'] ?? 0);
     $ruleKey = trim((string)($input['rule_key'] ?? 'manual_other'));
@@ -3434,8 +3571,9 @@ if ($method === 'POST' && $path === '/api/points/recalculate-bulk') {
             json_response(['success' => false, 'error' => 'Maximal 500 Dateien pro Lauf erlaubt'], 400);
         }
         $pdo = db();
+        require_points_year_editable($pdo, current_points_year());
         ensure_points_schema_available($pdo);
-        $stats = ['processed' => 0, 'eligible' => 0, 'created' => 0, 'existing' => 0, 'skipped_existing' => 0, 'skipped_ineligible' => 0, 'skipped_no_user' => 0, 'skipped_zero' => 0, 'not_found' => 0];
+        $stats = ['processed' => 0, 'eligible' => 0, 'created' => 0, 'existing' => 0, 'skipped_existing' => 0, 'skipped_ineligible' => 0, 'skipped_no_user' => 0, 'skipped_zero' => 0, 'skipped_closed' => 0, 'not_found' => 0];
         $stmt = $pdo->prepare("SELECT * FROM documents WHERE upload_id = :upload_id LIMIT 1");
         foreach ($uploadIds as $uploadId) {
             $stmt->execute([':upload_id' => $uploadId]);
@@ -3460,6 +3598,7 @@ if ($method === 'POST' && preg_match('#^/api/documents/([^/]+)/points/recalculat
     try {
         $uploadId = urldecode($matches[1]);
         $pdo = db();
+        require_points_year_editable($pdo, current_points_year());
         ensure_points_schema_available($pdo);
         $stmt = $pdo->prepare("SELECT * FROM documents WHERE upload_id = :upload_id LIMIT 1");
         $stmt->execute([':upload_id' => $uploadId]);
@@ -3637,7 +3776,6 @@ if ($method === 'POST' && $path === '/api/admin/reset-database') {
     }
     $deleted = [];
     try {
-        $pdo->beginTransaction();
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
         $tables = ['contribution_points', 'point_events', 'point_adjustments', 'document_persons', 'document_history', 'documents'];
         if ($includeMail) { $tables[] = 'mail_history'; }
@@ -3649,12 +3787,10 @@ if ($method === 'POST' && $path === '/api/admin/reset-database') {
             $deleted[$table] = $count;
         }
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 1");
-        $pdo->commit();
         api_log('warning', 'Datenbank-Bewegungsdaten zurückgesetzt', ['by_user_id' => $currentUser['id'], 'deleted' => $deleted, 'include_mail_history' => $includeMail]);
         json_response(['success' => true, 'message' => 'Datenbank-Bewegungsdaten wurden zurückgesetzt', 'deleted' => $deleted]);
     } catch (Throwable $e) {
         try { $pdo->exec("SET FOREIGN_KEY_CHECKS = 1"); } catch (Throwable $ignore) {}
-        if ($pdo->inTransaction()) { $pdo->rollBack(); }
         api_log('error', 'Datenbank-Reset fehlgeschlagen', ['by_user_id' => $currentUser['id'], 'error' => $e->getMessage()]);
         json_response(['success' => false, 'error' => 'Datenbank-Reset fehlgeschlagen: ' . $e->getMessage()], 500);
     }

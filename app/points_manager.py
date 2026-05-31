@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import csv
 from datetime import datetime
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, messagebox
 
 DEFAULT_MANUAL_BONUS_RULES = [
     ("manual_archive_research", "Recherche in Archiven", 0),
@@ -367,6 +366,7 @@ class PointsManagerMixin:
         tree.configure(yscrollcommand=vsb.set)
         vsb.grid(row=2, column=1, sticky="ns")
         row_upload_ids: dict[str, str] = {}
+        load_pending = {"after_id": None}
 
         def load_my_points():
             for iid in tree.get_children():
@@ -394,6 +394,18 @@ class PointsManagerMixin:
             except Exception as exc:
                 messagebox.showerror("Mein Punktestand", str(exc), parent=dialog)
 
+        def schedule_load(*_args):
+            try:
+                old_after = load_pending.get("after_id")
+                if old_after:
+                    try:
+                        dialog.after_cancel(old_after)
+                    except Exception:
+                        pass
+                load_pending["after_id"] = dialog.after(150, load_my_points)
+            except Exception:
+                load_my_points()
+
         def open_selected_from_points(_event=None):
             sel = tree.selection()
             if not sel:
@@ -405,75 +417,18 @@ class PointsManagerMixin:
         tree.bind("<Double-1>", open_selected_from_points)
         if self.is_current_admin():
             try:
-                user_combo.bind("<<ComboboxSelected>>", lambda _e: load_my_points())
+                user_combo.bind("<<ComboboxSelected>>", lambda _e: schedule_load())
             except Exception:
                 pass
+        try:
+            year_var.trace_add("write", lambda *_: schedule_load())
+        except Exception:
+            pass
         buttons = ttk.Frame(dialog, padding=8)
         buttons.grid(row=3, column=0, sticky="ew")
-        ttk.Button(top, text="Aktualisieren", command=load_my_points).pack(side="left", padx=6)
         ttk.Label(buttons, text="Doppelklick öffnet das Dokument in 'Dateien bearbeiten'.", foreground="#555555").pack(side="left")
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right")
         load_my_points()
-
-    def open_points_summary_dialog(self) -> None:
-        if not self.is_current_admin():
-            messagebox.showwarning("Keine Berechtigung", "Auswertungen sind Admins vorbehalten.")
-            return
-        if not self.api_token:
-            messagebox.showwarning("Nicht angemeldet", "Für die Auswertung ist eine API-Anmeldung erforderlich.")
-            return
-        dialog = tk.Toplevel(self)
-        dialog.title("Beitragsauswertung")
-        try: self.track_window_geometry(dialog, "Beitragsauswertung")
-        except Exception: pass
-        dialog.geometry("920x560")
-        dialog.transient(self)
-        dialog.columnconfigure(0, weight=1)
-        dialog.rowconfigure(1, weight=1)
-        top = ttk.Frame(dialog, padding=8)
-        top.grid(row=0, column=0, sticky="ew")
-        ttk.Label(top, text="Kalenderjahr:").pack(side="left")
-        year_var = tk.StringVar(value=str(self._current_points_year()))
-        ttk.Entry(top, textvariable=year_var, width=8).pack(side="left", padx=6)
-        tree = ttk.Treeview(dialog, columns=("user", "place", "upload", "metadata", "persons", "admin", "manual", "total"), show="headings")
-        for col, label, width in [("user", "Benutzer", 220), ("place", "Ort", 120), ("upload", "Upload", 70), ("metadata", "Metadaten", 90), ("persons", "Personen", 80), ("admin", "Admin", 70), ("manual", "Sonder", 70), ("total", "Gesamt", 80)]:
-            tree.heading(col, text=label, anchor="w")
-            tree.column(col, width=width, anchor="w")
-        tree.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
-        vsb = ttk.Scrollbar(dialog, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=vsb.set)
-        vsb.grid(row=1, column=1, sticky="ns")
-        rows_cache = []
-        def load_summary():
-            nonlocal rows_cache
-            for iid in tree.get_children():
-                tree.delete(iid)
-            try:
-                resp = self.api.points_summary(self.api_token, int(year_var.get()))
-                rows_cache = resp.get("summary", []) or []
-                for row in rows_cache:
-                    tree.insert("", "end", values=(row.get("user_display_name", ""), row.get("place", ""), row.get("upload_points", 0), row.get("metadata_points", 0), row.get("persons_points", 0), row.get("admin_points", 0), row.get("manual_points", 0), row.get("total_points", 0)))
-            except Exception as exc:
-                messagebox.showerror("Beitragsauswertung", str(exc))
-        def export_csv():
-            if not rows_cache:
-                messagebox.showinfo("Export", "Keine Daten zum Export vorhanden.")
-                return
-            path = filedialog.asksaveasfilename(title="CSV exportieren", defaultextension=".csv", filetypes=[("CSV", "*.csv")])
-            if not path:
-                return
-            with open(path, "w", newline="", encoding="utf-8-sig") as f:
-                writer = csv.writer(f, delimiter=";")
-                writer.writerow(["Benutzer", "Ort", "Upload", "Metadaten", "Personen", "Admin", "Sonder", "Gesamt"])
-                for row in rows_cache:
-                    writer.writerow([row.get("user_display_name", ""), row.get("place", ""), row.get("upload_points", 0), row.get("metadata_points", 0), row.get("persons_points", 0), row.get("admin_points", 0), row.get("manual_points", 0), row.get("total_points", 0)])
-            messagebox.showinfo("Export", f"CSV wurde gespeichert:\n{path}")
-        buttons = ttk.Frame(dialog, padding=8)
-        buttons.grid(row=2, column=0, sticky="ew")
-        ttk.Button(top, text="Aktualisieren", command=load_summary).pack(side="left", padx=6)
-        ttk.Button(buttons, text="CSV exportieren", command=export_csv).pack(side="left")
-        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right")
-        load_summary()
 
     def open_manual_points_dialog(self) -> None:
         if not self.is_current_admin():
