@@ -61,7 +61,8 @@ from .history_manager import HistoryManagerMixin
 from .mail_manager import MailManagerMixin
 from .masterdata_manager import MasterdataManagerMixin
 from .metadata_helpers import MetadataHelpersMixin
-from .points_manager import PointsManagerMixin
+from .points_special_manager import PointsSpecialManagerMixin
+from .points_rules_manager import PointsRulesManagerMixin
 from .points_year_manager import PointsYearManagerMixin
 from .single_instance import acquire_single_instance_lock, release_single_instance_lock, resource_path
 from .system_status import SystemStatusMixin
@@ -73,9 +74,9 @@ from PIL import Image, ImageTk, ImageDraw, ImageFont
 
 APP_NAME = "Ortschronisten-Datei-Verwaltung"
 APP_SHORT_NAME = "ODV"
-APP_VERSION = "v112"
+APP_VERSION = "v115"
 
-class OrtschronikUploader(HelpDocsMixin, HistoryManagerMixin, UiStateMixin, SystemStatusMixin, AppUpdateMixin, AdminOperationsMixin, PointsYearManagerMixin, PointsManagerMixin, MailManagerMixin, UserAdminMixin, MasterdataManagerMixin, ConfigFoldersMixin, MetadataHelpersMixin, UploadTabMixin, TK_BASE_CLASS):
+class OrtschronikUploader(HelpDocsMixin, HistoryManagerMixin, UiStateMixin, SystemStatusMixin, AppUpdateMixin, AdminOperationsMixin, PointsYearManagerMixin, PointsSpecialManagerMixin, PointsRulesManagerMixin, MailManagerMixin, UserAdminMixin, MasterdataManagerMixin, ConfigFoldersMixin, MetadataHelpersMixin, UploadTabMixin, TK_BASE_CLASS):
     APP_SHORT_NAME = APP_SHORT_NAME
     APP_VERSION = APP_VERSION
     ADMIN_WORK_FOLDER_NAMES = {"01_ABLAGE_ORTSCHRONIK", "06_ARBEIT_DER_ORTSCHRONISTEN"}

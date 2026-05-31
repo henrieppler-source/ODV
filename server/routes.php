@@ -7,7 +7,7 @@ $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 $path = rtrim($path, '/');
 
-const ODV_API_VERSION = 'v112';
+const ODV_API_VERSION = 'v115';
 
 if (!function_exists('get_json_input')) {
     function get_json_input(): array

@@ -1,6 +1,6 @@
 # ODV-Admin-Handbuch
 
-Stand: v112
+Stand: v115
 
 Dieses Handbuch beschreibt Administration, Betrieb und technische Abläufe der Ortschronisten-Datei-Verwaltung (ODV). Es richtet sich an Admins und Superadmins.
 
@@ -112,7 +112,7 @@ Statuslogik:
 
 # 6. Punkteverwaltung
 
-Die Punkteverwaltung ist seit v112 feldbezogen strukturiert.
+Die Punkteverwaltung ist seit v115 feldbezogen strukturiert.
 
 ## Metadatenregeln
 
@@ -243,7 +243,7 @@ Updatefreigabe:
 
 Die Bearbeiter bekommen den Updatehinweis automatisch, sobald die gespeicherte Freigabe eine neuere Version als ihre lokale ODV-Version enthält.
 
-Als Paketname wird künftig `ODV_vXXX.zip` empfohlen, z. B. `ODV_v112.zip`. Das ZIP soll den vollständigen Inhalt von `dist\ODV` enthalten, nicht nur die einzelne `ODV.exe`, damit auch der Updater und alle Programmdateien verteilt werden.
+Als Paketname wird künftig `ODV_vXXX.zip` empfohlen, z. B. `ODV_v115.zip`. Das ZIP soll den vollständigen Inhalt von `dist\ODV` enthalten, nicht nur die einzelne `ODV.exe`, damit auch der Updater und alle Programmdateien verteilt werden.
 
 Versionierung:
 
@@ -338,7 +338,7 @@ Sicherheitsregeln:
 - FTP-Passwort lokal per Windows-DPAPI verschlüsselt.
 - Vor Upload wird Serverdatei gesichert.
 
-## v106 bis v112
+## v106 bis v115
 
 - Serverseitige Datenbankmigrationen über API.
 - Migrationsprotokoll `odv_schema_migrations`.
@@ -352,7 +352,7 @@ Sicherheitsregeln:
 - Paketkonvention für Updates festgelegt: `ODV_vXXX.zip` aus dem vollständigen `dist\ODV`-Ordner.
 - Technischer Strukturumbau begonnen: Hilfe-/Markdown-Anzeige liegt in `app/help_docs.py`, Updateprüfung und Updatefreigabe liegen in `app/update_manager.py`.
 - Datenbank-/Serverbetrieb ausgelagert: Backup, Rücksicherung, Migrationen, Wartungsmodus und `routes.php`-Deployment liegen in `app/admin_operations.py`.
-- Punkteverwaltung ausgelagert: Punkteregeln, Punkteübersichten und manuelle Sonderpunkte liegen in `app/points_manager.py`.
+- Punkteverwaltung aufgeteilt: Jahresauswertung, Sonderpunkte sowie Punkteregeln und `Mein Punktestand` liegen in `app/points_year_manager.py`, `app/points_special_manager.py` und `app/points_rules_manager.py`.
 - Mailbereich ausgelagert: Rundmail, Verteilerverwaltung, Versandhistorie, Nextcloud-Mail-Links und Mailanhänge liegen in `app/mail_manager.py`.
 - Benutzerverwaltung ausgelagert: Benutzer, Rechte sowie Sitzungen/Geräte liegen in `app/user_admin.py`.
 - Stammdatenbereich ausgelagert: Ortsordner, Archiv/Sammlung, vorhandene Dateien einlesen und lokale Sicherungsdateien bereinigen liegen in `app/masterdata_manager.py`.
@@ -367,6 +367,9 @@ Sicherheitsregeln:
 - Historie ausgelagert: Historie-Tab, Aktualisierung, Detailanzeige und `Historie gesehen` liegen in `app/history_manager.py`.
 - UI-Zustand ausgelagert: Mausradbindung, Styles, Tabwechsel, Fenstergeometrie, Pane-Positionen und Spaltenbreiten liegen in `app/ui_state.py`.
 - Punktejahre steuerbar gemacht: Jahresbudget, Jahresabschluss und Wiederöffnung liegen in `app/points_year_manager.py`; abgeschlossene Jahre sperren Punkte-Regeln, manuelle Punkte und Nachberechnungen.
+- Sonderpunkte ausgelagert: Sonderpunkte-Dialoge, Sonderpunkte-Einstellungen und die Sonderpunkte-Übersicht liegen in `app/points_special_manager.py`.
+- Punkteregeln und `Mein Punktestand` ausgelagert: Die Regelverwaltung und die persönliche Punkteansicht liegen jetzt in `app/points_rules_manager.py`.
+- Der frühere Kompatibilitätsrest `app/points_manager.py` wurde entfernt; die Punktefunktionen sind jetzt vollständig auf eigene kleine Module verteilt.
 
 ## Dokumentationsregel
 
