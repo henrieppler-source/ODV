@@ -168,6 +168,12 @@ class APIClient:
     def maintenance_status(self, token: str | None = None) -> dict:
         return self.request("GET", "/admin/maintenance", token=token)
 
+    def operating_mode(self, token: str) -> dict:
+        return self.request("GET", "/admin/operating-mode", token=token)
+
+    def set_operating_mode(self, token: str, mode: str) -> dict:
+        return self.request("POST", "/admin/operating-mode", {"mode": mode}, token=token)
+
     def set_maintenance(self, token: str, minutes: int, message: str = "") -> dict:
         return self.request("POST", "/admin/maintenance", {"action": "schedule", "minutes": int(minutes), "message": message}, token=token)
 

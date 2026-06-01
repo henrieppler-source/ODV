@@ -467,6 +467,22 @@ class MailManagerMixin:
         for user in users:
             user_list.insert("end", f"{user.get('display_name','')} <{user.get('email','')}> ({user.get('place','') or user.get('role','')})")
 
+        def update_group_highlights() -> None:
+            highlighted: set[str] = set()
+            for var, group in group_vars:
+                if not var.get():
+                    continue
+                for member in list(group.get("members", []) or []) + list(group.get("external_members", []) or []):
+                    email = str(member.get("email", "") or "").strip().lower()
+                    if email:
+                        highlighted.add(email)
+            for idx, user in enumerate(users):
+                email = str(user.get("email", "") or "").strip().lower()
+                if email and email in highlighted:
+                    user_list.itemconfig(idx, background="#fff2bf")
+                else:
+                    user_list.itemconfig(idx, background="")
+
         ttk.Label(dialog, text="Verteiler:").grid(row=1, column=0, sticky="nw", padx=10, pady=8)
         group_frame = ttk.Frame(dialog)
         group_frame.grid(row=1, column=1, sticky="ew", padx=10, pady=8)
@@ -476,7 +492,7 @@ class MailManagerMixin:
                 var = tk.BooleanVar(value=False)
                 group_vars.append((var, group))
                 text = f"{group.get('name','')} ({len(group.get('members', []))} Empfänger)"
-                ttk.Checkbutton(group_frame, text=text, variable=var).grid(row=idx // 3, column=idx % 3, sticky="w", padx=(0, 18), pady=2)
+                ttk.Checkbutton(group_frame, text=text, variable=var, command=update_group_highlights).grid(row=idx // 3, column=idx % 3, sticky="w", padx=(0, 18), pady=2)
         else:
             ttk.Label(group_frame, text="Keine Verteiler vorhanden. Über Informationen > Verteiler verwalten anlegen.").grid(row=0, column=0, sticky="w")
 
@@ -750,4 +766,3 @@ class MailManagerMixin:
         ttk.Button(buttons, text="Im Mailprogramm öffnen", command=open_mail_client).pack(side="left", padx=4)
         ttk.Button(buttons, text="Direkt versenden", command=send_direct).pack(side="left", padx=4)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
-

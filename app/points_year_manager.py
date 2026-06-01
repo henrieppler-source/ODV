@@ -47,10 +47,13 @@ class PointsYearManagerMixin:
 
         ttk.Label(budget_frame, text="Prämienbetrag:").grid(row=0, column=0, sticky="w")
         budget_var = tk.StringVar(value="")
-        budget_entry = ttk.Entry(budget_frame, textvariable=budget_var, width=12)
-        budget_entry.grid(row=0, column=1, sticky="w", padx=(6, 16))
+        budget_input_frame = ttk.Frame(budget_frame)
+        budget_input_frame.grid(row=0, column=1, sticky="w", padx=(6, 16))
+        budget_entry = ttk.Entry(budget_input_frame, textvariable=budget_var, width=12)
+        budget_entry.pack(side="left")
+        ttk.Label(budget_input_frame, text="EUR").pack(side="left", padx=(6, 0))
         ttk.Label(budget_frame, text="Wert je Punkt:").grid(row=0, column=2, sticky="w")
-        value_per_point_var = tk.StringVar(value="0,00")
+        value_per_point_var = tk.StringVar(value="0,00 EUR")
         ttk.Label(budget_frame, textvariable=value_per_point_var, foreground="#444444").grid(row=0, column=3, sticky="w", padx=(6, 16))
         ttk.Label(budget_frame, text="Gesamtpunkte:").grid(row=0, column=4, sticky="w")
         total_points_var = tk.StringVar(value="0")
@@ -61,7 +64,7 @@ class PointsYearManagerMixin:
 
         tree = ttk.Treeview(
             dialog,
-            columns=("user", "place", "upload", "metadata", "persons", "admin", "manual", "total"),
+            columns=("user", "place", "upload", "metadata", "persons", "admin", "manual", "total", "value"),
             show="headings",
         )
         for col, label, width in [
@@ -73,6 +76,7 @@ class PointsYearManagerMixin:
             ("admin", "Admin", 70),
             ("manual", "Sonder", 70),
             ("total", "Gesamt", 80),
+            ("value", "Wert", 90),
         ]:
             tree.heading(col, text=label, anchor="w")
             tree.column(col, width=width, anchor="w")
@@ -96,6 +100,9 @@ class PointsYearManagerMixin:
 
         def fmt_budget(value: float) -> str:
             return f"{value:.2f}".replace(".", ",")
+
+        def fmt_money(value: float) -> str:
+            return f"{fmt_budget(value)} EUR"
 
         def update_controls() -> None:
             closed = bool(year_state.get("closed"))
@@ -129,7 +136,9 @@ class PointsYearManagerMixin:
             try:
                 resp = self.api.points_summary(self.api_token, int(year_var.get()))
                 rows_cache = resp.get("summary", []) or []
+                value_per_point = float(year_state.get("value_per_point", 0) or 0)
                 for row in rows_cache:
+                    total = float(row.get("total_points", 0) or 0)
                     tree.insert(
                         "",
                         "end",
@@ -142,6 +151,7 @@ class PointsYearManagerMixin:
                             row.get("admin_points", 0),
                             row.get("manual_points", 0),
                             row.get("total_points", 0),
+                            fmt_money(total * value_per_point),
                         ),
                     )
             except Exception as exc:
@@ -171,7 +181,7 @@ class PointsYearManagerMixin:
                 budget_var.set(fmt_budget(float(resp.get("budget", 0) or 0)))
                 total_points_var.set(str(int(resp.get("total_points", 0) or 0)))
                 participant_count_var.set(str(int(resp.get("participant_count", 0) or 0)))
-                value_per_point_var.set(fmt_budget(float(resp.get("value_per_point", 0) or 0)))
+                value_per_point_var.set(fmt_money(float(resp.get("value_per_point", 0) or 0)))
                 update_controls()
                 load_summary()
             except Exception as exc:
@@ -217,8 +227,10 @@ class PointsYearManagerMixin:
                 return
             with open(path, "w", newline="", encoding="utf-8-sig") as f:
                 writer = csv.writer(f, delimiter=";")
-                writer.writerow(["Benutzer", "Ort", "Upload", "Metadaten", "Personen", "Admin", "Sonder", "Gesamt"])
+                value_per_point = float(year_state.get("value_per_point", 0) or 0)
+                writer.writerow(["Benutzer", "Ort", "Upload", "Metadaten", "Personen", "Admin", "Sonder", "Gesamt", "Wert"])
                 for row in rows_cache:
+                    total = float(row.get("total_points", 0) or 0)
                     writer.writerow([
                         row.get("user_display_name", ""),
                         row.get("place", ""),
@@ -228,6 +240,7 @@ class PointsYearManagerMixin:
                         row.get("admin_points", 0),
                         row.get("manual_points", 0),
                         row.get("total_points", 0),
+                        fmt_money(total * value_per_point),
                     ])
             messagebox.showinfo("Export", f"CSV wurde gespeichert:\n{path}")
 

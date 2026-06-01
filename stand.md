@@ -60,6 +60,8 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Wenn sich die Struktur von Modulen ändert, den neuen Zuschnitt kurz dokumentieren.
 - Wenn sichtbare Bedienung, Statuslogik, Punkte, Updateabläufe, Serverbetrieb oder Admin-Menüs betroffen sind, die Änderung in den Handbüchern mitführen.
 - Der Datenbank-Reset ist ein Bewegungsdaten-Reset: Dokumente, Historie, Personenmarkierungen, Punkte und manuelle Sonderpunkte werden geleert; Stammdaten wie Benutzer, Rechte, Orte, Punkteregeln, Verteiler und Systemeinstellungen bleiben erhalten.
+- Bewegungsdaten-Reset darf nur im Testbetrieb möglich sein; der Produktivbetrieb muss serverseitig gegen Reset geschützt bleiben.
+- Server-Backups sollen aufräumbar bleiben; Standardregel ist, pro Serverdatei nur die letzten drei Sicherungskopien aufzubewahren.
 
 ## Kurzform für die nächste Sitzung
 

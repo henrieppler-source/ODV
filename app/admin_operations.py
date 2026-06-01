@@ -106,6 +106,7 @@ class AdminOperationsMixin:
             with local_path.open("rb") as fh:
                 ftp.storbinary(f"STOR {remote_name}", fh)
             size = ftp.size(remote_name)
+        cleanup_deleted = self.cleanup_old_routes_backups_via_ftp(keep=3)
         return {
             "host": host,
             "remote_dir": remote_dir,
@@ -113,7 +114,69 @@ class AdminOperationsMixin:
             "backup_name": backup_name if backup_created else "",
             "local_path": str(local_path),
             "size": size,
+            "cleanup_deleted": cleanup_deleted,
         }
+
+    def ftp_connection_info(self) -> tuple[str, int, str, str, str, str]:
+        host = str(self.config_data.get("ftp_host", "") or "").strip()
+        port = int(str(self.config_data.get("ftp_port", "21") or "21").strip())
+        user = str(self.config_data.get("ftp_user", "") or "").strip()
+        password = self.stored_ftp_password()
+        remote_path = str(self.config_data.get("ftp_remote_routes_path", "") or "").strip()
+        remote_dir = posixpath.dirname(remote_path)
+        remote_name = posixpath.basename(remote_path)
+        if not host or not user or not password or not remote_dir or not remote_name:
+            raise RuntimeError("FTP-Zugang oder Zielpfad ist unvollständig.")
+        return host, port, user, password, remote_dir, remote_name
+
+    def list_routes_backups_via_ftp(self) -> list[dict]:
+        host, port, user, password, remote_dir, remote_name = self.ftp_connection_info()
+        stem, ext = posixpath.splitext(remote_name)
+        prefix = f"{stem}_backup_"
+        backups: list[dict] = []
+        with ftplib.FTP() as ftp:
+            ftp.connect(host, port, timeout=30)
+            ftp.login(user, password)
+            ftp.cwd(remote_dir)
+            for name in ftp.nlst():
+                if not name.startswith(prefix) or (ext and not name.endswith(ext)):
+                    continue
+                size = 0
+                modified = ""
+                try:
+                    size = int(ftp.size(name) or 0)
+                except Exception:
+                    pass
+                try:
+                    raw = ftp.sendcmd(f"MDTM {name}").split()[-1]
+                    modified = datetime.strptime(raw, "%Y%m%d%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
+                except Exception:
+                    modified = ""
+                backups.append({"name": name, "size": size, "modified": modified})
+        backups.sort(key=lambda item: (str(item.get("modified") or ""), str(item.get("name") or "")), reverse=True)
+        return backups
+
+    def delete_routes_backups_via_ftp(self, names: list[str]) -> int:
+        host, port, user, password, remote_dir, remote_name = self.ftp_connection_info()
+        stem, ext = posixpath.splitext(remote_name)
+        prefix = f"{stem}_backup_"
+        deleted = 0
+        with ftplib.FTP() as ftp:
+            ftp.connect(host, port, timeout=30)
+            ftp.login(user, password)
+            ftp.cwd(remote_dir)
+            for name in names:
+                safe_name = posixpath.basename(str(name))
+                if not safe_name.startswith(prefix) or (ext and not safe_name.endswith(ext)):
+                    continue
+                ftp.delete(safe_name)
+                deleted += 1
+        return deleted
+
+    def cleanup_old_routes_backups_via_ftp(self, keep: int = 3) -> int:
+        backups = self.list_routes_backups_via_ftp()
+        old_names = [str(item.get("name") or "") for item in backups[max(0, keep):]]
+        return self.delete_routes_backups_via_ftp([name for name in old_names if name])
 
     def open_routes_deploy_dialog(self) -> None:
         if self.current_role() != "Superadmin":
@@ -123,10 +186,11 @@ class AdminOperationsMixin:
         dialog.title("Server-routes.php sichern/hochladen")
         try: self.track_window_geometry(dialog, "Server-routes.php sichern/hochladen")
         except Exception: pass
-        dialog.geometry("780x430")
+        dialog.geometry("860x560")
         dialog.transient(self)
         dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(3, weight=1)
 
         local_path = self.resolve_local_routes_path()
         remote_path = str(self.config_data.get("ftp_remote_routes_path", "") or "")
@@ -136,7 +200,7 @@ class AdminOperationsMixin:
         password_saved = bool(str(self.config_data.get("ftp_password_dpapi", "") or "").strip())
 
         text = (
-            "ODV sichert die vorhandene routes.php auf dem Webserver und lädt danach die lokale Datei hoch.\n\n"
+            "ODV sichert die vorhandene routes.php auf dem Webserver, lädt danach die lokale Datei hoch und behält automatisch nur die letzten 3 Server-Backups.\n\n"
             f"Lokal: {local_path}\n"
             f"Server: {server}:{port}\n"
             f"Benutzer: {user}\n"
@@ -147,6 +211,31 @@ class AdminOperationsMixin:
         ttk.Label(dialog, text=text, wraplength=740).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
         result_var = tk.StringVar(value="")
         ttk.Label(dialog, textvariable=result_var, wraplength=740).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+        backup_frame = ttk.LabelFrame(dialog, text="Server-Backups", padding=8)
+        backup_frame.grid(row=3, column=0, sticky="nsew", padx=12, pady=(0, 10))
+        backup_frame.columnconfigure(0, weight=1)
+        backup_frame.rowconfigure(0, weight=1)
+        backup_tree = ttk.Treeview(backup_frame, columns=("name", "modified", "size"), show="headings", selectmode="extended", height=7)
+        for col, label, width in [("name", "Datei", 430), ("modified", "Geändert", 150), ("size", "Größe", 90)]:
+            backup_tree.heading(col, text=label, anchor="w")
+            backup_tree.column(col, width=width, anchor="w")
+        backup_tree.grid(row=0, column=0, sticky="nsew")
+        backup_scroll = ttk.Scrollbar(backup_frame, orient="vertical", command=backup_tree.yview)
+        backup_tree.configure(yscrollcommand=backup_scroll.set)
+        backup_scroll.grid(row=0, column=1, sticky="ns")
+
+        def load_server_backups() -> None:
+            for iid in backup_tree.get_children():
+                backup_tree.delete(iid)
+            try:
+                backups = self.list_routes_backups_via_ftp()
+                for item in backups:
+                    name = str(item.get("name") or "")
+                    backup_tree.insert("", "end", iid=name, values=(name, item.get("modified", ""), item.get("size", "")))
+                result_var.set(f"{len(backups)} Server-Backup(s) gefunden.")
+            except Exception as exc:
+                result_var.set(f"Server-Backups konnten nicht geladen werden: {exc}")
 
         def run_deploy() -> None:
             if not messagebox.askyesno(
@@ -172,7 +261,10 @@ class AdminOperationsMixin:
                         lines.append(f"Backup auf Server: {info.get('backup_name')}")
                     else:
                         lines.append("Kein Server-Backup erstellt, weil keine vorhandene routes.php gefunden wurde.")
+                    if int(info.get("cleanup_deleted", 0) or 0):
+                        lines.append(f"Alte Server-Backups gelöscht: {info.get('cleanup_deleted')}")
                     self.after(0, lambda: result_var.set("\n".join(lines)))
+                    self.after(0, load_server_backups)
                     self.after(0, lambda: messagebox.showinfo("routes.php hochladen", "routes.php wurde hochgeladen.", parent=dialog))
                 except Exception as exc:
                     self.after(0, lambda error=str(exc): result_var.set(f"Upload fehlgeschlagen: {error}"))
@@ -182,10 +274,96 @@ class AdminOperationsMixin:
 
             threading.Thread(target=worker, daemon=True).start()
 
+        def delete_selected_backups() -> None:
+            names = [str(iid) for iid in backup_tree.selection()]
+            if not names:
+                messagebox.showinfo("Server-Backups", "Bitte zuerst Backup-Dateien auswählen.", parent=dialog)
+                return
+            if not messagebox.askyesno("Server-Backups löschen", f"{len(names)} ausgewählte Server-Backup(s) löschen?", parent=dialog):
+                return
+            try:
+                deleted = self.delete_routes_backups_via_ftp(names)
+                load_server_backups()
+                messagebox.showinfo("Server-Backups", f"{deleted} Backup-Datei(en) gelöscht.", parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Server-Backups", f"Backups konnten nicht gelöscht werden:\n{exc}", parent=dialog)
+
+        def cleanup_old_backups() -> None:
+            if not messagebox.askyesno("Server-Backups bereinigen", "Nur die letzten 3 routes.php-Backups behalten und ältere löschen?", parent=dialog):
+                return
+            try:
+                deleted = self.cleanup_old_routes_backups_via_ftp(keep=3)
+                load_server_backups()
+                messagebox.showinfo("Server-Backups", f"{deleted} alte Backup-Datei(en) gelöscht.", parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Server-Backups", f"Backups konnten nicht bereinigt werden:\n{exc}", parent=dialog)
+
         buttons = ttk.Frame(dialog)
-        buttons.grid(row=3, column=0, sticky="e", padx=12, pady=(10, 12))
+        buttons.grid(row=4, column=0, sticky="e", padx=12, pady=(0, 12))
+        ttk.Button(buttons, text="Backups aktualisieren", command=load_server_backups).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Ausgewählte Backups löschen", command=delete_selected_backups).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Nur letzte 3 behalten", command=cleanup_old_backups).pack(side="left", padx=4)
         ttk.Button(buttons, text="Sichern und hochladen", command=run_deploy).pack(side="left", padx=4)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
+        load_server_backups()
+
+    def open_operating_mode_dialog(self) -> None:
+        if self.current_role() != "Superadmin":
+            messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Superadmins freigegeben.")
+            return
+        if not self.api_token:
+            messagebox.showerror("API", "Keine API-Anmeldung vorhanden. Bitte neu anmelden.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("Betriebsmodus")
+        try: self.track_window_geometry(dialog, "Betriebsmodus")
+        except Exception: pass
+        dialog.geometry("560x260")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=1)
+
+        ttk.Label(dialog, text="Betriebsmodus", font=("", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
+        info = (
+            "Im Produktivbetrieb ist das Zurücksetzen der Bewegungsdaten gesperrt.\n"
+            "Im Testbetrieb kann ein Superadmin Bewegungsdaten zurücksetzen."
+        )
+        ttk.Label(dialog, text=info, wraplength=520).grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 10))
+        mode_var = tk.StringVar(value="production")
+        ttk.Radiobutton(dialog, text="Produktivbetrieb", variable=mode_var, value="production").grid(row=2, column=0, sticky="w", padx=12, pady=4)
+        ttk.Radiobutton(dialog, text="Testbetrieb", variable=mode_var, value="test").grid(row=3, column=0, sticky="w", padx=12, pady=4)
+        status_var = tk.StringVar(value="")
+        ttk.Label(dialog, textvariable=status_var, foreground="#444444").grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 8))
+
+        def refresh() -> None:
+            try:
+                resp = self.api.operating_mode(self.api_token)
+                mode_var.set(str(resp.get("mode") or "production"))
+                status_var.set(f"Aktueller Modus: {resp.get('label') or mode_var.get()}")
+            except Exception as exc:
+                status_var.set(f"Betriebsmodus konnte nicht geladen werden: {exc}")
+
+        def save() -> None:
+            mode = mode_var.get()
+            if mode == "test" and not messagebox.askyesno(
+                "Testbetrieb aktivieren",
+                "Testbetrieb aktivieren?\n\nIm Testbetrieb ist das Zurücksetzen der Bewegungsdaten möglich.",
+                parent=dialog,
+            ):
+                return
+            try:
+                resp = self.api.set_operating_mode(self.api_token, mode)
+                status_var.set(f"Aktueller Modus: {resp.get('label') or mode}")
+                messagebox.showinfo("Betriebsmodus", "Betriebsmodus wurde gespeichert.", parent=dialog)
+            except Exception as exc:
+                messagebox.showerror("Betriebsmodus", f"Betriebsmodus konnte nicht gespeichert werden:\n{exc}", parent=dialog)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=5, column=0, sticky="e", padx=12, pady=(4, 12))
+        ttk.Button(buttons, text="Aktualisieren", command=refresh).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Speichern", command=save).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
+        refresh()
 
     def open_database_migrations_dialog(self) -> None:
         if self.current_role() != "Superadmin":
@@ -467,20 +645,26 @@ class AdminOperationsMixin:
             "Gelöscht werden: Dokumente, Metadaten, Personenmarkierungen, Dokumenthistorie, Punkte, Sonderpunkte "
             "und optional Mail-Versandhistorie.\n\n"
             "NICHT gelöscht werden: Benutzer, Rollen, Rechte, Ortsordner, Punkteregeln, Verteiler und Systemeinstellungen.\n"
-            "Nextcloud-Dateien werden nicht gelöscht. Vorhandene Dateien müssen danach bei Bedarf neu eingelesen werden.\n\n"
+            "Lokale JSON-Sicherungsdateien ohne passenden API-Datensatz werden nach dem Reset automatisch gelöscht.\n\n"
             "Bitte vorher ein MySQL-Backup erstellen."
         )
         ttk.Label(dialog, text=warning, wraplength=720, foreground="#8a0000").grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 8))
+        mode_var = tk.StringVar(value="Betriebsmodus wird geprüft ...")
+        mode_allows_reset = {"value": False}
+        ttk.Label(dialog, textvariable=mode_var, foreground="#8a0000").grid(row=1, column=0, sticky="w", padx=12, pady=(0, 6))
         include_mail_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(dialog, text="Mail-Versandhistorie ebenfalls löschen", variable=include_mail_var).grid(row=1, column=0, sticky="w", padx=12, pady=(4, 8))
-        ttk.Label(dialog, text="Zum Bestätigen exakt eingeben: DATENBANK ZURUECKSETZEN").grid(row=2, column=0, sticky="w", padx=12, pady=(8, 4))
+        ttk.Checkbutton(dialog, text="Mail-Versandhistorie ebenfalls löschen", variable=include_mail_var).grid(row=2, column=0, sticky="w", padx=12, pady=(4, 8))
+        ttk.Label(dialog, text="Zum Bestätigen exakt eingeben: DATENBANK ZURUECKSETZEN").grid(row=3, column=0, sticky="w", padx=12, pady=(8, 4))
         confirm_var = tk.StringVar()
-        ttk.Entry(dialog, textvariable=confirm_var).grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 10))
+        ttk.Entry(dialog, textvariable=confirm_var).grid(row=4, column=0, sticky="ew", padx=12, pady=(0, 10))
         result_var = tk.StringVar(value="")
-        ttk.Label(dialog, textvariable=result_var, wraplength=720).grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 8))
+        ttk.Label(dialog, textvariable=result_var, wraplength=720).grid(row=5, column=0, sticky="ew", padx=12, pady=(4, 8))
         buttons = ttk.Frame(dialog)
-        buttons.grid(row=5, column=0, sticky="e", padx=12, pady=12)
+        buttons.grid(row=6, column=0, sticky="e", padx=12, pady=12)
         def run_reset() -> None:
+            if not mode_allows_reset["value"]:
+                messagebox.showwarning("Produktivbetrieb", "Der Datenbank-Reset ist nur im Testbetrieb erlaubt.", parent=dialog)
+                return
             if confirm_var.get().strip() != "DATENBANK ZURUECKSETZEN":
                 messagebox.showwarning("Sicherheitsabfrage", "Der Bestätigungstext stimmt nicht.", parent=dialog)
                 return
@@ -493,12 +677,31 @@ class AdminOperationsMixin:
                 if isinstance(deleted, dict):
                     for key, val in deleted.items():
                         lines.append(f"{key}: {val}")
+                cleanup = self.delete_orphan_local_metadata_backups()
+                lines.append(f"verwaiste lokale JSON-Sicherungen gelöscht: {cleanup.get('deleted', 0)}")
+                errors = cleanup.get("errors", [])
+                if isinstance(errors, list) and errors:
+                    lines.append(f"Fehler bei JSON-Bereinigung: {len(errors)}")
                 result_var.set("\n".join(lines))
                 self.refresh_dashboard()
                 self.refresh_admin_uploads(show_message=False)
-                messagebox.showinfo("Datenbank zurücksetzen", "Zurücksetzen abgeschlossen. Nextcloud-Dateien wurden nicht gelöscht.", parent=dialog)
+                messagebox.showinfo("Datenbank zurücksetzen", "Zurücksetzen abgeschlossen. Verwaiste lokale JSON-Sicherungen wurden bereinigt.", parent=dialog)
             except ApiError as exc:
                 messagebox.showerror("Datenbank zurücksetzen", f"Zurücksetzen fehlgeschlagen:\n{exc}", parent=dialog)
-        ttk.Button(buttons, text="Datenbank zurücksetzen", command=run_reset).pack(side="left", padx=4)
+        reset_button = ttk.Button(buttons, text="Datenbank zurücksetzen", command=run_reset)
+        reset_button.pack(side="left", padx=4)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
 
+        def refresh_mode() -> None:
+            try:
+                resp = self.api.operating_mode(self.api_token)
+                mode = str(resp.get("mode") or "production")
+                label = str(resp.get("label") or mode)
+                mode_allows_reset["value"] = mode == "test"
+                mode_var.set(f"Aktueller Betriebsmodus: {label}")
+                reset_button.configure(state="normal" if mode == "test" else "disabled")
+            except Exception as exc:
+                mode_allows_reset["value"] = False
+                mode_var.set(f"Betriebsmodus konnte nicht geprüft werden: {exc}")
+                reset_button.configure(state="disabled")
+        refresh_mode()

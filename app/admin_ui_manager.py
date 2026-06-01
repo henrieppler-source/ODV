@@ -68,7 +68,7 @@ class AdminUiManagerMixin:
         actions.columnconfigure(1, weight=1)
         self.new_status_label = ttk.Label(actions, text="Dokumentstatus:")
         self.new_status_label.grid(row=0, column=0, sticky="w")
-        self.new_status_var = tk.StringVar(value="rueckfrage")
+        self.new_status_var = tk.StringVar(value="")
         self.new_status_combo = ttk.Combobox(actions, textvariable=self.new_status_var, values=["hochgeladen", "rueckfrage", "geprueft", "uebernommen", "archiviert"], width=18, state="readonly")
         self.new_status_combo.grid(row=0, column=1, sticky="w", padx=6)
         self.new_status_combo.bind("<<ComboboxSelected>>", lambda _e: self.admin_set_status(silent=True))
@@ -170,9 +170,10 @@ class AdminUiManagerMixin:
 
         dirty_var = tk.BooleanVar(value=False)
         saving_var = tk.BooleanVar(value=False)
+        initialized_var = tk.BooleanVar(value=False)
 
         def mark_dirty(*_args) -> None:
-            if not saving_var.get():
+            if initialized_var.get() and not saving_var.get():
                 dirty_var.set(True)
 
         notebook = ttk.Notebook(dialog)
@@ -203,6 +204,7 @@ class AdminUiManagerMixin:
         work_text = tk.Text(general_tab, height=8, width=55)
         work_text.grid(row=3, column=1, columnspan=2, sticky="nsew", padx=6, pady=(10, 6))
         work_text.insert("1.0", "\n".join(sorted(self.admin_work_folder_names)))
+        work_text.edit_modified(False)
         work_text.bind("<<Modified>>", lambda _event: (work_text.edit_modified(False), mark_dirty()))
         general_tab.rowconfigure(3, weight=1)
         ttk.Label(general_tab, text="Ein Ordnername pro Zeile. Es reicht der Ordnername, z. B. 01_ABLAGE_ORTSCHRONIK.", wraplength=620).grid(row=4, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
@@ -470,5 +472,6 @@ class AdminUiManagerMixin:
         ttk.Button(buttons, text="Schließen", command=close_dialog).pack(side="left", padx=6)
         dialog.protocol("WM_DELETE_WINDOW", close_dialog)
         dirty_var.set(False)
+        dialog.after_idle(lambda: (work_text.edit_modified(False), dirty_var.set(False), initialized_var.set(True)))
 
     # Upload

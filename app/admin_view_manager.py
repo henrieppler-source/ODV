@@ -25,5 +25,7 @@ class AdminViewManagerMixin:
                 clear_text_widget(widget, "Keine Datei ausgewählt." if attr == "admin_json_text" else None, disable_after=True)
         if hasattr(self, "admin_new_filename_var"):
             self.admin_new_filename_var.set("")
+        if hasattr(self, "new_status_var"):
+            self.new_status_var.set("")
         if hasattr(self, "admin_document_points_var"):
             self.admin_document_points_var.set("keine Datei ausgewählt")

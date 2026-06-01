@@ -158,6 +158,7 @@ class MainWindowMixin:
         if self.current_role() == "Superadmin":
             admin_menu = tk.Menu(menubar, tearoff=False)
             admin_menu.add_command(label="Admin-Einstellungen...", command=self.open_admin_settings_dialog)
+            admin_menu.add_command(label="Betriebsmodus...", command=self.open_operating_mode_dialog)
 
             user_admin_menu = tk.Menu(admin_menu, tearoff=False)
             user_admin_menu.add_command(label="Benutzer verwalten...", command=self.open_user_management_dialog)

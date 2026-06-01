@@ -1255,6 +1255,17 @@ function setting_delete(PDO $pdo, string $key): void
     $stmt->execute([':k' => $key]);
 }
 
+function operating_mode(PDO $pdo): string
+{
+    $mode = strtolower(trim((string)setting_get($pdo, 'operating_mode', 'production')));
+    return $mode === 'test' ? 'test' : 'production';
+}
+
+function operating_mode_label(string $mode): string
+{
+    return $mode === 'test' ? 'Testbetrieb' : 'Produktivbetrieb';
+}
+
 
 function ensure_manual_special_points_table(PDO $pdo): void
 {
@@ -3648,6 +3659,26 @@ if ($method === 'GET' && $path === '/api/admin/maintenance') {
     json_response(['success' => true, 'maintenance' => maintenance_state($pdo)]);
 }
 
+if ($method === 'GET' && $path === '/api/admin/operating-mode') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    $mode = operating_mode($pdo);
+    json_response(['success' => true, 'mode' => $mode, 'label' => operating_mode_label($mode)]);
+}
+
+if ($method === 'POST' && $path === '/api/admin/operating-mode') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    $input = get_json_input();
+    $mode = strtolower(trim((string)($input['mode'] ?? 'production')));
+    if (!in_array($mode, ['production', 'test'], true)) {
+        json_response(['success' => false, 'error' => 'Ungültiger Betriebsmodus'], 400);
+    }
+    setting_set($pdo, 'operating_mode', $mode);
+    api_log('warning', 'Betriebsmodus geändert', ['by_user_id' => $currentUser['id'], 'mode' => $mode]);
+    json_response(['success' => true, 'mode' => $mode, 'label' => operating_mode_label($mode)]);
+}
+
 if ($method === 'POST' && $path === '/api/admin/maintenance') {
     $currentUser = require_role(['superadmin']);
     $pdo = db();
@@ -3774,6 +3805,9 @@ if ($method === 'POST' && $path === '/api/admin/reset-database') {
     }
     $includeMail = !empty($input['include_mail_history']);
     $pdo = db();
+    if (operating_mode($pdo) !== 'test') {
+        json_response(['success' => false, 'error' => 'Datenbank-Reset ist nur im Testbetrieb erlaubt.'], 403);
+    }
     try {
         // Sicherheitsnetz: Vor jedem Reset automatisch ein aktuelles Datenbankbackup erstellen.
         create_pdo_database_backup($pdo, $currentUser);

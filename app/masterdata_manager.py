@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox
 
 from .api_client import ApiError
 from .app_logging import app_log, app_log_exception
@@ -226,8 +226,39 @@ class MasterdataManagerMixin:
             if not old:
                 messagebox.showwarning("Archiv/Sammlung", "Bitte zuerst einen Eintrag auswählen.", parent=dialog)
                 return
-            target = simpledialog.askstring("Verschmelzen", f"'{old}' verschmelzen in welche Bezeichnung?", parent=dialog)
-            target = str(target or "").strip()
+            choices = [value for value in self.archive_collection_options() if value.casefold() != old.casefold()]
+            if not choices:
+                messagebox.showinfo("Verschmelzen", "Es gibt keinen weiteren Eintrag als Ziel.", parent=dialog)
+                return
+            merge_dialog = tk.Toplevel(dialog)
+            merge_dialog.title("Verschmelzen")
+            merge_dialog.transient(dialog)
+            merge_dialog.grab_set()
+            merge_dialog.columnconfigure(0, weight=1)
+            target_var = tk.StringVar(value=choices[0])
+            info_var = tk.StringVar()
+
+            def update_info(*_args) -> None:
+                info_var.set(f"Der Eintrag {old} wird mit {target_var.get()} verschmolzen.\nNeue Bezeichnung: {target_var.get()}")
+
+            ttk.Label(merge_dialog, textvariable=info_var, wraplength=520).grid(row=0, column=0, sticky="ew", padx=14, pady=(14, 8))
+            combo = ttk.Combobox(merge_dialog, textvariable=target_var, values=choices, state="readonly", width=56)
+            combo.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 12))
+            buttons2 = ttk.Frame(merge_dialog)
+            buttons2.grid(row=2, column=0, sticky="e", padx=14, pady=(0, 14))
+            result = {"target": ""}
+
+            def accept() -> None:
+                result["target"] = target_var.get().strip()
+                merge_dialog.destroy()
+
+            ttk.Button(buttons2, text="Verschmelzen", command=accept).pack(side="left", padx=4)
+            ttk.Button(buttons2, text="Abbrechen", command=merge_dialog.destroy).pack(side="left", padx=4)
+            target_var.trace_add("write", update_info)
+            update_info()
+            combo.focus_set()
+            dialog.wait_window(merge_dialog)
+            target = result["target"]
             if not target:
                 return
             values = [value for value in self.archive_collection_options() if value.casefold() != old.casefold()]
@@ -672,3 +703,25 @@ class MasterdataManagerMixin:
         ttk.Button(buttons, text="Ausgewählte verwaiste löschen", command=delete_selected_orphans).pack(side="left", padx=6)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right")
         load_backup_rows()
+
+    def delete_orphan_local_metadata_backups(self) -> dict[str, int | list[str]]:
+        """Löscht lokale Metadaten-Sicherungen ohne passenden API-Datensatz."""
+        response = self.api.list_documents(self.api_token, only_own=False)
+        api_ids = {str(doc.get("upload_id", "")) for doc in response.get("documents", []) if doc.get("upload_id")}
+        deleted = 0
+        skipped = 0
+        errors: list[str] = []
+        for item in load_metadata_files(self.metadata_folder_path()):
+            upload_id = str(item.get("upload_id", "") or "")
+            if upload_id and upload_id in api_ids:
+                skipped += 1
+                continue
+            source = Path(str(item.get("_metadata_file", "") or ""))
+            try:
+                if source.exists() and source.suffix.lower() == ".json" and source.name.lower().endswith(".metadata.json"):
+                    source.unlink()
+                    deleted += 1
+            except Exception as exc:
+                errors.append(f"{source}: {exc}")
+        app_log("info", "Verwaiste JSON-Sicherungen automatisch gelöscht", deleted=deleted, skipped=skipped, errors=len(errors))
+        return {"deleted": deleted, "skipped": skipped, "errors": errors}

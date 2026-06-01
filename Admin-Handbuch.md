@@ -35,7 +35,7 @@ Admin-Aufgaben sind:
 - Rundmail- und Verteilerfunktionen betreuen.
 - Systemstatus, Datenbanksicherung, Migrationen und Updates überwachen.
 
-Superadmins haben zusätzlich Zugriff auf Server-Deployment, Datenbankmigrationen, Backup-Rücksicherung und Update-Freigabe.
+Superadmins haben zusätzlich Zugriff auf Server-Deployment, Datenbankmigrationen, Backup-Rücksicherung, Update-Freigabe und den Betriebsmodus.
 
 # 2. Systemarchitektur
 
@@ -202,6 +202,7 @@ Wichtig:
 - Produktive API-Datei ist `routes.php` im Serverpfad der API.
 - ODV kann `server/routes.php` per FTP hochladen.
 - Vor dem Upload wird die vorhandene Serverdatei mit Version und Zeitstempel gesichert.
+- Vorhandene `routes.php`-Backups können im Deployment-Dialog angezeigt und gezielt gelöscht werden; beim Upload bleiben automatisch nur die letzten drei Sicherungen erhalten.
 - FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt gespeichert.
 
 Wenn App- und API-Version abweichen, erhalten Superadmins beim Start einen Hinweis.
@@ -222,12 +223,13 @@ Unterschied:
 
 | Funktion | Wirkung |
 | --- | --- |
-| Datenbank zurücksetzen | Löscht Bewegungs-/Testdaten nach Sicherheitsabfrage, inklusive Dokumente, Historie, Personenmarkierungen, Punkte und manuelle Sonderpunkte. |
+| Datenbank zurücksetzen | Löscht Bewegungs-/Testdaten nach Sicherheitsabfrage, inklusive Dokumente, Historie, Personenmarkierungen, Punkte und manuelle Sonderpunkte; nur im Testbetrieb möglich. |
 | Datenbank sichern | Erstellt serverseitig ein SQL-GZ-Backup. |
 | Backup zurücksichern | Spielt ein vorhandenes Serverbackup zurück. |
 | Migrationen ausführen | Passt Tabellen/Regeln kontrolliert an. |
 
 Bei Migrationen wird zuerst ein Backup erstellt. Bei Tabellenänderungen wird die betroffene Tabelle mit Versionssuffix gesichert, z. B. `point_rules_v110`.
+Nach einem Bewegungsdaten-Reset löscht ODV verwaiste lokale JSON-Metadatensicherungen automatisch. Originaldateien in der Nextcloud werden nicht gelöscht.
 
 # 10. Updates und Versionierung
 
@@ -399,6 +401,11 @@ Sicherheitsregeln:
 - Die App-Klasse ist in `app/uploader.py` gebündelt.
 - Bootstrap, Startdialoge und Fensteraufbau liegen in `app/bootstrap_mixin.py` und `app/main_window_mixin.py`.
 - Diese technische Aufteilung ändert die Bedienung nicht, macht Start und Wartung aber klarer.
+- Betriebsmodus ergänzt: Im Produktivbetrieb ist der Bewegungsdaten-Reset gesperrt, im Testbetrieb bleibt er für Superadmins verfügbar.
+- Reset-Bereinigung ergänzt: Verwaiste lokale JSON-Metadatensicherungen werden nach dem Reset automatisch gelöscht.
+- Server-Deployment erweitert: Server-Backups können angezeigt und gezielt gelöscht werden; beim Upload bleiben automatisch nur die letzten drei Sicherungen erhalten.
+- Beitragsauswertung erweitert: Geldbeträge werden mit `EUR` und zwei Nachkommastellen dargestellt; je Nutzer wird der berechnete Wert angezeigt.
+- Rundmail-Dialog markiert Benutzer farblich, wenn sie über einen ausgewählten Verteiler enthalten sind.
 
 ## Dokumentationsregel
 

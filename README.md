@@ -110,6 +110,14 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Die technische Aufteilung ändert die Bedienung nicht, macht Start und Wartung aber klarer.
 - Handbuch und Admin-Handbuch sind auf `v119` fortgeschrieben und im Hilfe-Menü direkt als Markdown-Ansicht verfügbar.
 - Datenbank-Reset korrigiert: `manual_special_points` wird nun wie im Dialog beschrieben zusammen mit den übrigen Bewegungsdaten geleert; Benutzer, Rechte, Ortsordner, Punkteregeln, Verteiler und Systemeinstellungen bleiben erhalten.
+- Betriebsmodus ergänzt: Superadmins können zwischen Produktivbetrieb und Testbetrieb wechseln; Bewegungsdaten-Reset ist serverseitig nur im Testbetrieb erlaubt.
+- Nach einem Bewegungsdaten-Reset werden verwaiste lokale JSON-Metadatensicherungen automatisch gelöscht; Originaldateien bleiben unangetastet.
+- Server-Deployment-Dialog erweitert: vorhandene `routes.php`-Backups auf dem Server werden angezeigt, können gezielt gelöscht werden, und beim Upload bleiben automatisch nur die letzten drei Sicherungen erhalten.
+- Stammdaten-Verschmelzung für Archiv/Sammlung führt jetzt per Auswahlfeld auf einen bestehenden Zieleintrag.
+- Beitragsauswertung erweitert: Prämienbetrag zeigt `EUR`, Geldbeträge werden mit zwei Nachkommastellen angezeigt, und je Nutzer wird der berechnete Wert nach Gesamtpunkten angezeigt und exportiert.
+- Rundmail-Dialog markiert Benutzer farblich, die über ausgewählte Verteiler enthalten sind.
+- Admin-Bearbeitung zeigt den Dokumentstatus leer an, solange kein Dokument ausgewählt ist.
+- Admin-Einstellungen melden beim unveränderten Öffnen und Schließen keine ungespeicherten Änderungen mehr.
 - Geänderte Dateien: `app/app_constants.py`, `app/main.py`, `app/bootstrap_mixin.py`, `app/main_window_mixin.py`, `app/uploader.py`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`
 
 ### v118 - Dateiansicht nach Auswahl oben
