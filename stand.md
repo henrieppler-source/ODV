@@ -26,6 +26,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Standardtext-Auswahl im Rundmail-Dialog soll direkt über dem Textfeld stehen; beim Wechsel wird der Text ersetzt.
 - Im Rundmail-Dialog kann optional eine `Antwort an`-Adresse gepflegt werden, während der Versand über `info@ortschronik.info` läuft.
 - Für Mailtexte ist das leichte Markup `/bText/b` erlaubt und wird beim Direktversand als HTML-Fettschrift gerendert.
+- Die Mail-UI zeigt `Versandart Anlagen`; Nextcloud-Dateien werden bei Link-Versand automatisch als Downloadlink erzeugt, andere Dateien werden normal angehängt.
 - Mailrechte: Admin/Superadmin dürfen an alle senden und externe Empfänger nutzen; Bearbeiter nur an Benutzer und orts-/eigene Verteiler, ohne externe Empfänger.
 - Verteiler speichern den Ersteller; normale Nutzer sehen nur eigene und ortsbezogene Verteiler, Admin/Superadmin nur von Admin/Superadmin angelegte Verteiler.
 - Versandhistorie bleibt benutzerbezogen und zeigt jeweils nur die eigenen Sendungen.

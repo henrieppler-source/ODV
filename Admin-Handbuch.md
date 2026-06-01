@@ -191,6 +191,7 @@ ODV unterstützt Rundmails und Informationen mit:
 - Standard-Mail-Texte können im Superadmin-Menü unter `Admin > Mail > Standard-Mail-Texte...` gepflegt und in der Rundmail geladen werden.
 - Der Standardtext wird direkt über dem eigentlichen Textfeld ausgewählt; beim Wechsel wird der Textinhalt ersetzt.
 - Im Rundmail-Dialog kann optional eine `Antwort an`-Adresse gesetzt werden. Der Versand erfolgt weiterhin über `info@ortschronik.info`, die Antwort kann aber an die gewählte Adresse gehen.
+- Die Anzeige heißt jetzt `Versandart Anlagen`. Bei Nextcloud-Dateien wird im Link-Versand automatisch ein Downloadlink erzeugt, Dateien außerhalb der Nextcloud werden unabhängig davon normal angehängt.
 - Im Rundmail-Text und in Vorlagen ist das leichte Markup `/bText/b` erlaubt; beim Direktversand wird es als HTML-Fettschrift gerendert.
 - In der Benutzerverwaltung können optional Nextcloud-Benutzername und -Passwort für spätere Anbindungen erfasst werden; aktuell dienen sie nur als Vorbereitung.
 - Versandhistorie.

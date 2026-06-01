@@ -626,6 +626,19 @@ class MailManagerMixin:
                 )
         return self.fallback_nextcloud_folder_link_for_local_path(raw)
 
+    def is_path_under_nextcloud_base(self, file_path: str) -> bool:
+        raw = (file_path or "").strip()
+        base_text = self.base_folder_var.get().strip()
+        if not raw or not base_text:
+            return False
+        try:
+            base = Path(base_text).resolve()
+            path = Path(raw).resolve()
+            path.relative_to(base)
+            return True
+        except Exception:
+            return False
+
     def build_mail_attachment_payload(self, file_path: str) -> dict | None:
         raw = (file_path or "").strip()
         if not raw:
@@ -661,7 +674,7 @@ class MailManagerMixin:
         dialog.rowconfigure(7, weight=1)
 
         ttk.Label(dialog, text="Antwort an:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        reply_to_var = tk.StringVar(value=(self.email_var.get().strip() or (self.current_user.get("email", "") if self.current_user else "") or ""))
+        reply_to_var = tk.StringVar(value=((self.current_user.get("email", "") if self.current_user else "") or self.email_var.get().strip() or str(self.config_data.get("current_email", "") or "")))
         ttk.Entry(dialog, textvariable=reply_to_var).grid(row=0, column=1, sticky="ew", padx=10, pady=8)
 
         ttk.Label(dialog, text="Verteiler:").grid(row=1, column=0, sticky="nw", padx=10, pady=8)
@@ -724,7 +737,7 @@ class MailManagerMixin:
         subject_var = tk.StringVar(value="Information der Ortschronisten")
         ttk.Entry(dialog, textvariable=subject_var).grid(row=5, column=1, sticky="ew", padx=10, pady=8)
 
-        send_mode_var = tk.StringVar(value="none")
+        send_mode_var = tk.StringVar(value="attachment")
         if is_admin:
             ttk.Label(dialog, text="Standardtext:").grid(row=6, column=0, sticky="w", padx=10, pady=8)
             template_var = tk.StringVar()
@@ -756,18 +769,25 @@ class MailManagerMixin:
         doc_frame = ttk.Frame(dialog)
         doc_frame.grid(row=8, column=1, sticky="ew", padx=10, pady=8)
         doc_frame.columnconfigure(1, weight=1)
+        doc_frame.rowconfigure(1, weight=1)
         ttk.Button(doc_frame, text="+", width=3, command=lambda: add_doc()).grid(row=0, column=0, padx=(0, 6), sticky="w")
         ttk.Entry(doc_frame, textvariable=doc_path_var).grid(row=0, column=1, sticky="ew")
         ttk.Button(doc_frame, text="Entfernen", command=lambda: remove_selected_doc()).grid(row=0, column=2, padx=(6, 0))
         ttk.Button(doc_frame, text="Leeren", command=lambda: clear_docs()).grid(row=0, column=3, padx=(6, 0))
         doc_list = tk.Listbox(doc_frame, height=4, exportselection=False)
-        doc_list.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(6, 0))
-        ttk.Label(doc_frame, text="Mit + können Dokumente nacheinander hinzugefügt werden. Bei Downloadlink werden alle ausgewählten Dateien als Linkliste in die Mail geschrieben.", foreground="#555").grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
+        doc_list.grid(row=1, column=0, columnspan=4, sticky="nsew", pady=(6, 0))
+        doc_scroll = ttk.Scrollbar(doc_frame, orient="vertical", command=doc_list.yview)
+        doc_list.configure(yscrollcommand=doc_scroll.set)
+        doc_scroll.grid(row=1, column=4, sticky="ns", pady=(6, 0))
+        ttk.Label(
+            doc_frame,
+            text="Mit + können Dokumente nacheinander hinzugefügt werden. Nextcloud-Dateien werden bei Downloadlink als Link versendet, andere Dateien immer als normale Anlage.",
+            foreground="#555",
+        ).grid(row=2, column=0, columnspan=5, sticky="w", pady=(4, 0))
 
-        ttk.Label(dialog, text="Versandart:").grid(row=9, column=0, sticky="w", padx=10, pady=8)
+        ttk.Label(dialog, text="Versandart Anlagen:").grid(row=9, column=0, sticky="w", padx=10, pady=8)
         mode_frame = ttk.Frame(dialog)
         mode_frame.grid(row=9, column=1, sticky="w", padx=10, pady=8)
-        ttk.Radiobutton(mode_frame, text="Keine Anlage", variable=send_mode_var, value="none").pack(side="left", padx=(0, 18))
         ttk.Radiobutton(mode_frame, text="Nextcloud-Downloadlink versenden", variable=send_mode_var, value="link").pack(side="left", padx=(0, 18))
         ttk.Radiobutton(mode_frame, text="Dokument anhängen", variable=send_mode_var, value="attachment").pack(side="left")
 
@@ -825,14 +845,18 @@ class MailManagerMixin:
                 return ""
             parts = []
             expiry = share_expires_at_var.get().strip()
-            if send_mode_var.get() == "link" and expiry:
+            current_mode = send_mode_var.get()
+            nextcloud_docs = [path for path in selected_docs if self.is_path_under_nextcloud_base(path)]
+            if current_mode == "link" and not nextcloud_docs:
+                current_mode = "attachment"
+            if current_mode == "link" and expiry and nextcloud_docs:
                 parts.append(f"Gültig bis: {expiry}")
                 parts.append("")
             for path in selected_docs:
                 name = Path(path).name
                 link = generated_links.get(path, "")
-                if force_links or send_mode_var.get() == "link":
-                    if not link:
+                if current_mode == "link" and self.is_path_under_nextcloud_base(path):
+                    if force_links or not link:
                         link = self.nextcloud_web_link_for_local_path(path, share_expires_at_var.get().strip())
                         generated_links[path] = link
                 parts.append(f"Datei: {name}")
@@ -846,6 +870,13 @@ class MailManagerMixin:
             link_var.set(block)
             link_text.delete("1.0", "end")
             link_text.insert("1.0", block)
+
+        def effective_send_mode() -> str:
+            if not selected_docs:
+                return "none"
+            if send_mode_var.get() == "link" and any(self.is_path_under_nextcloud_base(path) for path in selected_docs):
+                return "link"
+            return "attachment"
 
         def apply_selected_template() -> None:
             label = template_var.get().strip()
@@ -965,12 +996,13 @@ class MailManagerMixin:
             else:
                 doc_name = Path(doc_path_var.get()).name if doc_path_var.get().strip() else ""
             document_block = link_var.get().strip()
-            if send_mode_var.get() == "none":
+            current_mode = effective_send_mode()
+            if current_mode == "none":
                 document_block = ""
                 doc_name = ""
-            elif selected_docs and send_mode_var.get() == "link" and not document_block:
+            elif selected_docs and current_mode == "link" and not document_block:
                 document_block = build_documents_block(force_links=True)
-            elif selected_docs and send_mode_var.get() == "attachment" and not document_block:
+            elif selected_docs and current_mode == "attachment" and not document_block:
                 document_block = "\n".join(f"Datei: {Path(x).name}" for x in selected_docs)
             rendered = (body.get("1.0", "end")
                         .replace("{dokumente}", document_block)
@@ -987,12 +1019,13 @@ class MailManagerMixin:
             else:
                 doc_name = Path(doc_path_var.get()).name if doc_path_var.get().strip() else ""
             document_block = link_var.get().strip()
-            if send_mode_var.get() == "none":
+            current_mode = effective_send_mode()
+            if current_mode == "none":
                 document_block = ""
                 doc_name = ""
-            elif selected_docs and send_mode_var.get() == "link" and not document_block:
+            elif selected_docs and current_mode == "link" and not document_block:
                 document_block = build_documents_block(force_links=True)
-            elif selected_docs and send_mode_var.get() == "attachment" and not document_block:
+            elif selected_docs and current_mode == "attachment" and not document_block:
                 document_block = "\n".join(f"Datei: {Path(x).name}" for x in selected_docs)
             rendered = (body.get("1.0", "end")
                         .replace("{dokumente}", document_block)
@@ -1005,7 +1038,7 @@ class MailManagerMixin:
 
         def copy_mail_text():
             recipients = collect_recipients()
-            text = f"Betreff: {subject_var.get().strip()}\nEmpfänger/BCC: {'; '.join(recipients)}\nVersandart: {send_mode_var.get()}\n\n{render_body_text()}"
+            text = f"Betreff: {subject_var.get().strip()}\nEmpfänger/BCC: {'; '.join(recipients)}\nVersandart Anlagen: {send_mode_var.get()}\n\n{render_body_text()}"
             self.clipboard_clear()
             self.clipboard_append(text)
             messagebox.showinfo("Kopiert", f"Der E-Mail-Text wurde in die Zwischenablage kopiert.\nEmpfänger: {len(recipients)}", parent=dialog)
@@ -1015,7 +1048,9 @@ class MailManagerMixin:
             if not recipients:
                 messagebox.showwarning("Rundmail", "Bitte mindestens einen Empfänger auswählen oder manuell eintragen.", parent=dialog)
                 return
-            if send_mode_var.get() == "attachment":
+            current_mode = effective_send_mode()
+            has_local_attachments = any(not self.is_path_under_nextcloud_base(path) for path in selected_docs)
+            if selected_docs and (current_mode == "attachment" or has_local_attachments):
                 messagebox.showinfo("Hinweis", "Anhänge können über mailto nicht zuverlässig automatisch übernommen werden.\nBitte für Anhänge den direkten Versand nutzen oder Dateien im Mailprogramm manuell anhängen.", parent=dialog)
             subject = urllib.parse.quote(subject_var.get().strip())
             mail_body = urllib.parse.quote(render_body_text())
@@ -1041,11 +1076,15 @@ class MailManagerMixin:
             if not subject:
                 messagebox.showwarning("Rundmail", "Bitte einen Betreff erfassen.", parent=dialog)
                 return
-            first_doc = selected_docs[0] if selected_docs else doc_path_var.get().strip()
-            if send_mode_var.get() in {"link", "attachment"} and not first_doc:
-                messagebox.showerror("Anlage", "Bitte mindestens eine Datei auswählen oder Versandart 'Keine Anlage' verwenden.", parent=dialog)
-                return
-            if send_mode_var.get() == "link" and first_doc:
+            selected_mode = effective_send_mode()
+            nc_docs = [path for path in selected_docs if self.is_path_under_nextcloud_base(path)]
+            local_docs = [path for path in selected_docs if not self.is_path_under_nextcloud_base(path)]
+            first_nc_doc = nc_docs[0] if nc_docs else ""
+            first_doc = first_nc_doc or (selected_docs[0] if selected_docs else doc_path_var.get().strip())
+            payload_mode = selected_mode
+            if payload_mode == "link" and not first_nc_doc and selected_docs:
+                payload_mode = "attachment"
+            if payload_mode == "link" and first_nc_doc:
                 try:
                     # Fehlende Links werden beim Direktversand automatisch erzeugt.
                     # Der Button "Downloadlinks erzeugen" bleibt nur Vorschau/Prüfung.
@@ -1053,24 +1092,34 @@ class MailManagerMixin:
                 except Exception as exc:
                     messagebox.showerror("Nextcloud-Link", f"Der Downloadlink konnte nicht erstellt werden:\n{exc}", parent=dialog)
                     return
+            if not selected_docs and not doc_path_var.get().strip():
+                payload_mode = "none"
             payload = {
                 "recipients": recipients,
                 "subject": subject,
                 "body": render_body_text(),
                 "body_html": render_body_html(),
-                "mode": send_mode_var.get(),
-                "link": link_var.get().strip() if send_mode_var.get() == "link" else "",
-                "local_file_path": first_doc if send_mode_var.get() in {"link", "attachment"} else "",
+                "mode": payload_mode,
+                "link": link_var.get().strip() if payload_mode == "link" else "",
+                "local_file_path": first_nc_doc if payload_mode == "link" else "",
                 "local_nextcloud_base": self.base_folder_var.get().strip(),
                 "share_expires_at": share_expires_at_var.get().strip(),
                 "document_name": Path(first_doc).name if first_doc else "",
                 "reply_to": reply_to_var.get().strip(),
             }
-            if send_mode_var.get() == "attachment":
+            files_for_attachment: list[str] = []
+            if payload_mode == "attachment":
                 files_for_attachment = selected_docs if selected_docs else ([doc_path_var.get().strip()] if doc_path_var.get().strip() else [])
-                if not files_for_attachment:
-                    messagebox.showerror("Anlage", "Bitte mindestens eine Datei als Anlage auswählen.", parent=dialog)
-                    return
+            elif payload_mode == "link":
+                files_for_attachment = local_docs
+            if payload_mode == "attachment" and not files_for_attachment:
+                messagebox.showerror("Anlage", "Bitte mindestens eine Datei als Anlage auswählen.", parent=dialog)
+                return
+            if payload_mode == "none":
+                payload["link"] = ""
+                payload["local_file_path"] = ""
+                payload["document_name"] = ""
+            if payload_mode == "attachment":
                 try:
                     attachments = []
                     total_size = 0
@@ -1085,6 +1134,23 @@ class MailManagerMixin:
                         raise ValueError("Die Anlagen sind zusammen größer als 12 MB. Bitte besser als Nextcloud-Link versenden.")
                     payload["attachments"] = attachments
                     payload["attachment"] = attachments[0]
+                except Exception as exc:
+                    messagebox.showerror("Anlage", str(exc), parent=dialog)
+                    return
+            elif payload_mode == "link" and files_for_attachment:
+                try:
+                    attachments = []
+                    total_size = 0
+                    for file_path in files_for_attachment:
+                        item = self.build_mail_attachment_payload(file_path)
+                        if item:
+                            attachments.append(item)
+                            total_size += int(item.get("size", 0) or 0)
+                    if attachments:
+                        if total_size > 12 * 1024 * 1024:
+                            raise ValueError("Die Anlagen sind zusammen größer als 12 MB. Bitte besser als Nextcloud-Link versenden.")
+                        payload["attachments"] = attachments
+                        payload["attachment"] = attachments[0]
                 except Exception as exc:
                     messagebox.showerror("Anlage", str(exc), parent=dialog)
                     return
@@ -1106,7 +1172,7 @@ class MailManagerMixin:
             messagebox.showinfo("Empfänger-Vorschau", f"Empfänger: {len(recipients)}\n\n{preview}", parent=dialog)
 
         def on_send_mode_changed(*_args):
-            if send_mode_var.get() == "attachment":
+            if send_mode_var.get() in {"attachment", "link"}:
                 refresh_document_block(force_links=False)
             elif send_mode_var.get() == "none":
                 link_var.set("")
@@ -1114,7 +1180,7 @@ class MailManagerMixin:
         send_mode_var.trace_add("write", on_send_mode_changed)
 
         buttons = ttk.Frame(dialog)
-        buttons.grid(row=9, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
+        buttons.grid(row=12, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
         ttk.Button(buttons, text="Empfänger prüfen", command=preview_recipients).pack(side="left", padx=4)
         ttk.Button(buttons, text="Text kopieren", command=copy_mail_text).pack(side="left", padx=4)
         ttk.Button(buttons, text="Im Mailprogramm öffnen", command=open_mail_client).pack(side="left", padx=4)

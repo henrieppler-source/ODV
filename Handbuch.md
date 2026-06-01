@@ -225,6 +225,7 @@ Für Bearbeiter gilt:
 - Keine externen weiteren Empfänger.
 - Keine Auswahl von Standardtexten; diese stehen nur Admin/Superadmin zur Verfügung.
 - Das Feld `Antwort an` ist vorbelegt mit der eigenen Mailadresse.
+- In der Versandart werden Nextcloud-Dateien als Downloadlink, andere ausgewählte Dateien als normale Anlage behandelt.
 - Die Versandhistorie zeigt nur die eigenen Sendungen.
 
 Für Bearbeiter ist wichtig:
