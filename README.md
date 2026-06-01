@@ -117,6 +117,8 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Beitragsauswertung erweitert: Prämienbetrag zeigt `EUR`, Geldbeträge werden mit zwei Nachkommastellen angezeigt, und je Nutzer wird der berechnete Wert nach Gesamtpunkten angezeigt und exportiert.
 - Rundmail-Dialog markiert Benutzer farblich, die über ausgewählte Verteiler enthalten sind.
 - Rundmail kann Vorlagen aus dem neuen Admin-Menüpunkt `Standard-Mail-Texte...` laden; Verfallsdatum wird im Dialog vorbefüllt und kann per Kalender gewählt werden.
+- Im Rundmail-Dialog gibt es nun zusätzlich ein `Antwort an`-Feld; der Direktversand sendet von `info@ortschronik.info`, setzt aber optional Reply-To auf die angegebene Adresse.
+- Für Standardtexte und Mailtext ist ein leichtes Markup mit `/bText/b` möglich, das beim Direktversand fett als HTML-Mail gerendert wird.
 - In der Benutzerverwaltung können optionale Nextcloud-Zugangsdaten für spätere Nutzung erfasst werden.
 - Server/API decken wieder die Ordnerrechte und Ortsordner-Stammdaten ab; Mail-Verteiler laden die externen Empfänger wieder robust mit an.
 - Admin-Bearbeitung zeigt den Dokumentstatus leer an, solange kein Dokument ausgewählt ist.

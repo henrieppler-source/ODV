@@ -416,7 +416,7 @@ function build_nextcloud_remote_path(string $localFilePath, string $localNextclo
     return ltrim($file, '/');
 }
 
-function send_text_mail(string $to, string $subject, string $body, array $attachments = []): bool
+function send_text_mail(string $to, string $subject, string $body, array $attachments = [], string $replyTo = '', string $bodyHtml = ''): bool
 {
     $recipient = trim($to);
     if ($recipient === '') {
@@ -425,8 +425,12 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
     $encodedSubject = mb_encode_mimeheader($subject, 'UTF-8', 'Q', "\r\n");
     $headers = [
         'MIME-Version: 1.0',
-        'From: Ortschronik <noreply@ortschronik.info>',
+        'From: Ortschronik <info@ortschronik.info>',
     ];
+    $replyTo = trim($replyTo);
+    if ($replyTo !== '' && filter_var($replyTo, FILTER_VALIDATE_EMAIL)) {
+        $headers[] = 'Reply-To: ' . $replyTo;
+    }
 
     $cleanAttachments = [];
     foreach ($attachments as $attachment) {
@@ -436,13 +440,31 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
         $cleanAttachments[] = $attachment;
     }
 
+    $hasHtml = trim($bodyHtml) !== '';
+    $params = '-f info@ortschronik.info';
+
     if ($cleanAttachments) {
-        $boundary = '=_odv_' . bin2hex(random_bytes(12));
+        $boundaryMixed = '=_odv_mixed_' . bin2hex(random_bytes(12));
+        $headers[] = "Content-Type: multipart/mixed; boundary=\"{$boundaryMixed}\"";
         $message = "This is a multi-part message in MIME format.\r\n";
-        $message .= "--{$boundary}\r\n";
-        $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
-        $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-        $message .= $body . "\r\n";
+        $message .= "--{$boundaryMixed}\r\n";
+        if ($hasHtml) {
+            $boundaryAlt = '=_odv_alt_' . bin2hex(random_bytes(12));
+            $message .= "Content-Type: multipart/alternative; boundary=\"{$boundaryAlt}\"\r\n\r\n";
+            $message .= "--{$boundaryAlt}\r\n";
+            $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+            $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+            $message .= $body . "\r\n";
+            $message .= "--{$boundaryAlt}\r\n";
+            $message .= "Content-Type: text/html; charset=UTF-8\r\n";
+            $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+            $message .= $bodyHtml . "\r\n";
+            $message .= "--{$boundaryAlt}--\r\n";
+        } else {
+            $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+            $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+            $message .= $body . "\r\n";
+        }
         foreach ($cleanAttachments as $attachment) {
             $filename = trim((string)($attachment['filename'] ?? 'Anhang'));
             $mime = trim((string)($attachment['mime_type'] ?? 'application/octet-stream'));
@@ -450,21 +472,34 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
             if ($raw === false) {
                 continue;
             }
-            $message .= "--{$boundary}\r\n";
+            $message .= "--{$boundaryMixed}\r\n";
             $message .= "Content-Type: {$mime}; name=\"" . str_replace('"', '\\"', $filename) . "\"\r\n";
             $message .= "Content-Transfer-Encoding: base64\r\n";
             $message .= "Content-Disposition: attachment; filename=\"" . str_replace('"', '\\"', $filename) . "\"\r\n\r\n";
             $message .= chunk_split(base64_encode($raw)) . "\r\n";
         }
+        $message .= "--{$boundaryMixed}--\r\n";
+        return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers), $params);
+    }
+
+    if ($hasHtml) {
+        $boundary = '=_odv_alt_' . bin2hex(random_bytes(12));
+        $headers[] = "Content-Type: multipart/alternative; boundary=\"{$boundary}\"";
+        $message = "This is a multi-part message in MIME format.\r\n";
+        $message .= "--{$boundary}\r\n";
+        $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+        $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+        $message .= $body . "\r\n";
+        $message .= "--{$boundary}\r\n";
+        $message .= "Content-Type: text/html; charset=UTF-8\r\n";
+        $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+        $message .= $bodyHtml . "\r\n";
         $message .= "--{$boundary}--\r\n";
-        $headers[] = "Content-Type: multipart/mixed; boundary=\"{$boundary}\"";
-        $params = '-f noreply@ortschronik.info';
         return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers), $params);
     }
 
     $headers[] = "Content-Type: text/plain; charset=UTF-8";
     $headers[] = "Content-Transfer-Encoding: 8bit";
-    $params = '-f noreply@ortschronik.info';
     return mail($recipient, $encodedSubject, $body, implode("\r\n", $headers), $params);
 }
 

@@ -7,6 +7,7 @@ if ($method === 'POST' && $path === '/api/mails/send') {
     $recipients = sanitize_email_list(is_array($input['recipients'] ?? null) ? $input['recipients'] : []);
     $subject = trim((string)($input['subject'] ?? ''));
     $body = (string)($input['body'] ?? '');
+    $bodyHtml = (string)($input['body_html'] ?? '');
     $mode = trim((string)($input['mode'] ?? 'none'));
     if (!in_array($mode, ['none', 'link', 'attachment'], true)) {
         json_response(['success' => false, 'error' => 'Ungültige Versandart'], 400);
@@ -24,26 +25,38 @@ if ($method === 'POST' && $path === '/api/mails/send') {
     if (trim($body) === '') {
         json_response(['success' => false, 'error' => 'Nachrichtentext fehlt'], 400);
     }
+    $replyTo = trim((string)($input['reply_to'] ?? ''));
     if ($mode === 'link' && $link === '') {
         $localFilePath = trim((string)($input['local_file_path'] ?? ''));
         $localBasePath = trim((string)($input['local_nextcloud_base'] ?? ''));
         if ($localFilePath !== '' && $localBasePath !== '') {
             try {
+                $escapedLink = '';
                 $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
                 $share = create_nextcloud_public_share($remotePath, $shareExpiresAt);
                 $link = $share['download_url'] ?: $share['share_url'];
                 $body = str_replace('{link}', $link, $body);
+                if ($bodyHtml !== '') {
+                    $escapedLink = htmlspecialchars($link, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                    $bodyHtml = str_replace('{link}', $escapedLink, $bodyHtml);
+                }
                 if (strpos($body, $link) === false) {
                     $body .= "
 
 Downloadlink:
 " . $link;
                 }
+                if ($bodyHtml !== '' && stripos($bodyHtml, $escapedLink) === false) {
+                    $bodyHtml .= "<br><br>Downloadlink:<br>" . htmlspecialchars($link, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                }
                 if ($shareExpiresAt !== '') {
                     $body .= "
 
 Gültig bis:
 " . $shareExpiresAt;
+                    if ($bodyHtml !== '') {
+                        $bodyHtml .= "<br><br>Gültig bis:<br>" . htmlspecialchars($shareExpiresAt, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                    }
                 }
             } catch (Throwable $e) {
                 api_log('error', 'Nextcloud-Link für Rundmail konnte nicht erzeugt werden', ['error' => $e->getMessage()]);
@@ -95,7 +108,7 @@ Gültig bis:
     $failed = 0;
     $failedRecipients = [];
     foreach ($recipients as $recipient) {
-        $ok = send_text_mail($recipient, $subject, $body, $attachments);
+        $ok = send_text_mail($recipient, $subject, $body, $attachments, $replyTo, $bodyHtml);
         if ($ok) {
             $sent++;
         } else {
@@ -148,6 +161,7 @@ Gültig bis:
         'failed' => $failed,
         'mode' => $mode,
         'share_expires_at' => $shareExpiresAt,
+        'reply_to' => $replyTo,
         'attachment_count' => count($attachments),
         'subject' => $subject,
     ]);

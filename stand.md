@@ -23,6 +23,9 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Admin-, Betriebs-, Server-, Datenbank- und Update-Themen werden zusätzlich in `Admin-Handbuch.md` dokumentiert.
 - In der Benutzerverwaltung werden optionale Nextcloud-Zugangsdaten nur als Vorbereitung für spätere Nutzung erfasst; im Mailbereich kann ein öffentlicher Nextcloud-Link mit manuell gesetztem Verfallsdatum vorbereitet werden.
 - Der Mailbereich bekommt zusätzlich Standard-Mail-Texte, die im Superadmin-Menü gepflegt und in Rundmails geladen werden können.
+- Standardtext-Auswahl im Rundmail-Dialog soll direkt über dem Textfeld stehen; beim Wechsel wird der Text ersetzt.
+- Im Rundmail-Dialog kann optional eine `Antwort an`-Adresse gepflegt werden, während der Versand über `info@ortschronik.info` läuft.
+- Für Mailtexte ist das leichte Markup `/bText/b` erlaubt und wird beim Direktversand als HTML-Fettschrift gerendert.
 - Die API-Endpunkte für Ordnerrechte und Ortsordner-Stammdaten müssen aktiv bleiben; fehlende Routen wurden wieder ergänzt.
 - Die Handbücher und die README werden bei Änderungen immer zusammen gedacht, damit die Dokumentation nicht auseinanderläuft.
 - Die aktuelle Versionshistorie in der `README.md` muss immer zum Code- und Handbuchstand passen.

@@ -17,6 +17,30 @@ from .config import save_config
 
 
 class MailManagerMixin:
+    def normalize_mail_markup(self, text: str) -> str:
+        """Entfernt die leichte /b-Markierung für reine Textausgaben."""
+        import re
+        text = text or ""
+        return re.sub(r"/b(.*?)/b", lambda m: m.group(1), text, flags=re.S)
+
+    def render_mail_html(self, text: str) -> str:
+        """Erzeugt eine sehr leichte HTML-Darstellung mit /b.../b als fett."""
+        import html
+        import re
+        parts: list[str] = []
+        last = 0
+        raw = text or ""
+        for match in re.finditer(r"/b(.*?)/b", raw, flags=re.S):
+            if match.start() > last:
+                parts.append(html.escape(raw[last:match.start()]))
+            parts.append(f"<strong>{html.escape(match.group(1))}</strong>")
+            last = match.end()
+        if last < len(raw):
+            parts.append(html.escape(raw[last:]))
+        html_text = "".join(parts)
+        html_text = html_text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>\n")
+        return f"<html><body>{html_text}</body></html>"
+
     def get_mail_text_templates(self) -> list[dict]:
         templates = self.config_data.get("mail_text_templates", [])
         if not isinstance(templates, list):
@@ -701,15 +725,9 @@ class MailManagerMixin:
         ttk.Label(fields, text="Betreff:").grid(row=0, column=0, sticky="w", pady=4)
         subject_var = tk.StringVar(value="Information der Ortschronisten")
         ttk.Entry(fields, textvariable=subject_var).grid(row=0, column=1, sticky="ew", pady=4)
-        ttk.Label(fields, text="Standardtext:").grid(row=1, column=0, sticky="w", pady=4)
-        template_var = tk.StringVar()
-        template_names = [item.get("label", "") for item in self.get_mail_text_templates()]
-        template_frame = ttk.Frame(fields)
-        template_frame.grid(row=1, column=1, sticky="ew", pady=4)
-        template_frame.columnconfigure(0, weight=1)
-        template_combo = ttk.Combobox(template_frame, textvariable=template_var, values=template_names, state="readonly")
-        template_combo.grid(row=0, column=0, sticky="ew")
-        ttk.Button(template_frame, text="Laden", width=8, command=lambda: apply_selected_template()).grid(row=0, column=1, padx=(6, 0))
+        ttk.Label(fields, text="Antwort an:").grid(row=1, column=0, sticky="w", pady=4)
+        reply_to_var = tk.StringVar()
+        ttk.Entry(fields, textvariable=reply_to_var).grid(row=1, column=1, sticky="ew", pady=4)
         ttk.Label(fields, text="Verfallsdatum:").grid(row=2, column=0, sticky="w", pady=4)
         share_expires_at_var = tk.StringVar(value=date.today().isoformat())
         expiry_frame = ttk.Frame(fields)
@@ -740,6 +758,15 @@ class MailManagerMixin:
         link_text, link_text_frame = self.make_scrolled_text(link_frame, height=5, wrap="word")
         link_text_frame.grid(row=0, column=0, sticky="ew")
         ttk.Button(link_frame, text="Downloadlinks erzeugen", command=lambda: refresh_document_block(force_links=True)).grid(row=0, column=1, padx=(6, 0), sticky="n")
+        ttk.Label(fields, text="Standardtext:").grid(row=6, column=0, sticky="w", pady=4)
+        template_var = tk.StringVar()
+        template_names = [item.get("label", "") for item in self.get_mail_text_templates()]
+        template_frame = ttk.Frame(fields)
+        template_frame.grid(row=6, column=1, sticky="ew", pady=4)
+        template_frame.columnconfigure(0, weight=1)
+        template_combo = ttk.Combobox(template_frame, textvariable=template_var, values=template_names, state="readonly")
+        template_combo.grid(row=0, column=0, sticky="ew")
+        ttk.Button(template_frame, text="Laden", width=8, command=lambda: apply_selected_template()).grid(row=0, column=1, padx=(6, 0))
 
         def refresh_doc_display():
             doc_list.delete(0, "end")
@@ -826,6 +853,7 @@ class MailManagerMixin:
                 if item.get("label", "") == label:
                     body.delete("1.0", "end")
                     body.insert("1.0", item.get("text", ""))
+                    refresh_document_block(force_links=False)
                     return
 
         template_combo.bind("<<ComboboxSelected>>", lambda _e: apply_selected_template())
@@ -919,7 +947,7 @@ class MailManagerMixin:
                     out.append(email)
             return out
 
-        def render_body() -> str:
+        def render_body_text() -> str:
             if selected_docs:
                 doc_name = ", ".join(Path(x).name for x in selected_docs)
             else:
@@ -939,11 +967,33 @@ class MailManagerMixin:
                         .strip())
             if document_block:
                 rendered += "\n\nAnlagen:\n" + document_block
-            return rendered
+            return self.normalize_mail_markup(rendered)
+
+        def render_body_html() -> str:
+            if selected_docs:
+                doc_name = ", ".join(Path(x).name for x in selected_docs)
+            else:
+                doc_name = Path(doc_path_var.get()).name if doc_path_var.get().strip() else ""
+            document_block = link_var.get().strip()
+            if send_mode_var.get() == "none":
+                document_block = ""
+                doc_name = ""
+            elif selected_docs and send_mode_var.get() == "link" and not document_block:
+                document_block = build_documents_block(force_links=True)
+            elif selected_docs and send_mode_var.get() == "attachment" and not document_block:
+                document_block = "\n".join(f"Datei: {Path(x).name}" for x in selected_docs)
+            rendered = (body.get("1.0", "end")
+                        .replace("{dokumente}", document_block)
+                        .replace("{link}", document_block)
+                        .replace("{datei}", doc_name)
+                        .strip())
+            if document_block:
+                rendered += "\n\nAnlagen:\n" + document_block
+            return self.render_mail_html(rendered)
 
         def copy_mail_text():
             recipients = collect_recipients()
-            text = f"Betreff: {subject_var.get().strip()}\nEmpfänger/BCC: {'; '.join(recipients)}\nVersandart: {send_mode_var.get()}\n\n{render_body()}"
+            text = f"Betreff: {subject_var.get().strip()}\nEmpfänger/BCC: {'; '.join(recipients)}\nVersandart: {send_mode_var.get()}\n\n{render_body_text()}"
             self.clipboard_clear()
             self.clipboard_append(text)
             messagebox.showinfo("Kopiert", f"Der E-Mail-Text wurde in die Zwischenablage kopiert.\nEmpfänger: {len(recipients)}", parent=dialog)
@@ -956,9 +1006,13 @@ class MailManagerMixin:
             if send_mode_var.get() == "attachment":
                 messagebox.showinfo("Hinweis", "Anhänge können über mailto nicht zuverlässig automatisch übernommen werden.\nBitte für Anhänge den direkten Versand nutzen oder Dateien im Mailprogramm manuell anhängen.", parent=dialog)
             subject = urllib.parse.quote(subject_var.get().strip())
-            mail_body = urllib.parse.quote(render_body())
+            mail_body = urllib.parse.quote(render_body_text())
             bcc = urllib.parse.quote(";".join(recipients))
-            url = f"mailto:?bcc={bcc}&subject={subject}&body={mail_body}"
+            reply_to = reply_to_var.get().strip()
+            if reply_to:
+                url = f"mailto:?bcc={bcc}&subject={subject}&body={mail_body}%0D%0A%0D%0AAntwort%20an:%20{urllib.parse.quote(reply_to)}"
+            else:
+                url = f"mailto:?bcc={bcc}&subject={subject}&body={mail_body}"
             try:
                 webbrowser.open(url)
                 app_log("info", "Rundmail im Mailprogramm geöffnet", recipients=len(recipients))
@@ -990,13 +1044,15 @@ class MailManagerMixin:
             payload = {
                 "recipients": recipients,
                 "subject": subject,
-                "body": render_body(),
+                "body": render_body_text(),
+                "body_html": render_body_html(),
                 "mode": send_mode_var.get(),
                 "link": link_var.get().strip() if send_mode_var.get() == "link" else "",
                 "local_file_path": first_doc if send_mode_var.get() in {"link", "attachment"} else "",
                 "local_nextcloud_base": self.base_folder_var.get().strip(),
                 "share_expires_at": share_expires_at_var.get().strip(),
                 "document_name": Path(first_doc).name if first_doc else "",
+                "reply_to": reply_to_var.get().strip(),
             }
             if send_mode_var.get() == "attachment":
                 files_for_attachment = selected_docs if selected_docs else ([doc_path_var.get().strip()] if doc_path_var.get().strip() else [])
