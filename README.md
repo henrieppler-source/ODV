@@ -1,8 +1,8 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v115
+# Ortschronisten-Datei-Verwaltung (ODV) v119
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v115`
+- Aktuelle App-Version laut `app/app_constants.py`: `v119`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
@@ -22,7 +22,7 @@ Wir machen im ODV-Projekt weiter:
 C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v115.
+Aktuelle App-Version laut README/Code: v119.
 Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
 Bearbeiterrelevante Änderungen bitte zusätzlich in Handbuch.md, Admin-/Betriebsthemen zusätzlich in Admin-Handbuch.md dokumentieren.
 Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
@@ -136,6 +136,68 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Strukturumbau erweitert: UI-Zustand mit Mausradbindung, Styles, Tabwechsel, Fenstergeometrie, Pane-Positionen und Spaltenbreiten nach `app/ui_state.py` ausgelagert.
 - Geänderte Dateien: `app/main.py`, `app/config.py`, `app/models.py`, `server/routes.php`, `app/help_docs.py`, `app/history_manager.py`, `app/ui_state.py`, `app/system_status.py`, `app/update_manager.py`, `app/admin_operations.py`, `app/points_year_manager.py`, `app/points_special_manager.py`, `app/points_rules_manager.py`, `app/mail_manager.py`, `app/user_admin.py`, `app/masterdata_manager.py`, `app/config_folders.py`, `app/metadata_helpers.py`, `app/single_instance.py`, `sql/migrations/schema_v111_point_rules_optimization.sql`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`, `scripts/docx_to_md.py`, `scripts/add_md_toc.py`
 
+### v119 - Rückfragen sauber getrennt
+
+- Aktuelle App-Version laut `app/app_constants.py`: `v119`.
+- API-Version in `server/routes.php` auf `v119` angehoben.
+- Rückfragen laufen jetzt über ein eigenes `status_note` statt über die allgemeine Bemerkung.
+- Der Rückfragehinweis wird in der Historie mitgeführt und als Statushinweis im JSON sichtbar.
+- Der Dokumentstatus ist im laufenden Betrieb auf die aktuelle Kanonliste reduziert; alte Statusbrücken sind entfernt.
+- Die Statuslogik sitzt jetzt in einem eigenen Admin-Status-Modul; die eigentliche App-Logik ist in `app/uploader.py` und den ausgelagerten Mixins gebündelt.
+- `app/main.py` ist jetzt nur noch der Launcher; Bootstrap, Fensterlogik und App-Klasse liegen in eigenen Modulen.
+- App-Konstanten liegen zentral in `app/app_constants.py`.
+- Öffnen, OCR-Verknüpfung, Download und Zugriffsprotokollierung liegen jetzt in einem eigenen Datei-Zugriffsmodul.
+- PDF-Erzeugung, Stammdatenblatt und Dateikonvertierung liegen jetzt in einem eigenen Dokument-PDF-Modul.
+- Der Dokumentzugriffs-Dialog ist ebenfalls in das Datei-Zugriffsmodul gewandert.
+- Startprüfung, Ortsordner-Check und Superadmin-Warnungen liegen jetzt im Systemstatus-Modul.
+- Metadaten-Text und große Bildvorschau liegen jetzt in einem eigenen Darstellungsmodul.
+- Dateiansichts-Metadaten, Benutzerlisten und Speicherlogik liegen jetzt in einem eigenen Metadatenformular-Modul.
+- Upload- und API-Metadatenlogik liegen jetzt in einem eigenen Upload-Modul.
+- Admin-Tabs und Admin-Einstellungen liegen jetzt in einem eigenen Admin-UI-Modul.
+- Admin-Listen, Filter und Zielordnerlogik liegen jetzt in einem eigenen Admin-Listen-Modul.
+- Dateibaum, Filter und Datei-Auswahl sind jetzt in einem eigenen Dateibaum-Modul.
+- Admin-Berechtigungen, Sichtbarkeitsregeln und Metadatenordner liegen jetzt in einem eigenen Admin-Policy-Modul.
+- Ordner-, Dateinamen- und Leseregeln laufen jetzt zusätzlich gesammelt über ein eigenes Path-Policy-Modul.
+- Lokale Pfadnormalisierung und Dateiauflösung für bestehende Dateien laufen in einem eigenen Path-Resolution-Modul.
+- Die komplette Dateiansicht mit Baum, Vorschau und Metadaten steckt jetzt im File-View-Modul.
+- Anmeldung, Benutzerkontext und Masterdata-Dialog liegen jetzt in einem eigenen Session-Modul.
+- Für Admins ist unter `Hilfe` ein direkter Zugriff auf die lokalen Logdateien ergänzt.
+- Der Tabwechsel im Adminbereich behandelt Bool-Felder nun korrekt beim Leeren der Auswahl.
+- Im Systemstatus können Admins die Logdateien direkt öffnen.
+- Die Reset-Logik für Datei- und Admin-Auswahl ist in einen kleinen UI-Helfer ausgelagert.
+- Der Upload-Reset liegt jetzt ebenfalls im Upload-Modul statt zentral in `main.py`.
+- Die Reset-Logik der Dateiansicht ist ebenfalls ausgelagert.
+- Die Admin-Auswahl-Reset-Logik liegt jetzt ebenfalls in einem eigenen Mixin.
+- Die Bildvorschau mit Personen-Overlay liegt jetzt ebenfalls in einem eigenen Mixin.
+- Die Admin-Punkteanzeige und Nachberechnung liegen jetzt in einem eigenen Punkte-Admin-Mixin.
+- Der Punktedetail-Dialog für Dokumente liegt jetzt ebenfalls in einem eigenen Mixin.
+- Das Laden und Speichern der Admin-Detailansicht liegt jetzt in einem eigenen Admin-Detail-Mixin.
+- Das Speichern der Admin-Metadaten ist jetzt ebenfalls im Admin-Detail-Mixin gebündelt.
+- Admin-Umbenennen und -Verschieben liegen jetzt in einem eigenen Admin-Datei-Mixin.
+
+### v118 - Dateiansicht nach Auswahl oben
+
+- Aktuelle App-Version laut `app/main.py`: `v118`.
+- API-Version in `server/routes.php` auf `v118` angehoben.
+- In `Dateien anzeigen` springt der Metadatenbereich beim Wechsel auf eine neue Datei wieder an den Anfang.
+- Die Hinweistexte zu Stichwörtern und Beschreibung wurden kürzer gefasst.
+
+### v117 - Personenmarkierung ergonomischer
+
+- Aktuelle App-Version laut `app/main.py`: `v117`.
+- API-Version in `server/routes.php` auf `v117` angehoben.
+- Der Personen-Dialog zeigt die Markierungsnummer sofort an, bleibt nummernstabil und nutzt für den Nachweis eine klarere Eingabemaske mit größerem Bemerkungsfeld.
+- Beim Löschen werden vorhandene Personenmarkierungen nicht mehr umnummeriert; neue Markierungen füllen die kleinste freie Nummer.
+
+### v116 - Dokumentstatus bereinigt
+
+- Aktuelle App-Version laut `app/main.py`: `v116`.
+- API-Version in `server/routes.php` auf `v116` angehoben.
+- Die sichtbare Statusauswahl ist auf den fachlichen Kern reduziert: `hochgeladen`, `rueckfrage`, `geprueft`, `uebernommen`, `archiviert`.
+- Legacy-Statuswerte werden serverseitig für bestehende Datensätze noch auf die neue Kanonliste normalisiert.
+- Der Rückfragen-Workflow verlangt jetzt einen Hinweis, und `geprueft` ist als eigener Arbeitsschritt sichtbar.
+- Im Upload-Reiter ist der geplante Nextcloud-Dateiname jetzt als eigenes, editierbares Feld sichtbar und wird im Wizard mit angezeigt.
+
 ### v115 - Punkte-Module bereinigt
 
 - Aktuelle App-Version laut `app/main.py`: `v115`.
@@ -143,6 +205,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Der leere Kompatibilitätsrest `app/points_manager.py` wurde entfernt; die Punktefunktionen liegen jetzt vollständig in `app/points_year_manager.py`, `app/points_special_manager.py` und `app/points_rules_manager.py`.
 - `main.py` hängt nur noch die echten Punkte-Mixins ein und bleibt damit klarer lesbar.
 - Die Punkte-Architektur ist damit fachlich sauber aufgeteilt und leichter wartbar.
+- Dokumentstatus unterstützt jetzt zusätzlich `geprueft`; bei `rueckfrage` muss ein Hinweis erfasst werden.
 
 ### v114 - Punkteregeln weiter ausgelagert
 
@@ -404,7 +467,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - `Neuer Status` heißt `Dokumentstatus`.
 - Punktebereich in `Dateien bearbeiten` optisch abgesetzt.
 - Status `archiviert`, `abgelehnt`, `geloescht` verschiebt Dateien in Archiv-/Papierkorb-Ordner.
-- Reaktivierung über Status `erfasst` versucht, Datei an ursprünglichen Pfad zurückzuschieben.
+- Reaktivierung über Status `hochgeladen` versucht, Datei an ursprünglichen Pfad zurückzuschieben.
 - Server: `server/routes_v77.php`
 - SQL: `sql/migrations/schema_v77_fileview_status_search.sql`
 - Reset: `sql/resets/reset_bewegungsdaten_v77.sql`

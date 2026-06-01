@@ -361,7 +361,7 @@ class MetadataHelpersMixin:
                 ("Upload-ID", "upload_id"),
                 ("Dokumenttyp", "document_type"),
                 ("Status", "status"),
-                ("Aktueller Dateiname", "current_filename"),
+                ("Geplanter Dateiname", "current_filename") if target == "upload" else ("Aktueller Dateiname", "current_filename"),
                 ("Erfasst von", "uploaded_by"),
                 ("Hochgeladen am", "uploaded_at"),
             ]),
@@ -492,7 +492,7 @@ class MetadataHelpersMixin:
                 if key == "keywords":
                     ttk.Label(
                         parent,
-                        text="Für Punkte: mindestens 3 Stichwörter, getrennt durch Komma oder Semikolon.",
+                        text="Für Punkte: mind. 3 Stichwörter (Komma/Semikolon).",
                         foreground="#555555",
                     ).grid(row=row, column=col0 + 1, sticky="w", padx=6, pady=(0, 3))
                     row += 1
@@ -509,7 +509,7 @@ class MetadataHelpersMixin:
         row += 1
         ttk.Label(parent, textvariable=desc_counter_var, foreground="#555555").grid(row=row, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 0))
         row += 1
-        ttk.Label(parent, text="Für Punkte: mindestens 50 Zeichen.", foreground="#555555").grid(row=row, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 3))
+        ttk.Label(parent, text="Für Punkte: mind. 50 Zeichen.", foreground="#555555").grid(row=row, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 3))
         row += 1
         note_label = ttk.Label(parent, text="Bemerkung:")
         note_label.grid(row=row, column=0, sticky="nw", pady=2)

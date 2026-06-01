@@ -1,6 +1,6 @@
 # ODV-Admin-Handbuch
 
-Stand: v115
+Stand: v119
 
 Dieses Handbuch beschreibt Administration, Betrieb und technische Abläufe der Ortschronisten-Datei-Verwaltung (ODV). Es richtet sich an Admins und Superadmins.
 
@@ -105,14 +105,14 @@ Statuslogik:
 | Status | Bedeutung |
 | --- | --- |
 | hochgeladen | Datei wurde neu hochgeladen. |
-| erfasst | Vorhandene Datei wurde nachträglich in ODV aufgenommen. |
-| in_pruefung | Dokument ist fachlich in Prüfung. |
+| rueckfrage | Es liegt eine Rückfrage oder Korrektur vor. |
+| geprueft | Rückfrage wurde vom Bearbeiter erledigt. |
 | uebernommen | Dokument ist übernommen und zählt regulär in Auswertungen. |
-| abgelehnt / archiviert / geloescht | Sonderstatus für fachliche oder organisatorische Fälle. |
+| archiviert | Dokument wurde fachlich oder organisatorisch abgelegt. |
 
 # 6. Punkteverwaltung
 
-Die Punkteverwaltung ist seit v115 feldbezogen strukturiert.
+Die Punkteverwaltung ist seit v116 feldbezogen strukturiert.
 
 ## Metadatenregeln
 
@@ -247,14 +247,14 @@ Als Paketname wird künftig `ODV_vXXX.zip` empfohlen, z. B. `ODV_v115.zip`. Das 
 
 Versionierung:
 
-- App-Version steht in `app/main.py`.
+- App-Version steht in `app/app_constants.py`.
 - API-Version steht in `server/routes.php`.
 - README und Handbücher werden bei Änderungen fortgeschrieben.
 - Bei neuer Version werden alle Versionsbezeichnungen angepasst.
 
 # 11. Wartungsmodus und Systemstatus
 
-Der ausführliche Systemstatus wird nicht mehr automatisch beim Start angezeigt. Er ist über `Hilfe > Systemstatus...` abrufbar.
+ Der ausführliche Systemstatus wird nicht mehr automatisch beim Start angezeigt. Er ist über `Hilfe > Systemstatus...` abrufbar; dort können Admins die Logdateien direkt öffnen. Zusätzlich gibt es `Hilfe > Logdateien öffnen...` im Explorer. Beim Leeren der Admin-Auswahl werden Bool-Felder jetzt korrekt mit `False` zurückgesetzt. Die Reset-Logik für Datei-, Upload- und Admin-Auswahl liegt jetzt in kleinen Helfern bzw. Mixins.
 
 Superadmins erhalten beim Start nur Hinweise, wenn Handlungsbedarf besteht:
 
@@ -292,8 +292,10 @@ Sicherheitsregeln:
 2. Datei und Vorschau prüfen.
 3. Metadaten fachlich korrigieren.
 4. Personenmarkierungen prüfen.
-5. Status auf `uebernommen` setzen.
-6. Falls nötig Datei normiert umbenennen oder verschieben.
+5. Bei Rückfragen Status auf `rueckfrage` setzen und den Hinweis direkt erfassen.
+6. Wenn die Rückfrage erledigt wurde, den Status auf `geprueft` setzen.
+7. Danach Status auf `uebernommen` setzen.
+8. Falls nötig Datei normiert umbenennen oder verschieben.
 
 ## Server aktualisieren
 
@@ -370,6 +372,33 @@ Sicherheitsregeln:
 - Sonderpunkte ausgelagert: Sonderpunkte-Dialoge, Sonderpunkte-Einstellungen und die Sonderpunkte-Übersicht liegen in `app/points_special_manager.py`.
 - Punkteregeln und `Mein Punktestand` ausgelagert: Die Regelverwaltung und die persönliche Punkteansicht liegen jetzt in `app/points_rules_manager.py`.
 - Der frühere Kompatibilitätsrest `app/points_manager.py` wurde entfernt; die Punktefunktionen sind jetzt vollständig auf eigene kleine Module verteilt.
+- Der Dokumentstatus ist auf die fachlichen Werte `hochgeladen`, `rueckfrage`, `geprueft`, `uebernommen` und `archiviert` reduziert; ältere Statuswerte werden beim Speichern nur noch intern normalisiert.
+- Im Upload-Bereich wird der geplante Nextcloud-Dateiname als eigenes, editierbares Feld geführt und zusätzlich im Wizard angezeigt.
+- Die Personenmarkierung nutzt jetzt eine größere, fachlichere Eingabemaske mit `Nachweis`, größerer Bemerkung und stabiler Nummernvergabe.
+- In `Dateien anzeigen` beginnt der Metadatenbereich bei jeder neuen Auswahl wieder oben; die Hinweistexte wurden gestrafft.
+- Rückfragen verwenden ein eigenes `status_note` und überschreiben nicht mehr die allgemeine Bemerkung.
+- Die Statuslogik selbst liegt in einem eigenen Admin-Status-Modul; `main.py` enthält dort keine Schattenmethoden mehr.
+- Dateiöffnen, OCR-Verknüpfung, Download und Zugriffsprotokollierung sind technisch in ein eigenes Datei-Zugriffsmodul ausgelagert.
+- Der Dialog `Dokumentzugriffe` gehört ebenfalls zum Datei-Zugriffsmodul.
+- Die Startprüfung mit Ortsordner-Check und Superadmin-Warnungen steckt im Systemstatus-Modul.
+- Die Metadaten-Textdarstellung und große Bildvorschau wurden in ein eigenes Darstellungsmodul ausgelagert.
+- Das Laden, Speichern und die `uploaded_by`-Auswahl der Dateiansicht laufen jetzt über ein eigenes Metadatenformular-Modul.
+- Upload- und API-Metadatenlogik liegen in einem eigenen Upload-Modul.
+- Der Admin-Reiter und die Admin-Einstellungen liegen in einem eigenen Admin-UI-Modul.
+- Die Admin-Listenansicht mit Filter, Zielordnern und Auswahl liegt in einem eigenen Admin-Listen-Modul.
+- Der Dateibaum mit Filter und Datei-Auswahl liegt in einem eigenen Dateibaum-Modul.
+- Admin-Berechtigungen, Sichtbarkeit und Metadatenordner liegen in einem eigenen Admin-Policy-Modul.
+- Die komplette Dateiansicht mit Vorschau und Metadaten liegt im File-View-Modul.
+- Anmeldung, Benutzerkontext und Masterdata-Dialog liegen in einem eigenen Session-Modul.
+- Ordner-, Dateinamen- und Leseregeln liegen in einem eigenen Path-Policy-Modul.
+- Lokale Pfade und Dateivarianten werden in einem eigenen Path-Resolution-Modul behandelt.
+
+## v116 bis v119
+
+- Die App-Version liegt jetzt zentral in `app/app_constants.py`; `app/main.py` ist nur noch der Launcher.
+- Die App-Klasse ist in `app/uploader.py` gebündelt.
+- Bootstrap, Startdialoge und Fensteraufbau liegen in `app/bootstrap_mixin.py` und `app/main_window_mixin.py`.
+- Diese technische Aufteilung ändert die Bedienung nicht, macht Start und Wartung aber klarer.
 
 ## Dokumentationsregel
 

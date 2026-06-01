@@ -440,7 +440,7 @@ class MasterdataManagerMixin:
                         "uploaded_by": display_name,
                         "import_uploaded_by_user_id": owner_id,
                         "uploaded_at": now,
-                        "status": "erfasst",
+                        "status": "hochgeladen",
                         "odv_capture_mode": "existing_file_metadata",
                         "odv_captured_by_admin": True,
                         "document_type": detect_document_type(path),
@@ -465,12 +465,12 @@ class MasterdataManagerMixin:
                         "persons": [],
                         "history": [],
                     }
-                    append_metadata_history(item, display_name, "Vorhandene Nextcloud-Datei in ODV erfasst", str(path))
+                    append_metadata_history(item, display_name, "Vorhandene Nextcloud-Datei in ODV aufgenommen", str(path))
                     metadata_file = self.metadata_folder_path() / f"{upload_id}.metadata.json"
                     save_metadata_file(metadata_file, item)
                     item["_metadata_file"] = str(metadata_file)
                     self.api.create_document(self.api_token, self.document_create_payload_from_item(item))
-                    add_history(HistoryEntry.now(display_name, "Vorhandene Nextcloud-Datei in ODV erfasst", str(path), upload_id))
+                    add_history(HistoryEntry.now(display_name, "Vorhandene Nextcloud-Datei in ODV aufgenommen", str(path), upload_id))
                     imported += 1
                     try:
                         tree.set(str(path), "status", "eingelesen")

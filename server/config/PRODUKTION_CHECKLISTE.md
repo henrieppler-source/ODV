@@ -44,9 +44,8 @@ Mindestens drei Testbenutzer anlegen:
 - Testdaten vor Start bereinigen oder klar als Testdaten belassen.
 - Statuswerte vereinheitlichen:
   - `hochgeladen`
-  - `in_pruefung`
   - `rueckfrage`
+  - `geprueft`
   - `uebernommen`
-  - `abgelehnt`
   - `archiviert`
 - Alte Tokens regelmäßig löschen, siehe `server/sql/token_cleanup.sql`.

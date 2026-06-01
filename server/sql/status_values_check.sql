@@ -6,8 +6,7 @@ ORDER BY status;
 
 -- Empfohlene Statuswerte im Testbetrieb:
 -- hochgeladen
--- in_pruefung
 -- rueckfrage
+-- geprueft
 -- uebernommen
--- abgelehnt
 -- archiviert

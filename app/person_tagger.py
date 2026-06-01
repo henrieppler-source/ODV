@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import ttk, messagebox
 
 from PIL import Image, ImageTk
 
 from .models import PersonMark
+
+
+CERTAINTY_OPTIONS = [
+    "sicher",
+    "vermutlich",
+    "unbekannt",
+    "persönlich bekannt",
+]
 
 
 class PersonTagger(tk.Toplevel):
@@ -17,10 +25,17 @@ class PersonTagger(tk.Toplevel):
         self.image_path = image_path
         self.persons: list[PersonMark] = []
         if initial_persons:
+            used_numbers: set[int] = set()
             for idx, data in enumerate(initial_persons, start=1):
                 try:
+                    number = int(data.get("number") or idx)
+                    if number <= 0 or number in used_numbers:
+                        number = 1
+                        while number in used_numbers:
+                            number += 1
+                    used_numbers.add(number)
                     self.persons.append(PersonMark(
-                        number=int(data.get("number") or idx),
+                        number=number,
                         x=float(data.get("x", 0)),
                         y=float(data.get("y", 0)),
                         display_name=str(data.get("display_name") or data.get("name") or ""),
@@ -29,9 +44,8 @@ class PersonTagger(tk.Toplevel):
                     ))
                 except Exception:
                     continue
-            for idx, p in enumerate(self.persons, start=1):
-                p.number = idx
         self._result: list[PersonMark] | None = None
+        self._current_number_var = tk.StringVar(value=f"Nächste Markierung: {self.next_person_number()}")
 
         self.original_image = Image.open(image_path)
         self.display_image = self.original_image.copy()
@@ -52,14 +66,20 @@ class PersonTagger(tk.Toplevel):
         side.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
         side.rowconfigure(0, weight=1)
 
-        self.tree = ttk.Treeview(side, columns=("name", "certainty", "note"), show="headings", height=18)
+        self.tree = ttk.Treeview(side, columns=("number", "name", "certainty", "note"), show="headings", height=18)
+        self.tree.heading("number", text="Nr.")
         self.tree.heading("name", text="Name")
-        self.tree.heading("certainty", text="Sicherheit")
+        self.tree.heading("certainty", text="Nachweis")
         self.tree.heading("note", text="Bemerkung")
+        self.tree.column("number", width=52, anchor="center", stretch=False)
+        self.tree.column("name", width=150, anchor="w")
+        self.tree.column("certainty", width=110, anchor="w", stretch=False)
+        self.tree.column("note", width=180, anchor="w")
         self.tree.grid(row=0, column=0, sticky="nsew")
 
+        ttk.Label(side, textvariable=self._current_number_var, foreground="#555555").grid(row=1, column=0, sticky="w", pady=(6, 0))
         btn_frame = ttk.Frame(side)
-        btn_frame.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        btn_frame.grid(row=2, column=0, sticky="ew", pady=(8, 0))
         ttk.Button(btn_frame, text="Ausgewählte Markierung bearbeiten", command=self.edit_selected).pack(fill="x", pady=2)
         ttk.Button(btn_frame, text="Ausgewählte Markierung löschen", command=self.delete_selected).pack(fill="x", pady=2)
         ttk.Button(btn_frame, text="Fertig", command=self.finish).pack(fill="x", pady=2)
@@ -90,6 +110,82 @@ class PersonTagger(tk.Toplevel):
             self.canvas.create_oval(x - 12, y - 12, x + 12, y + 12, fill="white", outline="black", width=2)
             self.canvas.create_text(x, y, text=str(p.number), fill="black", font=("Arial", 11, "bold"))
 
+    def next_person_number(self) -> int:
+        used = {p.number for p in self.persons if p.number > 0}
+        number = 1
+        while number in used:
+            number += 1
+        return number
+
+    def update_current_number_hint(self, number: int | None = None, selected: bool = False) -> None:
+        number = number or self.next_person_number()
+        prefix = "Markierung" if selected else "Nächste Markierung"
+        self._current_number_var.set(f"{prefix}: {number}")
+
+    def edit_person_dialog(
+        self,
+        *,
+        number: int,
+        title: str,
+        name: str = "",
+        certainty: str = "unbekannt",
+        note: str = "",
+    ) -> tuple[str, str, str] | None:
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.geometry("540x380")
+        dialog.transient(self)
+        dialog.resizable(True, True)
+
+        dialog.columnconfigure(1, weight=1)
+        dialog.rowconfigure(3, weight=1)
+
+        ttk.Label(dialog, text=f"Markierung {number}", font=("", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", padx=12, pady=(12, 6))
+        ttk.Label(dialog, text="Name:").grid(row=1, column=0, sticky="w", padx=12, pady=4)
+        name_var = tk.StringVar(value=name)
+        name_entry = ttk.Entry(dialog, textvariable=name_var)
+        name_entry.grid(row=1, column=1, sticky="ew", padx=12, pady=4)
+
+        ttk.Label(dialog, text="Nachweis:").grid(row=2, column=0, sticky="w", padx=12, pady=4)
+        certainty_var = tk.StringVar(value=certainty or "unbekannt")
+        certainty_combo = ttk.Combobox(dialog, textvariable=certainty_var, values=CERTAINTY_OPTIONS, state="readonly")
+        certainty_combo.grid(row=2, column=1, sticky="ew", padx=12, pady=4)
+
+        ttk.Label(dialog, text="Bemerkung:").grid(row=3, column=0, sticky="nw", padx=12, pady=4)
+        note_text = tk.Text(dialog, height=6, wrap="word")
+        note_text.grid(row=3, column=1, sticky="nsew", padx=12, pady=4)
+        note_text.insert("1.0", note or "")
+
+        button_frame = ttk.Frame(dialog)
+        button_frame.grid(row=4, column=0, columnspan=2, sticky="e", padx=12, pady=(8, 12))
+
+        result: dict[str, tuple[str, str, str] | None] = {"value": None}
+
+        def on_ok() -> None:
+            person_name = name_var.get().strip()
+            if not person_name:
+                messagebox.showwarning("Person", "Bitte einen Namen angeben.", parent=dialog)
+                name_entry.focus_set()
+                return
+            result["value"] = (
+                person_name,
+                certainty_var.get().strip() or "unbekannt",
+                note_text.get("1.0", "end-1c").strip(),
+            )
+            dialog.destroy()
+
+        def on_cancel() -> None:
+            dialog.destroy()
+
+        ttk.Button(button_frame, text="OK", command=on_ok).pack(side="left", padx=4)
+        ttk.Button(button_frame, text="Abbrechen", command=on_cancel).pack(side="left", padx=4)
+
+        dialog.protocol("WM_DELETE_WINDOW", on_cancel)
+        name_entry.focus_set()
+        dialog.grab_set()
+        dialog.wait_window()
+        return result["value"]
+
     def on_canvas_click(self, event: tk.Event) -> None:
         img_w, img_h = self.display_image.size
         if event.x < self.offset_x or event.y < self.offset_y:
@@ -99,18 +195,12 @@ class PersonTagger(tk.Toplevel):
 
         rel_x = (event.x - self.offset_x) / img_w
         rel_y = (event.y - self.offset_y) / img_h
-        number = len(self.persons) + 1
-
-        name = simpledialog.askstring("Person", f"Name für Person {number}:", parent=self)
-        if name is None:
+        number = self.next_person_number()
+        self.update_current_number_hint(number, selected=True)
+        data = self.edit_person_dialog(number=number, title=f"Person {number} erfassen")
+        if data is None:
             return
-        certainty = simpledialog.askstring("Sicherheit", "sicher / vermutlich / unbekannt:", initialvalue="unbekannt", parent=self)
-        if certainty is None:
-            return
-        note = simpledialog.askstring("Bemerkung", "Bemerkung:", parent=self)
-        if note is None:
-            return
-
+        name, certainty, note = data
         mark = PersonMark(number=number, x=rel_x, y=rel_y, display_name=name, certainty=certainty or "unbekannt", note=note)
         self.persons.append(mark)
         self.refresh_tree()
@@ -119,8 +209,9 @@ class PersonTagger(tk.Toplevel):
     def refresh_tree(self) -> None:
         for item in self.tree.get_children():
             self.tree.delete(item)
-        for p in self.persons:
-            self.tree.insert("", "end", iid=str(p.number), values=(f"{p.number}: {p.display_name}", p.certainty, p.note))
+        for p in sorted(self.persons, key=lambda person: person.number):
+            self.tree.insert("", "end", iid=str(p.number), values=(p.number, p.display_name, p.certainty, p.note))
+        self.update_current_number_hint()
 
 
     def edit_selected(self) -> None:
@@ -132,15 +223,17 @@ class PersonTagger(tk.Toplevel):
         person = next((p for p in self.persons if p.number == number), None)
         if person is None:
             return
-        name = simpledialog.askstring("Person", f"Name für Person {number}:", initialvalue=person.display_name, parent=self)
-        if name is None:
+        self.update_current_number_hint(number, selected=True)
+        data = self.edit_person_dialog(
+            number=number,
+            title=f"Person {number} bearbeiten",
+            name=person.display_name,
+            certainty=person.certainty,
+            note=person.note,
+        )
+        if data is None:
             return
-        certainty = simpledialog.askstring("Sicherheit", "sicher / vermutlich / unbekannt:", initialvalue=person.certainty or "unbekannt", parent=self)
-        if certainty is None:
-            return
-        note = simpledialog.askstring("Bemerkung", "Bemerkung:", initialvalue=person.note or "", parent=self)
-        if note is None:
-            return
+        name, certainty, note = data
         person.display_name = name
         person.certainty = certainty or "unbekannt"
         person.note = note
@@ -153,8 +246,6 @@ class PersonTagger(tk.Toplevel):
             return
         numbers = {int(iid) for iid in selected}
         self.persons = [p for p in self.persons if p.number not in numbers]
-        for idx, p in enumerate(self.persons, start=1):
-            p.number = idx
         self.refresh_tree()
         self.redraw()
 

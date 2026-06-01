@@ -4,8 +4,8 @@ from pathlib import Path
 import hashlib
 import importlib.util
 import json
-import threading
 import re
+import threading
 import shutil
 import subprocess
 import sys
@@ -25,9 +25,10 @@ except Exception:
 
 from .app_logging import app_log, app_log_exception
 from .config import APP_DIR, save_config
-from .file_service import detect_document_type, is_image_file, unique_path_with_counter
+from .file_service import detect_document_type, is_image_file, make_normalized_archive_filename, unique_path_with_counter
 from .openai_client import OpenAIClient, OpenAIError
 from .person_tagger import PersonTagger
+from .ui_helpers import reset_tk_var, clear_text_widget
 from .upload_wizard import UploadWizard
 
 LOCAL_PLACE_NAMES = [
@@ -57,6 +58,9 @@ class UploadTabMixin:
         # File drop hint will be placed directly above the filename entry
         self.upload_drop_hint_var = tk.StringVar(value="Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
         self.file_var = tk.StringVar()
+        if not hasattr(self, "upload_filename_var"):
+            self.upload_filename_var = tk.StringVar()
+        self._upload_filename_auto_value = ""
 
         # Place the select button in the same row as the file entry, OpenAI below it,
         # and target-folder on the next row.
@@ -115,6 +119,8 @@ class UploadTabMixin:
         ttk.Button(top, text="Baum...", command=self.choose_upload_target_tree, width=upload_button_width).grid(row=6, column=1, sticky="nw", padx=(6, 6), pady=(6, 0))
         self.target_combo = ttk.Combobox(top, textvariable=self.target_folder_var, state="readonly")
         self.target_combo.grid(row=6, column=2, sticky="ew", padx=(0, 6), pady=(6, 0))
+        ttk.Label(top, text="Ziel-Dateiname:").grid(row=7, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(top, textvariable=self.upload_filename_var).grid(row=7, column=1, columnspan=2, sticky="ew", padx=(6, 6), pady=(6, 0))
         self.enable_upload_drag_and_drop(top)
 
         row += 1
@@ -170,13 +176,39 @@ class UploadTabMixin:
         if "upload_id" in self.meta_vars:
             self.meta_vars["upload_id"].set("")
         if selected_file is not None and "current_filename" in self.meta_vars:
-            self.meta_vars["current_filename"].set(selected_file.name)
+            planned = self.planned_upload_filename(selected_file)
+            self.meta_vars["current_filename"].set(planned)
+            self._upload_filename_auto_value = planned
         elif "current_filename" in self.meta_vars:
             self.meta_vars["current_filename"].set("")
+            self._upload_filename_auto_value = ""
         if selected_file is not None and "uploaded_at" in self.meta_vars:
             self.meta_vars["uploaded_at"].set(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         elif "uploaded_at" in self.meta_vars:
             self.meta_vars["uploaded_at"].set("")
+
+    def planned_upload_filename(self, source: Path, requested_name: str | None = None) -> str:
+        if not hasattr(self, "meta_vars"):
+            return source.name
+        metadata = {key: (var.get() if hasattr(var, "get") else "") for key, var in self.meta_vars.items()}
+        metadata["current_filename"] = (requested_name or metadata.get("current_filename") or source.name).strip()
+        metadata["stored_filename"] = metadata.get("stored_filename") or metadata["current_filename"]
+        metadata["original_filename"] = metadata.get("original_filename") or source.name
+        return make_normalized_archive_filename(metadata, metadata["current_filename"])
+
+    def refresh_planned_upload_filename(self, source: Path | None = None, force: bool = False) -> None:
+        if not hasattr(self, "meta_vars") or "current_filename" not in self.meta_vars:
+            return
+        source = source or getattr(self, "selected_file", None)
+        if source is None:
+            return
+        current_value = str(self.meta_vars["current_filename"].get() or "").strip()
+        should_update = force or not current_value or current_value == self._upload_filename_auto_value
+        if not should_update:
+            return
+        planned = self.planned_upload_filename(source, current_value or source.name)
+        self._upload_filename_auto_value = planned
+        self.meta_vars["current_filename"].set(planned)
 
     def openai_available(self) -> bool:
         return bool(getattr(self, "config_data", {}).get("openai_api_key", "").strip())
@@ -228,6 +260,56 @@ class UploadTabMixin:
             self.upload_ocr_pdf_button.grid() if show_ocr_create else self.upload_ocr_pdf_button.grid_remove()
         if hasattr(self, "upload_show_ocr_pdf_button"):
             self.upload_show_ocr_pdf_button.grid() if show_ocr_open else self.upload_show_ocr_pdf_button.grid_remove()
+
+    def clear_upload_form(self, keep_target_folder: bool = True) -> None:
+        selected_target = self.target_folder_var.get()
+        self.selected_file = None
+        self.selected_folder = None
+        if hasattr(self, "upload_ocr_pdf_path"):
+            self.upload_ocr_pdf_path = None
+        self.file_var.set("")
+        for key, var in self.meta_vars.items():
+            if key == "place":
+                try:
+                    var.set(self.place_var.get().strip())
+                except Exception:
+                    pass
+                continue
+            reset_tk_var(var)
+        clear_text_widget(self.description_text)
+        if getattr(self, "upload_description_counter_var", None):
+            self.update_description_counter(self.description_text, self.upload_description_counter_var)
+        clear_text_widget(self.note_text)
+        self.person_status_var.set("none")
+        self.persons = []
+        self.person_summary_var.set("Keine Personen markiert.")
+        if getattr(self, "upload_wizard", None):
+            try:
+                self.upload_wizard.show_step(0)
+            except Exception:
+                pass
+        if getattr(self, "update_upload_status_indicator", None):
+            try:
+                self.update_upload_status_indicator()
+            except Exception:
+                pass
+        if getattr(self, "upload_openai_text_var", None):
+            try:
+                self.upload_openai_text_var.set("OpenAI: nicht geprüft")
+            except Exception:
+                pass
+        if getattr(self, "upload_openai_usage_var", None):
+            try:
+                self.upload_openai_usage_var.set("Verbrauch: k.A.")
+            except Exception:
+                pass
+        if getattr(self, "update_openai_precheck_indicator", None):
+            try:
+                self.update_openai_precheck_indicator()
+            except Exception:
+                pass
+        if keep_target_folder:
+            self.target_folder_var.set(selected_target)
 
     def openai_pdf_sample_pages(self) -> int:
         try:
@@ -1109,6 +1191,7 @@ class UploadTabMixin:
         if source != "keep_ocr_link":
             self.upload_ocr_pdf_path = None
         self.file_var.set(self.normalize_local_path_text(path))
+        self.update_upload_technical_fields(selected_file=path)
         detected_type = detect_document_type(self.selected_file)
         self.meta_vars["document_type"].set(detected_type)
         self.remember_document_type(detected_type)
@@ -1116,6 +1199,7 @@ class UploadTabMixin:
             self.meta_vars["place"].set(self.place_var.get().strip())
         self.apply_image_metadata_suggestions(path)
         self.apply_filename_keyword_suggestions(path)
+        self.refresh_planned_upload_filename(path)
         self.refresh_upload_metadata_option_comboboxes()
         self.persons = []
         self.person_status_var.set("none")
@@ -1136,6 +1220,7 @@ class UploadTabMixin:
         """Leert fachliche Upload-Metadaten beim Wechsel auf ein neues Dokument."""
         if not hasattr(self, "meta_vars"):
             return
+        self._upload_filename_auto_value = ""
         keep_empty_or_system = {"upload_id", "status", "current_filename", "uploaded_at", "uploaded_by"}
         for key, var in self.meta_vars.items():
             if isinstance(var, tk.BooleanVar):

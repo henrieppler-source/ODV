@@ -27,11 +27,13 @@ class UploadWizard:
         self.create_ui()
 
     def create_upload_meta_vars(self) -> None:
+        if not hasattr(self.owner, "upload_filename_var"):
+            self.owner.upload_filename_var = tk.StringVar()
         values = {
             "upload_id": tk.StringVar(),
             "document_type": tk.StringVar(),
             "status": tk.StringVar(),
-            "current_filename": tk.StringVar(),
+            "current_filename": self.owner.upload_filename_var,
             "uploaded_by": tk.StringVar(),
             "uploaded_at": tk.StringVar(),
             "primary_source": tk.StringVar(),
@@ -61,6 +63,8 @@ class UploadWizard:
         self.owner.person_status_var = tk.StringVar(value="none")
         self.owner.person_summary_var = tk.StringVar(value="Keine Personen markiert.")
         self.owner.upload_multiline_meta_widgets = {}
+        for key in ("document_date", "place"):
+            values[key].trace_add("write", lambda *_args: getattr(self.owner, "refresh_planned_upload_filename", lambda *a, **k: None)())
 
     def bind_multiline_meta_field(self, key: str, widget: tk.Text) -> None:
         var = self.owner.meta_vars[key]
@@ -525,6 +529,7 @@ class UploadWizard:
             return
         fields = [
             ("Datei", self.owner.file_var.get().strip()),
+            ("Geplanter Dateiname", self.owner.meta_vars["current_filename"].get().strip()),
             ("Dokumenttyp", self.owner.meta_vars["document_type"].get().strip()),
             ("Datum / Zeitraum", self.owner.meta_vars["document_date"].get().strip()),
             ("Ereignis", self.owner.meta_vars["event"].get().strip()),

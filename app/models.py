@@ -59,6 +59,7 @@ class UploadMetadata:
     openai_metadata_fields: list[str] = field(default_factory=list)
     openai_metadata_model: str = ""
     openai_metadata_applied_at: str = ""
+    status_note: str = ""
     note: str = ""
     person_status: str = "none"
     persons: list[PersonMark] = field(default_factory=list)

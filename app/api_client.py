@@ -192,6 +192,9 @@ class APIClient:
     def schema_migrations(self, token: str) -> dict:
         return self.request("GET", "/admin/schema-migrations", token=token)
 
+    def pending_migrations(self, token: str) -> dict:
+        return self.schema_migrations(token)
+
     def apply_schema_migrations(self, token: str) -> dict:
         return self.request("POST", "/admin/schema-migrations/apply", {}, token=token)
 

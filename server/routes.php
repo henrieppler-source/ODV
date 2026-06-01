@@ -7,7 +7,7 @@ $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $method = $_SERVER['REQUEST_METHOD'];
 $path = rtrim($path, '/');
 
-const ODV_API_VERSION = 'v115';
+const ODV_API_VERSION = 'v119';
 
 if (!function_exists('get_json_input')) {
     function get_json_input(): array
@@ -492,12 +492,18 @@ function user_has_folder_permission(PDO $pdo, array $user, string $path, string 
 
 function allowed_status_values(): array
 {
-    return ['hochgeladen', 'erfasst', 'in_pruefung', 'rueckfrage', 'uebernommen', 'abgelehnt', 'archiviert', 'geloescht'];
+    return ['hochgeladen', 'rueckfrage', 'geprueft', 'uebernommen', 'archiviert'];
+}
+
+function canonical_document_status(string $status): string
+{
+    $status = trim($status);
+    return $status;
 }
 
 function validate_document_status(string $status): string
 {
-    $status = trim($status);
+    $status = canonical_document_status($status);
     if (!in_array($status, allowed_status_values(), true)) {
         json_response([
             'success' => false,
@@ -2018,7 +2024,7 @@ if ($method === 'POST' && $path === '/api/documents') {
     $targetFolder = trim((string)($input['target_folder'] ?? ''));
     $currentPath = trim((string)($input['current_path'] ?? ''));
     $uploadedAt = trim((string)($input['uploaded_at'] ?? date('Y-m-d H:i:s')));
-    $status = validate_document_status(trim((string)($input['status'] ?? (($input['odv_capture_mode'] ?? '') === 'existing_file_metadata' ? 'erfasst' : 'hochgeladen'))));
+    $status = validate_document_status(trim((string)($input['status'] ?? 'hochgeladen')));
     $metadata = is_array($input['metadata'] ?? null) ? $input['metadata'] : [];
     $captureMode = trim((string)($input['odv_capture_mode'] ?? 'odv_upload'));
 
@@ -2103,7 +2109,7 @@ if ($method === 'POST' && $path === '/api/documents') {
             ':user_id' => $currentUser['id'],
             ':user_display_name' => $currentUser['display_name'],
             ':action' => ($captureMode === 'existing_file_metadata' ? 'existing_file_captured' : 'document_created'),
-            ':details' => ($captureMode === 'existing_file_metadata' ? 'Vorhandene Nextcloud-Datei in ODV erfasst' : 'Dokument wurde über API angelegt')
+            ':details' => ($captureMode === 'existing_file_metadata' ? 'Vorhandene Nextcloud-Datei in ODV aufgenommen' : 'Dokument wurde über API angelegt')
         ]);
         add_auto_points_for_metadata($pdo, $documentId, $uploadId, $uploadOwner, [
             'description' => (string)($metadata['beschreibung'] ?? $metadata['description'] ?? ''),
@@ -2148,8 +2154,8 @@ if ($method === 'GET' && $path === '/api/documents') {
             $where[] = "status = :status";
             $params[':status'] = $status;
         } else {
-            // Papierkorb-Logik: gelöschte Dokumente bleiben erhalten, erscheinen aber nicht in Standardlisten.
-            $where[] = "status <> 'geloescht'";
+            // Archivierte Dokumente bleiben erhalten, erscheinen aber nicht in Standardlisten.
+            $where[] = "status <> 'archiviert'";
         }
         if ($onlyOwn === 1 && role_key($currentUser) === 'ortschronist') {
             $where[] = "uploaded_by_user_id = :user_id";

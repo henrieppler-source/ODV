@@ -1,6 +1,6 @@
 # ODV-Handbuch für Bearbeiter
 
-Stand: v115
+Stand: v119
 
 Dieses Handbuch beschreibt die Arbeit mit der Ortschronisten-Datei-Verwaltung (ODV) aus Sicht von Bearbeiterinnen und Bearbeitern. Es konzentriert sich auf die tägliche Erfassung, Pflege und Suche von Dateien und Metadaten.
 
@@ -49,7 +49,7 @@ Admins und Superadmins haben zusätzliche Verwaltungsfunktionen. Diese sind im A
 | Metadaten | Beschreibung und Kontext einer Datei. |
 | OCR | Texterkennung für gescannte oder bildhafte PDFs. |
 | OpenAI-Prüfung | Unterstützende Analyse einer Datei zur Metadatenvorschlagserstellung. |
-| Status | Bearbeitungszustand eines Dokuments, z. B. erfasst oder übernommen. |
+| Status | Bearbeitungszustand eines Dokuments, z. B. hochgeladen, rückfrage oder übernommen. |
 
 # 3. Erster Start und Anmeldung
 
@@ -172,7 +172,7 @@ Wenn ein anderer Benutzer ein Dokument gerade bearbeitet, kann eine Bearbeitungs
 
 Punkte sollen gute Erfassungsarbeit sichtbar machen. Sie sind kein Selbstzweck und ersetzen keine Qualitätsprüfung.
 
-Grundlogik seit v115:
+Grundlogik seit v116:
 
 - Manuell befüllte Metadatenfelder zählen standardmäßig 2 Punkte.
 - Von OpenAI übernommene Metadatenfelder zählen standardmäßig 1 Punkt.
@@ -181,6 +181,30 @@ Grundlogik seit v115:
 - Eine Transkription von Zeitung, Akte oder Urkunde zählt als besondere Transkriptionsleistung mit 10 Punkten.
 - Bild mit Personenmarkierung und einzelne Personenmarkierungen können eigene Punkte auslösen.
 - `Mein Punktestand` aktualisiert sich beim Öffnen und beim Wechsel des Bearbeiters automatisch; ein manueller Aktualisieren-Button ist nicht mehr nötig.
+- Im Upload-Reiter gibt es ein eigenes Feld für den geplanten Nextcloud-Dateinamen; es wird beim Auswählen einer Datei vorbefüllt und kann vor dem Upload angepasst werden.
+- Die Personenmarkierung zeigt die Nummer sofort, nutzt eine kompaktere Eingabemaske und lässt vorhandene Nummern beim Löschen bestehen.
+- In `Dateien anzeigen` springt der Metadatenbereich bei neuer Auswahl wieder nach oben; die Punkthinweise sind kürzer formuliert.
+- Bei einer Rückfrage erhält der Bearbeiter einen klaren Hinweis; der Statushinweis wird getrennt vom allgemeinen Bemerkungsfeld gespeichert.
+- Sichtbar verwendet ODV nur noch die Status `hochgeladen`, `rueckfrage`, `geprueft`, `uebernommen` und `archiviert`.
+- Die Statuslogik wird technisch in einem eigenen Modul verarbeitet; für die Bedienung ändert sich dadurch nichts.
+- Datei öffnen, OCR-Verknüpfung und Download laufen technisch über ein eigenes Zugriffsmodul; die Bedienung bleibt gleich.
+- Der App-Start ist technisch in Launcher, Bootstrap, Fensterlogik und App-Klasse aufgeteilt; für Bearbeiter ändert sich an der Bedienung nichts.
+- Der Zugriff auf Dokumentprotokolle für Admins nutzt ebenfalls dieses Modul.
+- Die Startprüfung und Ortsordner-Warnungen liegen technisch im Systemstatus-Modul.
+- Die längere Metadatenansicht und die große Bildvorschau laufen intern über ein eigenes Darstellungsmodul.
+- Das Laden und Speichern der Dateiansichts-Metadaten läuft intern über ein eigenes Metadatenformular-Modul.
+- Upload- und API-Payloads werden intern in einem eigenen Upload-Modul verarbeitet.
+- Admin-Tabs und Admin-Einstellungen werden intern über ein eigenes Admin-UI-Modul aufgebaut.
+- Admin-Listen und Zielordnerauswahl laufen intern über ein eigenes Admin-Listen-Modul.
+- Dateibaum, Filter und Datei-Auswahl laufen intern über ein eigenes Dateibaum-Modul.
+- Admin-Berechtigungen und Sichtbarkeitsregeln laufen intern über ein eigenes Admin-Policy-Modul.
+- Die komplette Dateiansicht mit Vorschau und Metadaten läuft intern über ein eigenes File-View-Modul.
+- Anmeldung und Benutzerkontext laufen intern über ein eigenes Session-Modul.
+- Ordner-, Dateinamen- und Leseregeln laufen intern über ein eigenes Path-Policy-Modul.
+- Lokale Pfade und vorhandene Dateivarianten werden intern über ein eigenes Path-Resolution-Modul aufgelöst.
+- Technische Logdateien sind für Bearbeiter nicht relevant; sie können bei Bedarf von Admins über das Hilfe-Menü geöffnet werden.
+- Die Auswahl- und Reset-Logik der Dateiansicht ist intern ausgelagert, das ändert an der Bedienung nichts.
+- Die Bildvorschau arbeitet intern über einen ausgelagerten Mixin; die Bedienung bleibt unverändert.
 
 Unterschied zwischen Prüftypen:
 
