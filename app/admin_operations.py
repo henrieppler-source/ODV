@@ -178,6 +178,26 @@ class AdminOperationsMixin:
         old_names = [str(item.get("name") or "") for item in backups[max(0, keep):]]
         return self.delete_routes_backups_via_ftp([name for name in old_names if name])
 
+    @staticmethod
+    def format_backup_size(size: object) -> str:
+        try:
+            value = int(size)
+        except Exception:
+            return "n.v."
+        if value <= 0:
+            return "n.v."
+        units = ["B", "KB", "MB", "GB"]
+        num = float(value)
+        unit = "B"
+        for candidate in units:
+            unit = candidate
+            if num < 1024 or candidate == units[-1]:
+                break
+            num /= 1024.0
+        if unit == "B":
+            return f"{value} B"
+        return f"{num:.1f} {unit}"
+
     def open_routes_deploy_dialog(self) -> None:
         if self.current_role() != "Superadmin":
             messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Superadmins freigegeben.")
@@ -232,7 +252,7 @@ class AdminOperationsMixin:
                 backups = self.list_routes_backups_via_ftp()
                 for item in backups:
                     name = str(item.get("name") or "")
-                    backup_tree.insert("", "end", iid=name, values=(name, item.get("modified", ""), item.get("size", "")))
+                    backup_tree.insert("", "end", iid=name, values=(name, item.get("modified", ""), self.format_backup_size(item.get("size"))))
                 result_var.set(f"{len(backups)} Server-Backup(s) gefunden.")
             except Exception as exc:
                 result_var.set(f"Server-Backups konnten nicht geladen werden: {exc}")

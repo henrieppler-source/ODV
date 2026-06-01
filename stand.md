@@ -62,6 +62,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Der Datenbank-Reset ist ein Bewegungsdaten-Reset: Dokumente, Historie, Personenmarkierungen, Punkte und manuelle Sonderpunkte werden geleert; Stammdaten wie Benutzer, Rechte, Orte, Punkteregeln, Verteiler und Systemeinstellungen bleiben erhalten.
 - Bewegungsdaten-Reset darf nur im Testbetrieb möglich sein; der Produktivbetrieb muss serverseitig gegen Reset geschützt bleiben.
 - Server-Backups sollen aufräumbar bleiben; Standardregel ist, pro Serverdatei nur die letzten drei Sicherungskopien aufzubewahren.
+- API-Token und OpenAI-API-Schlüssel werden lokal verschlüsselt gespeichert und nicht mehr im Klartext in der Konfiguration abgelegt.
 
 ## Kurzform für die nächste Sitzung
 

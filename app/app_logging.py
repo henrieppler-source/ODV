@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from pathlib import Path
 import os
@@ -12,12 +13,22 @@ def user_data_dir() -> Path:
     return APP_DIR
 
 
+SENSITIVE_KEY_PATTERN = re.compile(r"(^|[_-])(password|passwd|token|secret|api[_-]?key|openai[_-]?api[_-]?key|authorization|dpapi)($|[_-])", re.IGNORECASE)
+
+
+def _mask_context_value(key: str, value: object) -> object:
+    lower_key = str(key or "").strip().lower()
+    if lower_key and SENSITIVE_KEY_PATTERN.search(lower_key):
+        return "***"
+    return value
+
+
 def app_log(level: str, message: str, **context) -> None:
     """Schreibt ein lokales App-Log ohne sensible Daten."""
     try:
         log_dir = user_data_dir() / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        safe_context = {k: v for k, v in context.items() if k.lower() not in {"password", "token", "api_token", "authorization"}}
+        safe_context = {k: _mask_context_value(k, v) for k, v in context.items()}
         line = f"{datetime.now().isoformat(timespec='seconds')} [{level.upper()}] {message}"
         if safe_context:
             line += " | " + "; ".join(f"{k}={v}" for k, v in safe_context.items())

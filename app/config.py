@@ -6,6 +6,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from .secure_store import SecureStoreError, protect_text, unprotect_text
+
 def default_app_dir() -> Path:
     local = os.environ.get("LOCALAPPDATA")
     if local:
@@ -31,7 +33,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "api_url": "https://ortschronik.info/api",
     "api_token": "",
     "api_token_expires_at": "",
+    "api_token_dpapi": "",
     "openai_api_key": "",
+    "openai_api_key_dpapi": "",
     "openai_model": "gpt-3.5-turbo",
     "openai_pdf_sample_pages": 10,
     "openai_text_sample_chars": 4000,
@@ -49,6 +53,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "ftp_password_dpapi": "",
     "nextcloud_web_files_url": "https://nx94165.your-storageshare.de/apps/files/files",
     "device_id": "",
+}
+
+SENSITIVE_CONFIG_FIELDS = {
+    "api_token": "api_token_dpapi",
+    "openai_api_key": "openai_api_key_dpapi",
 }
 
 
@@ -81,10 +90,32 @@ def load_config() -> dict[str, Any]:
         data = json.load(fh)
     merged = DEFAULT_CONFIG.copy()
     merged.update(data)
+    for plain_key, dpapi_key in SENSITIVE_CONFIG_FIELDS.items():
+        encrypted = str(merged.get(dpapi_key, "") or "").strip()
+        if encrypted:
+            try:
+                merged[plain_key] = unprotect_text(encrypted)
+                continue
+            except SecureStoreError:
+                pass
+        merged[plain_key] = str(merged.get(plain_key, "") or "")
     return merged
 
 
 def save_config(config: dict[str, Any]) -> None:
     ensure_app_dir()
+    data = dict(config)
+    for plain_key, dpapi_key in SENSITIVE_CONFIG_FIELDS.items():
+        plain_value = str(data.get(plain_key, "") or "").strip()
+        if plain_value:
+            try:
+                data[dpapi_key] = protect_text(plain_value)
+                data.pop(plain_key, None)
+            except SecureStoreError:
+                data[dpapi_key] = ""
+                data[plain_key] = plain_value
+        else:
+            data[dpapi_key] = ""
+            data.pop(plain_key, None)
     with CONFIG_FILE.open("w", encoding="utf-8") as fh:
-        json.dump(config, fh, ensure_ascii=False, indent=2)
+        json.dump(data, fh, ensure_ascii=False, indent=2)

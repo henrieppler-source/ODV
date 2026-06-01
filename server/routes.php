@@ -30,7 +30,23 @@ function api_log(string $level, string $message, array $context = []): void
     if (!is_dir($logDir) || !is_writable($logDir)) {
         return;
     }
-    unset($context['password'], $context['token'], $context['Authorization'], $context['HTTP_AUTHORIZATION']);
+    $sensitivePattern = '/(^|[_-])(password|passwd|token|secret|api[_-]?key|openai[_-]?api[_-]?key|authorization|dpapi)($|[_-])/i';
+    $sanitize = static function ($value) use (&$sanitize, $sensitivePattern) {
+        if (!is_array($value)) {
+            return $value;
+        }
+        $out = [];
+        foreach ($value as $key => $item) {
+            $keyText = strtolower((string)$key);
+            if (preg_match($sensitivePattern, $keyText)) {
+                $out[$key] = '***';
+            } else {
+                $out[$key] = $sanitize($item);
+            }
+        }
+        return $out;
+    };
+    $context = $sanitize($context);
     $line = json_encode([
         'time' => date('c'),
         'level' => $level,

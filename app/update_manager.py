@@ -127,6 +127,19 @@ class AppUpdateMixin:
                 h.update(block)
         return h.hexdigest()
 
+    def safe_extract_zip(self, zf: zipfile.ZipFile, extract_dir: Path) -> None:
+        """Extrahiert ein ZIP nur innerhalb des Zielordners."""
+        base_dir = extract_dir.resolve()
+        for member in zf.infolist():
+            target = (extract_dir / member.filename).resolve()
+            try:
+                common = os.path.commonpath([str(base_dir), str(target)])
+            except Exception as exc:
+                raise RuntimeError(f"Ungültiger ZIP-Pfad: {member.filename}") from exc
+            if common != str(base_dir):
+                raise RuntimeError(f"Unsicherer ZIP-Pfad blockiert: {member.filename}")
+            zf.extract(member, extract_dir)
+
     def stage_app_update(self, update: dict) -> Path:
         """Kopiert/entpackt die freigegebene Version aus dem lokalen Nextcloud-Syncordner."""
         version = str(update.get("version") or "").strip()
@@ -154,7 +167,7 @@ class AppUpdateMixin:
                 shutil.rmtree(extract_dir)
             extract_dir.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(staged_file, "r") as zf:
-                zf.extractall(extract_dir)
+                self.safe_extract_zip(zf, extract_dir)
             exe_matches = list(extract_dir.rglob("ODV.exe")) + list(extract_dir.rglob("*.exe"))
             return exe_matches[0] if exe_matches else extract_dir
         return staged_file

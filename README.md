@@ -296,6 +296,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - In den Superadmin-Einstellungen gibt es FTP-Deployment-Felder fuer Server, Port, Benutzer, Zielpfad und Passwort.
 - Das FTP-Passwort wird lokal per Windows-DPAPI verschluesselt in der ODV-Konfiguration gespeichert; es muss danach nicht erneut eingegeben werden.
 - Ein vorhandenes gespeichertes FTP-Passwort bleibt erhalten, wenn das Passwortfeld beim Speichern leer bleibt.
+- API-Token und OpenAI-API-Schlüssel werden lokal ebenfalls per Windows-DPAPI verschlüsselt gespeichert.
 - FTP-Verbindungstest aus den Admin-Einstellungen ergaenzt.
 - Geplanter Server-Deploymentpfad fuer `routes.php`: FTP-Server `w0210fa6.kasserver.com`, Benutzer `f0185adc`, Port `21`, Zielpfad `/ortschronik.info/ortschronik-api/routes.php`, lokale Quelle `server/routes.php`.
 - Verbindungstest am 31.05.2026: DNS loest auf `85.13.162.140` auf, TCP/FTP auf Port `21` ist erreichbar.
