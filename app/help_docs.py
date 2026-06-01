@@ -24,6 +24,7 @@ class HelpDocsMixin:
         in_list = False
         in_table = False
         heading_counts: dict[str, int] = {}
+        help_dir = APP_DIR / "help"
 
         def slugify_heading(value: str) -> str:
             text = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode("ascii")
@@ -37,10 +38,20 @@ class HelpDocsMixin:
         def inline_markdown(value: str) -> str:
             result: list[str] = []
             pos = 0
-            for match in re.finditer(r"\[([^\]]+)\]\((#[^)]+)\)", value):
+            for match in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", value):
                 result.append(html.escape(value[pos:match.start()]))
                 label = html.escape(match.group(1))
-                href = html.escape(match.group(2), quote=True)
+                target = match.group(2).strip()
+                if target.startswith("#"):
+                    href = html.escape(target, quote=True)
+                else:
+                    target_path = Path(target)
+                    if target_path.suffix.lower() == ".md":
+                        href = html.escape((help_dir / f"{target_path.stem}.html").resolve().as_uri(), quote=True)
+                    elif target_path.suffix.lower() == ".html":
+                        href = html.escape((help_dir / target_path.name).resolve().as_uri(), quote=True)
+                    else:
+                        href = html.escape(target, quote=True)
                 result.append(f'<a href="{href}">{label}</a>')
                 pos = match.end()
             result.append(html.escape(value[pos:]))
@@ -119,6 +130,23 @@ class HelpDocsMixin:
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / (Path(filename).stem + ".html")
             out_path.write_text(self.markdown_to_help_html(markdown_text, title), encoding="utf-8", newline="\n")
+            for match in re.finditer(r"\[([^\]]+)\]\(([^)]+)\)", markdown_text):
+                target = match.group(2).strip()
+                if target.startswith("#"):
+                    continue
+                target_path = Path(target)
+                if target_path.suffix.lower() != ".md":
+                    continue
+                linked_path = self.project_root_path() / target_path.name
+                if not linked_path.exists():
+                    continue
+                linked_title = target_path.stem.replace("-", " ").replace("_", " ").title()
+                linked_out = out_dir / f"{target_path.stem}.html"
+                linked_out.write_text(
+                    self.markdown_to_help_html(linked_path.read_text(encoding="utf-8"), linked_title),
+                    encoding="utf-8",
+                    newline="\n",
+                )
             webbrowser.open(out_path.resolve().as_uri())
         except Exception as exc:
             messagebox.showerror("Handbuch", f"Das Handbuch konnte nicht geöffnet werden:\n{exc}", parent=self)

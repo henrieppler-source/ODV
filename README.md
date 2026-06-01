@@ -1,12 +1,13 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v111
+# Ortschronisten-Datei-Verwaltung (ODV) v119
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v111`
+- Aktuelle App-Version laut `app/main.py`: `v119`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
 - Dokumentationsregel: Alle künftigen Anpassungen in dieser `README.md` unter `Versionshistorie` dokumentieren.
+- Wiederaufnahme und Arbeitsregeln zusätzlich in [`stand.md`](stand.md) festhalten.
 - Bei neuer App-Version alle Versionsbezeichnungen passend anheben.
 - Bei Korrekturen innerhalb einer bestehenden Version die Beschreibung direkt bei dieser Version ergänzen.
 - Bearbeiterrelevante Änderungen zusätzlich in `Handbuch.md`, admin-/betriebsrelevante Änderungen zusätzlich in `Admin-Handbuch.md` fortschreiben.
@@ -25,7 +26,7 @@ Wir machen im ODV-Projekt weiter:
 C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v111.
+Aktuelle App-Version laut README/Code: v119.
 Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
 Bearbeiterrelevante Änderungen bitte zusätzlich in Handbuch.md, Admin-/Betriebsthemen zusätzlich in Admin-Handbuch.md dokumentieren.
 Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
@@ -98,6 +99,83 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - `sql/migrations/schema_v82_upload_form_layout.sql`
 
 ## Versionshistorie
+
+### v119 - Launcher und Modulaufteilung bereinigt
+
+- Aktuelle App-Version laut `app/main.py`: `v119`.
+- API-Version in `server/routes.php` auf `v119` angehoben.
+- Die App-Version liegt zentral in `app/app_constants.py`; `app/main.py` ist nur noch der Launcher.
+- Die App-Klasse ist in `app/uploader.py` gebündelt.
+- Bootstrap, Startdialoge und Fensteraufbau liegen in `app/bootstrap_mixin.py` und `app/main_window_mixin.py`.
+- Die technische Aufteilung ändert die Bedienung nicht, macht Start und Wartung aber klarer.
+- Handbuch und Admin-Handbuch sind auf `v119` fortgeschrieben und im Hilfe-Menü direkt als Markdown-Ansicht verfügbar.
+- Geänderte Dateien: `app/app_constants.py`, `app/main.py`, `app/bootstrap_mixin.py`, `app/main_window_mixin.py`, `app/uploader.py`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`
+
+### v118 - Dateiansicht nach Auswahl oben
+
+- Aktuelle App-Version laut `app/main.py`: `v118`.
+- API-Version in `server/routes.php` auf `v118` angehoben.
+- In `Dateien anzeigen` springt der Metadatenbereich beim Wechsel auf eine neue Datei wieder an den Anfang.
+- Die Hinweistexte zu Stichwörtern und Beschreibung wurden kürzer gefasst.
+- Geänderte Dateien: `app/main.py`, `README.md`
+
+### v117 - Personenmarkierung ergonomischer
+
+- Aktuelle App-Version laut `app/main.py`: `v117`.
+- API-Version in `server/routes.php` auf `v117` angehoben.
+- Der Personen-Dialog zeigt die Markierungsnummer sofort an, bleibt nummernstabil und nutzt für den Nachweis eine klarere Eingabemaske mit größerem Bemerkungsfeld.
+- Beim Löschen werden vorhandene Personenmarkierungen nicht mehr umnummeriert; neue Markierungen füllen die kleinste freie Nummer.
+- Geänderte Dateien: `app/main.py`, `README.md`
+
+### v116 - Dokumentstatus bereinigt
+
+- Aktuelle App-Version laut `app/main.py`: `v116`.
+- API-Version in `server/routes.php` auf `v116` angehoben.
+- Die sichtbare Statusauswahl ist auf den fachlichen Kern reduziert: `hochgeladen`, `rueckfrage`, `geprueft`, `uebernommen`, `archiviert`.
+- Legacy-Statuswerte werden serverseitig für bestehende Datensätze noch auf die neue Kanonliste normalisiert.
+- Der Rückfragen-Workflow verlangt jetzt einen Hinweis, und `geprueft` ist als eigener Arbeitsschritt sichtbar.
+- Im Upload-Reiter ist der geplante Nextcloud-Dateiname jetzt als eigenes, editierbares Feld sichtbar und wird im Wizard mit angezeigt.
+- Geänderte Dateien: `app/main.py`, `README.md`
+
+### v115 - Punkte-Module bereinigt
+
+- Aktuelle App-Version laut `app/main.py`: `v115`.
+- API-Version in `server/routes.php` auf `v115` angehoben.
+- Der leere Kompatibilitätsrest `app/points_manager.py` wurde entfernt; die Punktefunktionen liegen jetzt vollständig in `app/points_year_manager.py`, `app/points_special_manager.py` und `app/points_rules_manager.py`.
+- `main.py` hängt nur noch die echten Punkte-Mixins ein und bleibt damit klarer lesbar.
+- Die Punkte-Architektur ist damit fachlich sauber aufgeteilt und leichter wartbar.
+- Dokumentstatus unterstützt jetzt zusätzlich `geprueft`; bei `rueckfrage` muss ein Hinweis erfasst werden.
+- Geänderte Dateien: `app/main.py`, `README.md`
+
+### v114 - Punkteregeln weiter ausgelagert
+
+- Aktuelle App-Version laut `app/main.py`: `v114`.
+- API-Version in `server/routes.php` auf `v114` angehoben.
+- Punkteregeln-Dialog und `Mein Punktestand` aus `points_manager.py` in `app/points_rules_manager.py` ausgelagert; `points_manager.py` ist jetzt nur noch ein Platzhalter für den bisherigen Modulnamen.
+- Damit sind die Punktebereiche jetzt fachlich in drei kleine Module getrennt: Jahresauswertung, Sonderpunkte und Punkteregeln/`Mein Punktestand`.
+- Die Auslagerung hält `main.py` weiter schlank und verbessert die Wartbarkeit für spätere Anpassungen.
+- Geänderte Dateien: `app/main.py`, `README.md`
+
+### v113 - Sonderpunkte ausgelagert
+
+- Aktuelle App-Version laut `app/main.py`: `v113`.
+- API-Version in `server/routes.php` auf `v113` angehoben.
+- Sonderpunkte-Dialoge und Sonderpunkte-Übersicht aus `points_manager.py` in `app/points_special_manager.py` ausgelagert; `main.py` bleibt dadurch weiter schlanker.
+- Die Punkte-Einstellungen für manuelle Sonderpunkte liegen jetzt zusammen mit den Sonderpunkte-Dialogen in einem eigenen Modul.
+- Die neuen Module bauen auf den bereits ausgelagerten Punkte-Jahresdialogen auf; die Klassenzusammensetzung bleibt in `main.py` nachvollziehbar.
+- Geänderte Dateien: `app/main.py`, `README.md`
+
+### v112 - Punktejahre und Jahresabschluss
+
+- Aktuelle App-Version laut `app/main.py`: `v112`.
+- API-Version in `server/routes.php` auf `v112` angehoben.
+- Beitragsauswertung und Jahressteuerung aus `points_manager.py` in `app/points_year_manager.py` ausgelagert; `main.py` bleibt dadurch weiter schlanker.
+- Superadmin kann pro Kalenderjahr einen Prämienbetrag hinterlegen, den Wert je Punkt anzeigen lassen und das Punktejahr abschließen oder wieder öffnen.
+- Abgeschlossene Punktejahre sperren Punkte-Regeln, automatische Punktvergabe, manuelle Punkte, Punkt-Neuberechnungen und die Jahresfreigabe.
+- Die Beitragsauswertung zeigt Budget, Gesamtpunkte, Teilnehmende und den errechneten Wert je Punkt.
+- Serverseitig wird der Abschluss über `point_year_closures` und das Budget über `system_settings` pro Jahr gespeichert.
+- Dokumentation wird mit den neuen Punkten für Jahresabschluss und Prämienbudget fortgeschrieben.
+- Geänderte Dateien: `app/main.py`, `README.md`
 
 ### v111 - Punkteverwaltung optimiert
 
