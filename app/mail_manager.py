@@ -76,9 +76,12 @@ class MailManagerMixin:
                 if isinstance(d, dict):
                     label = d.get('file') or d.get('filename') or d.get('name') or ''
                     link = d.get('link') or d.get('download_url') or d.get('url') or ''
+                    expires_at = d.get('expires_at') or d.get('share_expires_at') or ''
                     lines.append(f"{i}. Datei: {label}")
                     if link:
                         lines.append(f"   Link: {link}")
+                    if expires_at:
+                        lines.append(f"   Gültig bis: {expires_at}")
                 else:
                     lines.append(f"{i}. {d}")
         elif docs:
@@ -154,7 +157,21 @@ class MailManagerMixin:
             for i, item in enumerate(rows):
                 docs = item.get("documents") or item.get("links") or ""
                 if isinstance(docs, (list, tuple)):
-                    docs = "; ".join(str(x) for x in docs)
+                    parts = []
+                    for x in docs:
+                        if isinstance(x, dict):
+                            label = x.get('file') or x.get('filename') or x.get('name') or ''
+                            link = x.get('link') or x.get('download_url') or x.get('url') or ''
+                            expires_at = x.get('expires_at') or x.get('share_expires_at') or ''
+                            text = label or link or str(x)
+                            if link and label:
+                                text = f"{label}"
+                            if expires_at:
+                                text += f" (bis {expires_at})"
+                            parts.append(text)
+                        else:
+                            parts.append(str(x))
+                    docs = "; ".join(parts)
                 tree.insert("", "end", iid=str(i), values=(
                     item.get("sent_at") or item.get("created_at") or "",
                     item.get("sender_name") or item.get("sent_by_name") or "",
@@ -396,7 +413,7 @@ class MailManagerMixin:
         except Exception:
             return raw
 
-    def nextcloud_web_link_for_local_path(self, file_path: str) -> str:
+    def nextcloud_web_link_for_local_path(self, file_path: str, share_expires_at: str = "") -> str:
         """Erzeugt bevorzugt einen öffentlichen Nextcloud-Downloadlink über die API.
 
         Die App übergibt lokalen Dateipfad und lokales Nextcloud-Stammverzeichnis.
@@ -410,7 +427,7 @@ class MailManagerMixin:
         if self.api.configured() and self.api_token:
             try:
                 base = self.base_folder_var.get().strip()
-                response = self.api.create_nextcloud_share(self.api_token, raw, base)
+                response = self.api.create_nextcloud_share(self.api_token, raw, base, share_expires_at=share_expires_at.strip())
                 return (response.get("download_url") or response.get("share_url") or "").strip()
             except Exception as exc:
                 app_log_exception("Nextcloud-Freigabelink konnte nicht erstellt werden; Fallback wird verwendet", exc)
@@ -515,13 +532,16 @@ class MailManagerMixin:
         ttk.Label(fields, text="Betreff:").grid(row=0, column=0, sticky="w", pady=4)
         subject_var = tk.StringVar(value="Information der Ortschronisten")
         ttk.Entry(fields, textvariable=subject_var).grid(row=0, column=1, sticky="ew", pady=4)
-        ttk.Label(fields, text="Dokumente / Anhänge:").grid(row=1, column=0, sticky="nw", pady=4)
+        ttk.Label(fields, text="Verfallsdatum (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", pady=4)
+        share_expires_at_var = tk.StringVar()
+        ttk.Entry(fields, textvariable=share_expires_at_var).grid(row=1, column=1, sticky="ew", pady=4)
+        ttk.Label(fields, text="Dokumente / Anhänge:").grid(row=2, column=0, sticky="nw", pady=4)
         doc_path_var = tk.StringVar()
         link_var = tk.StringVar()
         selected_docs: list[str] = []
         generated_links: dict[str, str] = {}
         doc_frame = ttk.Frame(fields)
-        doc_frame.grid(row=1, column=1, sticky="ew", pady=4)
+        doc_frame.grid(row=2, column=1, sticky="ew", pady=4)
         doc_frame.columnconfigure(1, weight=1)
         ttk.Button(doc_frame, text="+", width=3, command=lambda: add_doc()).grid(row=0, column=0, padx=(0, 6), sticky="w")
         ttk.Entry(doc_frame, textvariable=doc_path_var).grid(row=0, column=1, sticky="ew")
@@ -530,9 +550,9 @@ class MailManagerMixin:
         doc_list = tk.Listbox(doc_frame, height=4, exportselection=False)
         doc_list.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         ttk.Label(doc_frame, text="Mit + können Dokumente nacheinander hinzugefügt werden. Bei Downloadlink werden alle ausgewählten Dateien als Linkliste in die Mail geschrieben.", foreground="#555").grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        ttk.Label(fields, text="Dokumentenliste:").grid(row=2, column=0, sticky="nw", pady=4)
+        ttk.Label(fields, text="Dokumentenliste:").grid(row=3, column=0, sticky="nw", pady=4)
         link_frame = ttk.Frame(fields)
-        link_frame.grid(row=2, column=1, sticky="ew", pady=4)
+        link_frame.grid(row=3, column=1, sticky="ew", pady=4)
         link_frame.columnconfigure(0, weight=1)
         link_text, link_text_frame = self.make_scrolled_text(link_frame, height=5, wrap="word")
         link_text_frame.grid(row=0, column=0, sticky="ew")
@@ -583,12 +603,16 @@ class MailManagerMixin:
             if not selected_docs:
                 return ""
             parts = []
+            expiry = share_expires_at_var.get().strip()
+            if send_mode_var.get() == "link" and expiry:
+                parts.append(f"Gültig bis: {expiry}")
+                parts.append("")
             for path in selected_docs:
                 name = Path(path).name
                 link = generated_links.get(path, "")
                 if force_links or send_mode_var.get() == "link":
                     if not link:
-                        link = self.nextcloud_web_link_for_local_path(path)
+                        link = self.nextcloud_web_link_for_local_path(path, share_expires_at_var.get().strip())
                         generated_links[path] = link
                 parts.append(f"Datei: {name}")
                 if link:
@@ -710,6 +734,7 @@ class MailManagerMixin:
                 "link": link_var.get().strip() if send_mode_var.get() == "link" else "",
                 "local_file_path": first_doc if send_mode_var.get() in {"link", "attachment"} else "",
                 "local_nextcloud_base": self.base_folder_var.get().strip(),
+                "share_expires_at": share_expires_at_var.get().strip(),
                 "document_name": Path(first_doc).name if first_doc else "",
             }
             if send_mode_var.get() == "attachment":

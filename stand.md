@@ -21,6 +21,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Korrekturen innerhalb einer bestehenden Version werden direkt bei dieser Version in der `README.md` ergänzt.
 - Bearbeiterrelevante Änderungen werden zusätzlich in `Handbuch.md` dokumentiert.
 - Admin-, Betriebs-, Server-, Datenbank- und Update-Themen werden zusätzlich in `Admin-Handbuch.md` dokumentiert.
+- In der Benutzerverwaltung werden optionale Nextcloud-Zugangsdaten nur als Vorbereitung für spätere Nutzung erfasst; im Mailbereich kann ein öffentlicher Nextcloud-Link mit manuell gesetztem Verfallsdatum vorbereitet werden.
 - Die Handbücher und die README werden bei Änderungen immer zusammen gedacht, damit die Dokumentation nicht auseinanderläuft.
 - Die aktuelle Versionshistorie in der `README.md` muss immer zum Code- und Handbuchstand passen.
 

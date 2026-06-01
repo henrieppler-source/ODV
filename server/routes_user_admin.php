@@ -49,7 +49,8 @@ if ($method === 'POST' && $path === '/api/admin/devices/block') {
 if ($method === 'GET' && $path === '/api/users') {
     require_role(['superadmin']);
     $pdo = db();
-    $stmt = $pdo->query("\n        SELECT id, username, display_name, email, role, place, is_active, last_login_at, created_at, updated_at\n        FROM users\n        ORDER BY display_name ASC, username ASC\n    ");
+    ensure_user_nextcloud_columns($pdo);
+    $stmt = $pdo->query("\n        SELECT id, username, display_name, email, nextcloud_username,\n               CASE WHEN COALESCE(nextcloud_password_enc, '') <> '' THEN 1 ELSE 0 END AS nextcloud_password_saved,\n               role, place, is_active, last_login_at, created_at, updated_at\n        FROM users\n        ORDER BY display_name ASC, username ASC\n    ");
     json_response(['success' => true, 'users' => $stmt->fetchAll()]);
 }
 
@@ -60,6 +61,8 @@ if ($method === 'POST' && $path === '/api/users') {
     $password = (string)($input['password'] ?? '');
     $displayName = trim((string)($input['display_name'] ?? ''));
     $email = trim((string)($input['email'] ?? ''));
+    $nextcloudUsername = trim((string)($input['nextcloud_username'] ?? ''));
+    $nextcloudPassword = (string)($input['nextcloud_password'] ?? '');
     $role = normalize_role((string)($input['role'] ?? 'ortschronist'));
     $place = trim((string)($input['place'] ?? ''));
     $isActive = isset($input['is_active']) ? (int)(bool)$input['is_active'] : 1;
@@ -70,14 +73,18 @@ if ($method === 'POST' && $path === '/api/users') {
 
     $passwordHash = password_hash($password, PASSWORD_DEFAULT);
     $pdo = db();
+    ensure_user_nextcloud_columns($pdo);
 
     try {
-        $stmt = $pdo->prepare("\n            INSERT INTO users (username, password_hash, display_name, role, place, is_active)\n            VALUES (:username, :password_hash, :display_name, :role, :place, :is_active)\n        ");
+        $nextcloudPasswordEnc = $nextcloudPassword !== '' ? encrypt_nextcloud_credential($pdo, $nextcloudPassword) : '';
+        $stmt = $pdo->prepare("\n            INSERT INTO users (username, password_hash, display_name, email, nextcloud_username, nextcloud_password_enc, role, place, is_active)\n            VALUES (:username, :password_hash, :display_name, :email, :nextcloud_username, :nextcloud_password_enc, :role, :place, :is_active)\n        ");
         $stmt->execute([
             ':username' => $username,
             ':password_hash' => $passwordHash,
             ':display_name' => $displayName,
             ':email' => $email !== '' ? $email : null,
+            ':nextcloud_username' => $nextcloudUsername !== '' ? $nextcloudUsername : null,
+            ':nextcloud_password_enc' => $nextcloudPasswordEnc !== '' ? $nextcloudPasswordEnc : null,
             ':role' => $role,
             ':place' => $place !== '' ? $place : null,
             ':is_active' => $isActive,
@@ -122,31 +129,38 @@ if ($method === 'PUT' && preg_match('#^/api/users/(\d+)$#', $path, $matches)) {
     }
 
     $pdo = db();
+    ensure_user_nextcloud_columns($pdo);
     try {
         if ($password !== '') {
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $pdo->prepare("\n                UPDATE users\n                SET username = :username, password_hash = :password_hash, display_name = :display_name, email = :email, role = :role, place = :place, is_active = :is_active\n                WHERE id = :id\n            ");
+            $stmt = $pdo->prepare("\n                UPDATE users\n                SET username = :username, password_hash = :password_hash, display_name = :display_name, email = :email, nextcloud_username = :nextcloud_username, role = :role, place = :place, is_active = :is_active\n                WHERE id = :id\n            ");
             $stmt->execute([
                 ':id' => $userId,
                 ':username' => $username,
                 ':password_hash' => $passwordHash,
                 ':display_name' => $displayName,
                 ':email' => $email !== '' ? $email : null,
+                ':nextcloud_username' => $nextcloudUsername !== '' ? $nextcloudUsername : null,
                 ':role' => $role,
                 ':place' => $place !== '' ? $place : null,
                 ':is_active' => $isActive,
             ]);
         } else {
-            $stmt = $pdo->prepare("\n                UPDATE users\n                SET username = :username, display_name = :display_name, email = :email, role = :role, place = :place, is_active = :is_active\n                WHERE id = :id\n            ");
+            $stmt = $pdo->prepare("\n                UPDATE users\n                SET username = :username, display_name = :display_name, email = :email, nextcloud_username = :nextcloud_username, role = :role, place = :place, is_active = :is_active\n                WHERE id = :id\n            ");
             $stmt->execute([
                 ':id' => $userId,
                 ':username' => $username,
                 ':display_name' => $displayName,
                 ':email' => $email !== '' ? $email : null,
+                ':nextcloud_username' => $nextcloudUsername !== '' ? $nextcloudUsername : null,
                 ':role' => $role,
                 ':place' => $place !== '' ? $place : null,
                 ':is_active' => $isActive,
             ]);
+        }
+        if ($nextcloudPassword !== '') {
+            $enc = encrypt_nextcloud_credential($pdo, $nextcloudPassword);
+            $pdo->prepare("UPDATE users SET nextcloud_password_enc = :enc WHERE id = :id")->execute([':enc' => $enc, ':id' => $userId]);
         }
         api_log('info', 'Benutzer gespeichert', ['by_user_id' => $currentUser['id'], 'user_id' => $userId]);
         json_response(['success' => true, 'message' => 'Benutzer wurde gespeichert', 'user_id' => $userId]);

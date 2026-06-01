@@ -466,7 +466,7 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
     return mail($recipient, $encodedSubject, $body, implode("\r\n", $headers));
 }
 
-function create_nextcloud_public_share(string $remotePath): array
+function create_nextcloud_public_share(string $remotePath, string $expiresAt = ''): array
 {
     $path = trim(str_replace('\\', '/', $remotePath));
     $pdo = db();
@@ -483,7 +483,12 @@ function create_nextcloud_public_share(string $remotePath): array
         $dir = '/';
     }
     $link = $baseUrl . '?dir=' . rawurlencode($dir);
-    return ['share_url' => $link, 'download_url' => $link, 'url' => $link];
+    $result = ['share_url' => $link, 'download_url' => $link, 'url' => $link];
+    $expiresAt = trim($expiresAt);
+    if ($expiresAt !== '') {
+        $result['expires_at'] = $expiresAt;
+    }
+    return $result;
 }
 
 function document_person_events_from_payload(array $document, array $persons): array
@@ -1367,6 +1372,73 @@ function setting_set(PDO $pdo, string $key, string $value): void
     $stmt = $pdo->prepare("INSERT INTO system_settings (setting_key, setting_value) VALUES (:k, :v)
         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
     $stmt->execute([':k' => $key, ':v' => $value]);
+}
+
+function ensure_user_nextcloud_columns(PDO $pdo): void
+{
+    if (!db_column_exists($pdo, 'users', 'nextcloud_username')) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN nextcloud_username VARCHAR(255) NULL AFTER email");
+    }
+    if (!db_column_exists($pdo, 'users', 'nextcloud_password_enc')) {
+        $pdo->exec("ALTER TABLE users ADD COLUMN nextcloud_password_enc TEXT NULL AFTER nextcloud_username");
+    }
+}
+
+function nextcloud_credentials_crypto_key(PDO $pdo): string
+{
+    ensure_system_settings_table($pdo);
+    $stored = trim((string)(setting_get($pdo, 'nextcloud_credentials_crypto_key', '') ?? ''));
+    if ($stored === '') {
+        $stored = bin2hex(random_bytes(32));
+        setting_set($pdo, 'nextcloud_credentials_crypto_key', $stored);
+    }
+    return hash('sha256', $stored, true);
+}
+
+function encrypt_nextcloud_credential(PDO $pdo, string $value): string
+{
+    $plain = trim($value);
+    if ($plain === '') {
+        return '';
+    }
+    if (!function_exists('openssl_encrypt')) {
+        throw new RuntimeException('OpenSSL ist auf dem Server nicht verfügbar.');
+    }
+    $key = nextcloud_credentials_crypto_key($pdo);
+    $iv = random_bytes(12);
+    $tag = '';
+    $cipher = openssl_encrypt($plain, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($cipher === false) {
+        throw new RuntimeException('Nextcloud-Zugangsdaten konnten nicht verschlüsselt werden.');
+    }
+    return 'nc1:' . base64_encode($iv . $tag . $cipher);
+}
+
+function decrypt_nextcloud_credential(PDO $pdo, string $value): string
+{
+    $stored = trim($value);
+    if ($stored === '') {
+        return '';
+    }
+    if (!str_starts_with($stored, 'nc1:')) {
+        return $stored;
+    }
+    if (!function_exists('openssl_decrypt')) {
+        throw new RuntimeException('OpenSSL ist auf dem Server nicht verfügbar.');
+    }
+    $raw = base64_decode(substr($stored, 4), true);
+    if ($raw === false || strlen($raw) < 29) {
+        throw new RuntimeException('Gespeicherte Nextcloud-Zugangsdaten sind ungültig.');
+    }
+    $iv = substr($raw, 0, 12);
+    $tag = substr($raw, 12, 16);
+    $cipher = substr($raw, 28);
+    $key = nextcloud_credentials_crypto_key($pdo);
+    $plain = openssl_decrypt($cipher, 'aes-256-gcm', $key, OPENSSL_RAW_DATA, $iv, $tag);
+    if ($plain === false) {
+        throw new RuntimeException('Gespeicherte Nextcloud-Zugangsdaten konnten nicht entschlüsselt werden.');
+    }
+    return $plain;
 }
 
 function setting_delete(PDO $pdo, string $key): void

@@ -210,11 +210,14 @@ class APIClient:
             "include_mail_history": bool(include_mail_history),
         }, token=token)
 
-    def create_nextcloud_share(self, token: str, local_file_path: str, local_nextcloud_base: str) -> dict:
-        return self.request("POST", "/nextcloud/share", {
+    def create_nextcloud_share(self, token: str, local_file_path: str, local_nextcloud_base: str, share_expires_at: str = "") -> dict:
+        payload = {
             "local_file_path": local_file_path,
             "local_nextcloud_base": local_nextcloud_base,
-        }, token=token)
+        }
+        if share_expires_at:
+            payload["share_expires_at"] = share_expires_at
+        return self.request("POST", "/nextcloud/share", payload, token=token)
 
     def list_point_rules(self, token: str, year: int | None = None) -> dict:
         query = f"?year={int(year)}" if year else ""

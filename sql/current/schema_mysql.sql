@@ -7,6 +7,8 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     display_name VARCHAR(200) NOT NULL,
     email VARCHAR(255) NULL,
+    nextcloud_username VARCHAR(255) NULL,
+    nextcloud_password_enc TEXT NULL,
     role ENUM('ortschronist', 'admin', 'superadmin') NOT NULL DEFAULT 'ortschronist',
     place VARCHAR(200) NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,

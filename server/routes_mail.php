@@ -12,6 +12,7 @@ if ($method === 'POST' && $path === '/api/mails/send') {
         json_response(['success' => false, 'error' => 'Ungültige Versandart'], 400);
     }
     $link = trim((string)($input['link'] ?? ''));
+    $shareExpiresAt = trim((string)($input['share_expires_at'] ?? ''));
     $attachments = [];
 
     if (!$recipients) {
@@ -29,7 +30,7 @@ if ($method === 'POST' && $path === '/api/mails/send') {
         if ($localFilePath !== '' && $localBasePath !== '') {
             try {
                 $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
-                $share = create_nextcloud_public_share($remotePath);
+                $share = create_nextcloud_public_share($remotePath, $shareExpiresAt);
                 $link = $share['download_url'] ?: $share['share_url'];
                 $body = str_replace('{link}', $link, $body);
                 if (strpos($body, $link) === false) {
@@ -37,6 +38,12 @@ if ($method === 'POST' && $path === '/api/mails/send') {
 
 Downloadlink:
 " . $link;
+                }
+                if ($shareExpiresAt !== '') {
+                    $body .= "
+
+Gültig bis:
+" . $shareExpiresAt;
                 }
             } catch (Throwable $e) {
                 api_log('error', 'Nextcloud-Link für Rundmail konnte nicht erzeugt werden', ['error' => $e->getMessage()]);
@@ -104,7 +111,11 @@ Downloadlink:
             $docs = $input['documents'];
         }
         if ($link !== '') {
-            $docs[] = ['link' => $link];
+            $docInfo = ['link' => $link];
+            if ($shareExpiresAt !== '') {
+                $docInfo['expires_at'] = $shareExpiresAt;
+            }
+            $docs[] = $docInfo;
         }
         if ($attachments) {
             foreach ($attachments as $attachment) {
@@ -136,6 +147,7 @@ Downloadlink:
         'sent' => $sent,
         'failed' => $failed,
         'mode' => $mode,
+        'share_expires_at' => $shareExpiresAt,
         'attachment_count' => count($attachments),
         'subject' => $subject,
     ]);
@@ -174,15 +186,17 @@ if ($method === 'POST' && $path === '/api/nextcloud/share') {
     $input = get_json_input();
     $localFilePath = trim((string)($input['local_file_path'] ?? ''));
     $localBasePath = trim((string)($input['local_nextcloud_base'] ?? ''));
+    $shareExpiresAt = trim((string)($input['share_expires_at'] ?? ''));
     if ($localFilePath === '' || $localBasePath === '') {
         json_response(['success' => false, 'error' => 'local_file_path und local_nextcloud_base sind erforderlich'], 400);
     }
     $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
-    $share = create_nextcloud_public_share($remotePath);
+    $share = create_nextcloud_public_share($remotePath, $shareExpiresAt);
     api_log('info', 'Nextcloud-Freigabe-Link erzeugt', [
         'by_user_id' => $currentUser['id'],
         'local_file_path' => $localFilePath,
         'local_nextcloud_base' => $localBasePath,
+        'share_expires_at' => $shareExpiresAt,
     ]);
     json_response([
         'success' => true,
@@ -190,5 +204,6 @@ if ($method === 'POST' && $path === '/api/nextcloud/share') {
         'download_url' => $share['download_url'] ?? '',
         'share_url' => $share['share_url'] ?? '',
         'url' => $share['url'] ?? '',
+        'share_expires_at' => $shareExpiresAt,
     ]);
 }

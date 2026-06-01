@@ -164,6 +164,8 @@ class UserAdminMixin:
         username_var = tk.StringVar()
         email_var = tk.StringVar()
         password_var = tk.StringVar()
+        nextcloud_username_var = tk.StringVar()
+        nextcloud_password_var = tk.StringVar()
         role_var = tk.StringVar(value="Ortschronist")
         place_var = tk.StringVar()
         active_var = tk.BooleanVar(value=True)
@@ -175,6 +177,8 @@ class UserAdminMixin:
             ("Benutzername:", username_var),
             ("E-Mail:", email_var),
             ("Passwort:", password_var),
+            ("Nextcloud-Benutzername:", nextcloud_username_var),
+            ("Nextcloud-Passwort:", nextcloud_password_var),
             ("Rolle:", role_var),
             ("Ort des Ortschronisten:", place_var),
         ]
@@ -200,7 +204,7 @@ class UserAdminMixin:
             else:
                 ttk.Entry(form, textvariable=var, width=34).grid(row=row, column=1, sticky="ew", padx=6, pady=5)
 
-        ttk.Checkbutton(form, text="Benutzer aktiv", variable=active_var).grid(row=6, column=0, columnspan=2, sticky="w", pady=(6, 4))
+        ttk.Checkbutton(form, text="Benutzer aktiv", variable=active_var).grid(row=8, column=0, columnspan=2, sticky="w", pady=(6, 4))
         hint = ttk.Label(
             form,
             text=(
@@ -209,10 +213,10 @@ class UserAdminMixin:
             ),
             wraplength=360,
         )
-        hint.grid(row=7, column=0, columnspan=2, sticky="w", pady=(8, 12))
+        hint.grid(row=9, column=0, columnspan=2, sticky="w", pady=(8, 12))
 
         perm_frame = ttk.LabelFrame(form, text="Rechte / Hinweise", padding=6)
-        perm_frame.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(4, 8))
+        perm_frame.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(4, 8))
         perm_frame.columnconfigure(0, weight=1)
         permission_vars: dict[str, tuple[tk.BooleanVar, tk.BooleanVar]] = {}
         ttk.Label(perm_frame, text="Bereich").grid(row=0, column=0, sticky="w")
@@ -299,6 +303,8 @@ class UserAdminMixin:
             username_var.set("")
             email_var.set("")
             password_var.set("")
+            nextcloud_username_var.set("")
+            nextcloud_password_var.set("")
             role_var.set("Ortschronist")
             place_var.set("")
             active_var.set(True)
@@ -354,6 +360,8 @@ class UserAdminMixin:
             username_var.set(user.get("username", ""))
             email_var.set(user.get("email", "") or "")
             password_var.set("")
+            nextcloud_username_var.set(user.get("nextcloud_username", "") or "")
+            nextcloud_password_var.set("")
             role_var.set(api_role_label(str(user.get("role", "ortschronist"))))
             place_var.set(user.get("place", "") or "")
             active_var.set(int(user.get("is_active", 0) or 0) == 1)
@@ -373,10 +381,14 @@ class UserAdminMixin:
                 "display_name": name,
                 "username": username,
                 "email": email_var.get().strip(),
+                "nextcloud_username": nextcloud_username_var.get().strip(),
                 "role": self.local_role_to_api(role),
                 "place": place,
                 "is_active": bool(active_var.get()),
             }
+            nextcloud_password = nextcloud_password_var.get().strip()
+            if nextcloud_password:
+                payload["nextcloud_password"] = nextcloud_password
             if include_password:
                 if not password:
                     raise ValueError("Bitte für neue Benutzer ein Passwort erfassen.")
@@ -443,7 +455,7 @@ class UserAdminMixin:
                 messagebox.showerror("Benutzerverwaltung", str(exc), parent=dialog)
 
         btns = ttk.Frame(form)
-        btns.grid(row=9, column=0, columnspan=2, sticky="ew", pady=8)
+        btns.grid(row=11, column=0, columnspan=2, sticky="ew", pady=8)
         ttk.Button(btns, text="Neu", command=clear_form).pack(side="left", padx=4)
         ttk.Button(btns, text="Benutzer speichern", command=save_user).pack(side="left", padx=4)
         ttk.Button(btns, text="Benutzer deaktivieren", command=deactivate_user).pack(side="left", padx=4)
@@ -455,4 +467,3 @@ class UserAdminMixin:
             first = tree.get_children()[0]
             tree.selection_set(first)
             load_selected()
-
