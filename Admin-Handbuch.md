@@ -222,7 +222,7 @@ Unterschied:
 
 | Funktion | Wirkung |
 | --- | --- |
-| Datenbank zurücksetzen | Löscht Bewegungs-/Testdaten nach Sicherheitsabfrage. |
+| Datenbank zurücksetzen | Löscht Bewegungs-/Testdaten nach Sicherheitsabfrage, inklusive Dokumente, Historie, Personenmarkierungen, Punkte und manuelle Sonderpunkte. |
 | Datenbank sichern | Erstellt serverseitig ein SQL-GZ-Backup. |
 | Backup zurücksichern | Spielt ein vorhandenes Serverbackup zurück. |
 | Migrationen ausführen | Passt Tabellen/Regeln kontrolliert an. |

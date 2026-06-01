@@ -109,6 +109,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Bootstrap, Startdialoge und Fensteraufbau liegen in `app/bootstrap_mixin.py` und `app/main_window_mixin.py`.
 - Die technische Aufteilung ändert die Bedienung nicht, macht Start und Wartung aber klarer.
 - Handbuch und Admin-Handbuch sind auf `v119` fortgeschrieben und im Hilfe-Menü direkt als Markdown-Ansicht verfügbar.
+- Datenbank-Reset korrigiert: `manual_special_points` wird nun wie im Dialog beschrieben zusammen mit den übrigen Bewegungsdaten geleert; Benutzer, Rechte, Ortsordner, Punkteregeln, Verteiler und Systemeinstellungen bleiben erhalten.
 - Geänderte Dateien: `app/app_constants.py`, `app/main.py`, `app/bootstrap_mixin.py`, `app/main_window_mixin.py`, `app/uploader.py`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`
 
 ### v118 - Dateiansicht nach Auswahl oben

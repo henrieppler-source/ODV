@@ -59,6 +59,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Wenn sich nur ein kleiner Teil ändert, trotzdem die betroffene Versionsbeschreibung aktualisieren.
 - Wenn sich die Struktur von Modulen ändert, den neuen Zuschnitt kurz dokumentieren.
 - Wenn sichtbare Bedienung, Statuslogik, Punkte, Updateabläufe, Serverbetrieb oder Admin-Menüs betroffen sind, die Änderung in den Handbüchern mitführen.
+- Der Datenbank-Reset ist ein Bewegungsdaten-Reset: Dokumente, Historie, Personenmarkierungen, Punkte und manuelle Sonderpunkte werden geleert; Stammdaten wie Benutzer, Rechte, Orte, Punkteregeln, Verteiler und Systemeinstellungen bleiben erhalten.
 
 ## Kurzform für die nächste Sitzung
 
@@ -71,4 +72,3 @@ Wir machen im ODV-Projekt weiter:
 - README, Handbuch und Admin-Handbuch passend mitpflegen
 - Versionsstand und Entwicklung in der `README.md` sauber dokumentieren
 - Vorhandene Änderungen nicht zurücksetzen oder überschreiben
-

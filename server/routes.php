@@ -3783,7 +3783,7 @@ if ($method === 'POST' && $path === '/api/admin/reset-database') {
     $deleted = [];
     try {
         $pdo->exec("SET FOREIGN_KEY_CHECKS = 0");
-        $tables = ['contribution_points', 'point_events', 'point_adjustments', 'document_persons', 'document_history', 'documents'];
+        $tables = ['contribution_points', 'manual_special_points', 'point_events', 'point_adjustments', 'document_persons', 'document_history', 'documents'];
         if ($includeMail) { $tables[] = 'mail_history'; }
         foreach ($tables as $table) {
             if (!db_table_exists($pdo, $table)) { continue; }
