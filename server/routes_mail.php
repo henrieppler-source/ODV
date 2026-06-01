@@ -168,3 +168,27 @@ if ($method === 'GET' && $path === '/api/mails/history') {
     }
     json_response(['success' => true, 'items' => $items]);
 }
+
+if ($method === 'POST' && $path === '/api/nextcloud/share') {
+    $currentUser = current_user();
+    $input = get_json_input();
+    $localFilePath = trim((string)($input['local_file_path'] ?? ''));
+    $localBasePath = trim((string)($input['local_nextcloud_base'] ?? ''));
+    if ($localFilePath === '' || $localBasePath === '') {
+        json_response(['success' => false, 'error' => 'local_file_path und local_nextcloud_base sind erforderlich'], 400);
+    }
+    $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
+    $share = create_nextcloud_public_share($remotePath);
+    api_log('info', 'Nextcloud-Freigabe-Link erzeugt', [
+        'by_user_id' => $currentUser['id'],
+        'local_file_path' => $localFilePath,
+        'local_nextcloud_base' => $localBasePath,
+    ]);
+    json_response([
+        'success' => true,
+        'remote_path' => $remotePath,
+        'download_url' => $share['download_url'] ?? '',
+        'share_url' => $share['share_url'] ?? '',
+        'url' => $share['url'] ?? '',
+    ]);
+}

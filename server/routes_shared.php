@@ -402,6 +402,119 @@ function current_session_device(PDO $pdo): array
     return $row ?: ['device_id'=>'', 'device_name'=>''];
 }
 
+function build_nextcloud_remote_path(string $localFilePath, string $localNextcloudBase): string
+{
+    $file = trim(str_replace('\\', '/', $localFilePath));
+    $base = trim(str_replace('\\', '/', $localNextcloudBase));
+    if ($file === '') {
+        return '';
+    }
+    if ($base !== '' && str_starts_with($file, $base)) {
+        $relative = ltrim(substr($file, strlen($base)), '/');
+        return $relative;
+    }
+    return ltrim($file, '/');
+}
+
+function send_text_mail(string $to, string $subject, string $body, array $attachments = []): bool
+{
+    $recipient = trim($to);
+    if ($recipient === '') {
+        return false;
+    }
+    $encodedSubject = mb_encode_mimeheader($subject, 'UTF-8', 'Q', "\r\n");
+    $headers = [
+        'MIME-Version: 1.0',
+        'From: Ortschronik <noreply@ortschronik.info>',
+    ];
+
+    $cleanAttachments = [];
+    foreach ($attachments as $attachment) {
+        if (!is_array($attachment) || empty($attachment['content_base64'])) {
+            continue;
+        }
+        $cleanAttachments[] = $attachment;
+    }
+
+    if ($cleanAttachments) {
+        $boundary = '=_odv_' . bin2hex(random_bytes(12));
+        $message = "This is a multi-part message in MIME format.\r\n";
+        $message .= "--{$boundary}\r\n";
+        $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+        $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+        $message .= $body . "\r\n";
+        foreach ($cleanAttachments as $attachment) {
+            $filename = trim((string)($attachment['filename'] ?? 'Anhang'));
+            $mime = trim((string)($attachment['mime_type'] ?? 'application/octet-stream'));
+            $raw = base64_decode((string)$attachment['content_base64'], true);
+            if ($raw === false) {
+                continue;
+            }
+            $message .= "--{$boundary}\r\n";
+            $message .= "Content-Type: {$mime}; name=\"" . str_replace('"', '\\"', $filename) . "\"\r\n";
+            $message .= "Content-Transfer-Encoding: base64\r\n";
+            $message .= "Content-Disposition: attachment; filename=\"" . str_replace('"', '\\"', $filename) . "\"\r\n\r\n";
+            $message .= chunk_split(base64_encode($raw)) . "\r\n";
+        }
+        $message .= "--{$boundary}--\r\n";
+        $headers[] = "Content-Type: multipart/mixed; boundary=\"{$boundary}\"";
+        return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers));
+    }
+
+    $headers[] = "Content-Type: text/plain; charset=UTF-8";
+    $headers[] = "Content-Transfer-Encoding: 8bit";
+    return mail($recipient, $encodedSubject, $body, implode("\r\n", $headers));
+}
+
+function create_nextcloud_public_share(string $remotePath): array
+{
+    $path = trim(str_replace('\\', '/', $remotePath));
+    $pdo = db();
+    $baseUrl = trim((string)(setting_get($pdo, 'nextcloud_web_files_url', '') ?? ''));
+    if ($baseUrl === '') {
+        $baseUrl = 'https://nx94165.your-storageshare.de/apps/files/files';
+    }
+    $baseUrl = rtrim($baseUrl, '/');
+    if ($path === '') {
+        return ['share_url' => $baseUrl, 'download_url' => $baseUrl, 'url' => $baseUrl];
+    }
+    $dir = '/' . trim(dirname($path), '.');
+    if ($dir === '/' || $dir === '/.') {
+        $dir = '/';
+    }
+    $link = $baseUrl . '?dir=' . rawurlencode($dir);
+    return ['share_url' => $link, 'download_url' => $link, 'url' => $link];
+}
+
+function document_person_events_from_payload(array $document, array $persons): array
+{
+    $events = [];
+    foreach ($persons as $person) {
+        if (!is_array($person)) {
+            continue;
+        }
+        $number = (int)($person['number'] ?? 0);
+        $displayName = trim((string)($person['display_name'] ?? ''));
+        if ($number <= 0 || $displayName === '') {
+            continue;
+        }
+        $events[] = [
+            'number' => $number,
+            'display_name' => $displayName,
+            'x' => isset($person['x']) ? (float)$person['x'] : null,
+            'y' => isset($person['y']) ? (float)$person['y'] : null,
+            'certainty' => isset($person['certainty']) ? (float)$person['certainty'] : null,
+            'note' => trim((string)($person['note'] ?? '')),
+        ];
+    }
+    return $events;
+}
+
+function add_person_points_for_document(PDO $pdo, int $documentId, string $uploadId, array $user, array $document, array $events): void
+{
+    add_person_points($pdo, $documentId, $uploadId, $user, $events);
+}
+
 function acquire_document_lock(PDO $pdo, array $user, string $uploadId): void
 {
     ensure_security_tables($pdo);
