@@ -205,6 +205,8 @@ Wichtig:
 - Vorhandene `routes.php`-Backups können im Deployment-Dialog angezeigt und gezielt gelöscht werden; beim Upload bleiben automatisch nur die letzten drei Sicherungen erhalten.
 - FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt gespeichert.
 - API-Token und OpenAI-API-Schlüssel werden lokal ebenfalls per Windows-DPAPI verschlüsselt gespeichert.
+- Die Server-API wird schrittweise modularisiert; Admin-/Backup-/Wartungsendpunkte liegen bereits in `server/routes_admin_endpoints.php`.
+- FTP-Deployment nimmt lokale `routes*.php`-Dateien automatisch mit und rotiert Backups je Datei.
 
 Wenn App- und API-Version abweichen, erhalten Superadmins beim Start einen Hinweis.
 
@@ -342,6 +344,7 @@ Sicherheitsregeln:
 - FTP-Deployment für `routes.php`.
 - FTP-Passwort lokal per Windows-DPAPI verschlüsselt.
 - API-Token und OpenAI-API-Schlüssel lokal per Windows-DPAPI verschlüsselt.
+- Server-Deployment berücksichtigt bereits `routes*.php`-Module.
 - Vor Upload wird Serverdatei gesichert.
 
 ## v106 bis v115

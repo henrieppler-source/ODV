@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ftplib
 import posixpath
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -68,6 +69,26 @@ class AdminOperationsMixin:
                 return path
         return candidates[0]
 
+    def discover_routes_deploy_files(self) -> list[Path]:
+        """Findet routes.php plus mögliche Modul-Dateien im selben Ordner."""
+        main_path = self.resolve_local_routes_path()
+        if not main_path.parent.exists():
+            return [main_path]
+        files: list[Path] = []
+        seen: set[str] = set()
+        for candidate in [main_path, *sorted(main_path.parent.glob("routes*.php"))]:
+            try:
+                resolved = candidate.resolve()
+            except Exception:
+                resolved = candidate
+            key = str(resolved).lower()
+            if key in seen:
+                continue
+            if candidate.is_file():
+                files.append(candidate)
+                seen.add(key)
+        return files or [main_path]
+
     def stored_ftp_password(self) -> str:
         encrypted = str(self.config_data.get("ftp_password_dpapi", "") or "")
         if not encrypted:
@@ -80,40 +101,51 @@ class AdminOperationsMixin:
         user = str(self.config_data.get("ftp_user", "") or "").strip()
         remote_path = str(self.config_data.get("ftp_remote_routes_path", "") or "").strip()
         password = self.stored_ftp_password()
-        local_path = self.resolve_local_routes_path()
+        local_files = self.discover_routes_deploy_files()
+        main_path = self.resolve_local_routes_path()
         if not host or not user or not remote_path:
             raise RuntimeError("FTP-Server, Benutzer oder Zielpfad fehlen in den Admin-Einstellungen.")
         if not password:
             raise RuntimeError("FTP-Passwort ist noch nicht gespeichert. Bitte einmal in den Admin-Einstellungen erfassen.")
-        if not local_path.exists():
-            raise RuntimeError(f"Lokale routes.php nicht gefunden: {local_path}")
         remote_dir = posixpath.dirname(remote_path)
-        remote_name = posixpath.basename(remote_path)
-        if not remote_dir or not remote_name:
+        remote_main_name = posixpath.basename(remote_path)
+        if not remote_dir or not remote_main_name:
             raise RuntimeError("FTP-Zielpfad ist ungültig.")
+        for local_path in local_files:
+            if not local_path.exists():
+                raise RuntimeError(f"Lokale Datei nicht gefunden: {local_path}")
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        stem, ext = posixpath.splitext(remote_name)
-        backup_name = f"{stem}_backup_{self.app_version()}_{stamp}{ext or '.php'}"
         with ftplib.FTP() as ftp:
             ftp.connect(host, port, timeout=30)
             ftp.login(user, password)
             ftp.cwd(remote_dir)
-            existing = ftp.nlst()
-            backup_created = False
-            if remote_name in existing:
-                ftp.rename(remote_name, backup_name)
-                backup_created = True
-            with local_path.open("rb") as fh:
-                ftp.storbinary(f"STOR {remote_name}", fh)
-            size = ftp.size(remote_name)
+            existing = set(ftp.nlst())
+            uploaded = []
+            backups_created = []
+            sizes: dict[str, int | None] = {}
+            for local_path in local_files:
+                remote_name = local_path.name if local_path.name != main_path.name else remote_main_name
+                stem, ext = posixpath.splitext(remote_name)
+                backup_name = f"{stem}_backup_{self.app_version()}_{stamp}{ext or '.php'}"
+                if remote_name in existing:
+                    ftp.rename(remote_name, backup_name)
+                    backups_created.append(backup_name)
+                with local_path.open("rb") as fh:
+                    ftp.storbinary(f"STOR {remote_name}", fh)
+                try:
+                    sizes[remote_name] = int(ftp.size(remote_name) or 0)
+                except Exception:
+                    sizes[remote_name] = None
+                uploaded.append({"local_path": str(local_path), "remote_name": remote_name})
         cleanup_deleted = self.cleanup_old_routes_backups_via_ftp(keep=3)
         return {
             "host": host,
             "remote_dir": remote_dir,
-            "remote_name": remote_name,
-            "backup_name": backup_name if backup_created else "",
-            "local_path": str(local_path),
-            "size": size,
+            "remote_name": remote_main_name,
+            "uploaded": uploaded,
+            "backup_names": backups_created,
+            "local_path": str(main_path),
+            "size": sizes.get(remote_main_name),
             "cleanup_deleted": cleanup_deleted,
         }
 
@@ -129,17 +161,20 @@ class AdminOperationsMixin:
             raise RuntimeError("FTP-Zugang oder Zielpfad ist unvollständig.")
         return host, port, user, password, remote_dir, remote_name
 
+    @staticmethod
+    def _is_routes_backup_name(name: str) -> bool:
+        safe_name = posixpath.basename(str(name))
+        return bool(re.match(r"^routes.*_backup_.+\.php$", safe_name, re.IGNORECASE))
+
     def list_routes_backups_via_ftp(self) -> list[dict]:
-        host, port, user, password, remote_dir, remote_name = self.ftp_connection_info()
-        stem, ext = posixpath.splitext(remote_name)
-        prefix = f"{stem}_backup_"
+        host, port, user, password, remote_dir, _remote_name = self.ftp_connection_info()
         backups: list[dict] = []
         with ftplib.FTP() as ftp:
             ftp.connect(host, port, timeout=30)
             ftp.login(user, password)
             ftp.cwd(remote_dir)
             for name in ftp.nlst():
-                if not name.startswith(prefix) or (ext and not name.endswith(ext)):
+                if not self._is_routes_backup_name(name):
                     continue
                 size = 0
                 modified = ""
@@ -157,9 +192,7 @@ class AdminOperationsMixin:
         return backups
 
     def delete_routes_backups_via_ftp(self, names: list[str]) -> int:
-        host, port, user, password, remote_dir, remote_name = self.ftp_connection_info()
-        stem, ext = posixpath.splitext(remote_name)
-        prefix = f"{stem}_backup_"
+        host, port, user, password, remote_dir, _remote_name = self.ftp_connection_info()
         deleted = 0
         with ftplib.FTP() as ftp:
             ftp.connect(host, port, timeout=30)
@@ -167,7 +200,7 @@ class AdminOperationsMixin:
             ftp.cwd(remote_dir)
             for name in names:
                 safe_name = posixpath.basename(str(name))
-                if not safe_name.startswith(prefix) or (ext and not safe_name.endswith(ext)):
+                if not self._is_routes_backup_name(safe_name):
                     continue
                 ftp.delete(safe_name)
                 deleted += 1
@@ -175,7 +208,21 @@ class AdminOperationsMixin:
 
     def cleanup_old_routes_backups_via_ftp(self, keep: int = 3) -> int:
         backups = self.list_routes_backups_via_ftp()
-        old_names = [str(item.get("name") or "") for item in backups[max(0, keep):]]
+        grouped: dict[str, list[str]] = {}
+        for item in backups:
+            name = str(item.get("name") or "")
+            if "_backup_" not in name:
+                continue
+            base_name = name.split("_backup_", 1)[0]
+            grouped.setdefault(base_name, []).append(name)
+        old_names: list[str] = []
+        for names in grouped.values():
+            names_sorted = sorted(
+                names,
+                key=lambda n: next((str(item.get("modified") or "") for item in backups if str(item.get("name") or "") == n), ""),
+                reverse=True,
+            )
+            old_names.extend(names_sorted[max(0, keep):])
         return self.delete_routes_backups_via_ftp([name for name in old_names if name])
 
     @staticmethod
@@ -220,7 +267,7 @@ class AdminOperationsMixin:
         password_saved = bool(str(self.config_data.get("ftp_password_dpapi", "") or "").strip())
 
         text = (
-            "ODV sichert die vorhandene routes.php auf dem Webserver, lädt danach die lokale Datei hoch und behält automatisch nur die letzten 3 Server-Backups.\n\n"
+            "ODV sichert die vorhandenen routes*.php-Dateien auf dem Webserver, lädt danach die lokalen Server-Dateien hoch und behält automatisch nur die letzten 3 Server-Backups je Datei.\n\n"
             f"Lokal: {local_path}\n"
             f"Server: {server}:{port}\n"
             f"Benutzer: {user}\n"
@@ -260,7 +307,7 @@ class AdminOperationsMixin:
         def run_deploy() -> None:
             if not messagebox.askyesno(
                 "routes.php hochladen",
-                "Jetzt die Server-routes.php sichern und die lokale server/routes.php hochladen?",
+                "Jetzt die Server-routes.php und alle lokalen routes*.php-Dateien sichern und hochladen?",
                 parent=dialog,
             ):
                 return
@@ -271,21 +318,29 @@ class AdminOperationsMixin:
             def worker() -> None:
                 try:
                     info = self.deploy_routes_via_ftp()
+                    uploaded = info.get("uploaded") or []
+                    backup_names = info.get("backup_names") or []
                     lines = [
                         "Upload abgeschlossen.",
-                        f"Lokale Datei: {info.get('local_path')}",
+                        f"Lokale Hauptdatei: {info.get('local_path')}",
                         f"Serverziel: {info.get('remote_dir')}/{info.get('remote_name')}",
-                        f"Größe: {info.get('size')} Byte",
+                        f"Größe: {info.get('size') if info.get('size') is not None else 'n.v.'}",
                     ]
-                    if info.get("backup_name"):
-                        lines.append(f"Backup auf Server: {info.get('backup_name')}")
-                    else:
-                        lines.append("Kein Server-Backup erstellt, weil keine vorhandene routes.php gefunden wurde.")
+                    if uploaded:
+                        lines.append("Hochgeladene Dateien:")
+                        for item in uploaded:
+                            lines.append(f" - {item.get('remote_name')}")
+                    if backup_names:
+                        lines.append("Server-Backups:")
+                        for name in backup_names:
+                            lines.append(f" - {name}")
+                    if not backup_names:
+                        lines.append("Kein Server-Backup erstellt, weil keine vorhandene routes-Datei gefunden wurde.")
                     if int(info.get("cleanup_deleted", 0) or 0):
                         lines.append(f"Alte Server-Backups gelöscht: {info.get('cleanup_deleted')}")
                     self.after(0, lambda: result_var.set("\n".join(lines)))
                     self.after(0, load_server_backups)
-                    self.after(0, lambda: messagebox.showinfo("routes.php hochladen", "routes.php wurde hochgeladen.", parent=dialog))
+                    self.after(0, lambda: messagebox.showinfo("routes.php hochladen", "routes-Dateien wurden hochgeladen.", parent=dialog))
                 except Exception as exc:
                     self.after(0, lambda error=str(exc): result_var.set(f"Upload fehlgeschlagen: {error}"))
                     self.after(0, lambda error=str(exc): messagebox.showerror("routes.php hochladen", f"Upload fehlgeschlagen:\n{error}", parent=dialog))
@@ -309,7 +364,7 @@ class AdminOperationsMixin:
                 messagebox.showerror("Server-Backups", f"Backups konnten nicht gelöscht werden:\n{exc}", parent=dialog)
 
         def cleanup_old_backups() -> None:
-            if not messagebox.askyesno("Server-Backups bereinigen", "Nur die letzten 3 routes.php-Backups behalten und ältere löschen?", parent=dialog):
+            if not messagebox.askyesno("Server-Backups bereinigen", "Nur die letzten 3 routes-Backups je Datei behalten und ältere löschen?", parent=dialog):
                 return
             try:
                 deleted = self.cleanup_old_routes_backups_via_ftp(keep=3)
