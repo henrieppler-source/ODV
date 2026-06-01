@@ -1,6 +1,6 @@
 # ODV-Admin-Handbuch
 
-Stand: v119
+Stand: v120
 
 Dieses Handbuch beschreibt Administration, Betrieb und technische Abläufe der Ortschronisten-Datei-Verwaltung (ODV). Es richtet sich an Admins und Superadmins.
 
@@ -417,7 +417,7 @@ Sicherheitsregeln:
 - Ordner-, Dateinamen- und Leseregeln liegen in einem eigenen Path-Policy-Modul.
 - Lokale Pfade und Dateivarianten werden in einem eigenen Path-Resolution-Modul behandelt.
 
-## v116 bis v119
+## v116 bis v120
 
 - Die App-Version liegt jetzt zentral in `app/app_constants.py`; `app/main.py` ist nur noch der Launcher.
 - Die App-Klasse ist in `app/uploader.py` gebündelt.
@@ -428,6 +428,7 @@ Sicherheitsregeln:
 - Server-Deployment erweitert: Server-Backups können angezeigt und gezielt gelöscht werden; beim Upload bleiben automatisch nur die letzten drei Sicherungen erhalten.
 - Beitragsauswertung erweitert: Geldbeträge werden mit `EUR` und zwei Nachkommastellen dargestellt; je Nutzer wird der berechnete Wert angezeigt.
 - Rundmail-Dialog markiert Benutzer farblich, wenn sie über einen ausgewählten Verteiler enthalten sind.
+- Mailbereich erweitert: Antwortadresse wird vorbelegt, Mailrechte sind rollenbasiert, Standardtexte sind auf Admin/Superadmin begrenzt und `Versandart Anlagen` unterscheidet Nextcloud-Links von normalen Anhängen.
 
 ## Dokumentationsregel
 

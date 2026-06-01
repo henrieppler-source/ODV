@@ -1,13 +1,13 @@
 # ODV-Stand und Arbeitsvereinbarungen
 
-Stand: v119
+Stand: v120
 
 Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstand für die Weiterentwicklung der ODV-Anwendung. Sie dient als kompakte Wiederaufnahmehilfe für spätere Sitzungen.
 
 ## Aktueller Stand
 
-- Aktuelle App-Version: `v119`
-- README-Version: `v119`
+- Aktuelle App-Version: `v120`
+- README-Version: `v120`
 - Bearbeiter-Handbuch: `Handbuch.md`
 - Admin-Handbuch: `Admin-Handbuch.md`
 - Zentrale App-Konstanten: `app/app_constants.py`

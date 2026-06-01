@@ -1,8 +1,8 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v119
+# Ortschronisten-Datei-Verwaltung (ODV) v120
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v119`
+- Aktuelle App-Version laut `app/main.py`: `v120`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
@@ -26,7 +26,7 @@ Wir machen im ODV-Projekt weiter:
 C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v119.
+Aktuelle App-Version laut README/Code: v120.
 Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
 Bearbeiterrelevante Änderungen bitte zusätzlich in Handbuch.md, Admin-/Betriebsthemen zusätzlich in Admin-Handbuch.md dokumentieren.
 Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
@@ -99,6 +99,19 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - `sql/migrations/schema_v82_upload_form_layout.sql`
 
 ## Versionshistorie
+
+### v120 - Mailrechte und Versionsstand angehoben
+
+- Aktuelle App-Version laut `app/main.py`: `v120`.
+- API-Version in `server/routes.php` auf `v120` angehoben.
+- `Antwort an` wird im Rundmail-Dialog aus dem angemeldeten Benutzer vorbelegt.
+- Die Mail-UI zeigt `Versandart Anlagen`; Nextcloud-Dateien werden bei Link-Versand automatisch als Downloadlink erzeugt, andere Dateien werden normal angehängt.
+- Die Standard-Text-Vorbelegung startet jetzt minimal mit Leerzeile, `Viele Grüße` und dem Namen des angemeldeten Benutzers.
+- Mailrechte sind gestaffelt: Admin/Superadmin darf an alle Benutzer und externe Empfänger senden, Bearbeiter nur an Benutzer und orts-/eigene Verteiler; Standardtexte stehen nur Admin/Superadmin zur Verfügung.
+- Mailhistorie ist benutzerbezogen und zeigt immer nur die eigenen Versandvorgänge.
+- Verteiler speichern den Ersteller mit; normale Nutzer sehen ihre eigenen und ortsbezogenen Verteiler, Admin/Superadmin nur Verteiler, die von Admin/Superadmin angelegt wurden.
+- Die technische Aufteilung und die bisherigen Doku-/Reset-/Server-Änderungen aus v119 bleiben erhalten.
+- Handbuch und Admin-Handbuch sind auf `v120` fortgeschrieben und im Hilfe-Menü direkt als Markdown-Ansicht verfügbar.
 
 ### v119 - Launcher und Modulaufteilung bereinigt
 

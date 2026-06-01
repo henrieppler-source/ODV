@@ -26,6 +26,7 @@ class SessionManagerMixin:
         return {
             "display_name": user.get("display_name") or user.get("name") or user.get("username") or "Ortschronist/in",
             "username": user.get("username") or "",
+            "email": user.get("email") or "",
             "password_hash": "",
             "role": self.api_role_to_local(str(user.get("role", "ortschronist"))),
             "place": user.get("place") or "",

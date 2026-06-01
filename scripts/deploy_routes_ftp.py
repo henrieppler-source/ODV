@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from app.app_constants import APP_VERSION
 from app.config import load_config
 from app.secure_store import unprotect_text
 
@@ -64,7 +65,7 @@ def main() -> int:
         for local_path in local_files:
             remote_name = local_path.name if local_path.name != main_path.name else remote_main_name
             stem, ext = posixpath.splitext(remote_name)
-            backup_name = f"{stem}_backup_{cfg.get('app_version', 'v119')}_{stamp}{ext or '.php'}"
+            backup_name = f"{stem}_backup_{APP_VERSION}_{stamp}{ext or '.php'}"
             if remote_name in existing:
                 ftp.rename(remote_name, backup_name)
                 backup_names.append(backup_name)

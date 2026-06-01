@@ -674,7 +674,11 @@ class MailManagerMixin:
         dialog.rowconfigure(7, weight=1)
 
         ttk.Label(dialog, text="Antwort an:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        reply_to_var = tk.StringVar(value=((self.current_user.get("email", "") if self.current_user else "") or self.email_var.get().strip() or str(self.config_data.get("current_email", "") or "")))
+        current_username = (self.username_var.get().strip() or (self.current_user.get("username", "") if self.current_user else "")).strip()
+        current_email = (self.current_user.get("email", "") if self.current_user else "") or self.email_var.get().strip() or str(self.config_data.get("current_email", "") or "")
+        if not current_email and current_username:
+            current_email = next((str(u.get("email", "") or "").strip() for u in users if str(u.get("username", "") or "").strip() == current_username), "")
+        reply_to_var = tk.StringVar(value=current_email)
         ttk.Entry(dialog, textvariable=reply_to_var).grid(row=0, column=1, sticky="ew", padx=10, pady=8)
 
         ttk.Label(dialog, text="Verteiler:").grid(row=1, column=0, sticky="nw", padx=10, pady=8)
@@ -755,11 +759,8 @@ class MailManagerMixin:
         ttk.Label(dialog, text="Text:").grid(row=7, column=0, sticky="nw", padx=10, pady=4)
         body, body_frame = self.make_scrolled_text(dialog, height=16, wrap="word")
         body_frame.grid(row=7, column=1, sticky="nsew", padx=10, pady=4)
-        body.insert("1.0", "Liebe Ortschronistinnen und Ortschronisten,\n\n"
-                         "es liegt eine neue Information / Einladung vor.\n\n"
-                         "DOKUMENTE:\n{dokumente}\n\n"
-                         "Viele Grüße\n"
-                         f"{self.display_name_var.get().strip() or 'Ortschronisten'}")
+        body.insert("1.0", "\nViele Grüße\n"
+                         f"{(self.current_user.get('display_name') if self.current_user else '') or self.display_name_var.get().strip() or 'Ortschronisten'}")
 
         ttk.Label(dialog, text="Dokument / Anhänge:").grid(row=8, column=0, sticky="nw", padx=10, pady=8)
         doc_path_var = tk.StringVar()

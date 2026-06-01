@@ -1,6 +1,6 @@
 # ODV-Handbuch für Bearbeiter
 
-Stand: v119
+Stand: v120
 
 Dieses Handbuch beschreibt die Arbeit mit der Ortschronisten-Datei-Verwaltung (ODV) aus Sicht von Bearbeiterinnen und Bearbeitern. Es konzentriert sich auf die tägliche Erfassung, Pflege und Suche von Dateien und Metadaten.
 
