@@ -648,8 +648,9 @@ class MailManagerMixin:
 
         def update_group_highlights() -> None:
             highlighted: set[str] = set()
-            for var, group in group_vars:
-                if not var.get():
+            selected_indices: set[int] = set(group_listbox.curselection() if group_listbox is not None else [])
+            for idx, group in enumerate(groups):
+                if idx not in selected_indices:
                     continue
                 for member in list(group.get("members", []) or []) + list(group.get("external_members", []) or []):
                     email = str(member.get("email", "") or "").strip().lower()
@@ -665,13 +666,19 @@ class MailManagerMixin:
         ttk.Label(dialog, text="Verteiler:").grid(row=1, column=0, sticky="nw", padx=10, pady=8)
         group_frame = ttk.Frame(dialog)
         group_frame.grid(row=1, column=1, sticky="ew", padx=10, pady=8)
-        group_vars: list[tuple[tk.BooleanVar, dict]] = []
+        group_frame.columnconfigure(0, weight=1)
+        group_listbox: tk.Listbox | None = None
         if groups:
-            for idx, group in enumerate(groups):
-                var = tk.BooleanVar(value=False)
-                group_vars.append((var, group))
+            group_listbox = tk.Listbox(group_frame, selectmode="extended", height=min(6, max(3, len(groups))), exportselection=False)
+            group_listbox.grid(row=0, column=0, sticky="ew")
+            group_scroll = ttk.Scrollbar(group_frame, orient="vertical", command=group_listbox.yview)
+            group_listbox.configure(yscrollcommand=group_scroll.set)
+            group_scroll.grid(row=0, column=1, sticky="ns")
+            for group in groups:
                 text = f"{group.get('name','')} ({len(group.get('members', []))} Empfänger)"
-                ttk.Checkbutton(group_frame, text=text, variable=var, command=update_group_highlights).grid(row=idx // 3, column=idx % 3, sticky="w", padx=(0, 18), pady=2)
+                group_listbox.insert("end", text)
+            group_listbox.bind("<<ListboxSelect>>", lambda _e: update_group_highlights())
+            ttk.Label(group_frame, text="Mehrfachauswahl mit Strg/Shift möglich.", foreground="#555").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
         else:
             ttk.Label(group_frame, text="Keine Verteiler vorhanden. Über Informationen > Verteiler verwalten anlegen.").grid(row=0, column=0, sticky="w")
 
@@ -706,12 +713,11 @@ class MailManagerMixin:
         ttk.Label(fields, text="Verfallsdatum:").grid(row=2, column=0, sticky="w", pady=4)
         share_expires_at_var = tk.StringVar(value=date.today().isoformat())
         expiry_frame = ttk.Frame(fields)
-        expiry_frame.grid(row=2, column=1, sticky="ew", pady=4)
-        expiry_frame.columnconfigure(0, weight=1)
+        expiry_frame.grid(row=2, column=1, sticky="w", pady=4)
         expiry_entry = ttk.Entry(expiry_frame, textvariable=share_expires_at_var, width=16)
-        expiry_entry.grid(row=0, column=0, sticky="w")
-        ttk.Button(expiry_frame, text="Kalender", width=9, command=lambda: open_date_picker()).grid(row=0, column=1, padx=(6, 0))
-        ttk.Button(expiry_frame, text="Heute", width=7, command=lambda: share_expires_at_var.set(date.today().isoformat())).grid(row=0, column=2, padx=(6, 0))
+        expiry_entry.pack(side="left")
+        ttk.Button(expiry_frame, text="Kalender", width=9, command=lambda: open_date_picker()).pack(side="left", padx=(4, 0))
+        ttk.Button(expiry_frame, text="Heute", width=7, command=lambda: share_expires_at_var.set(date.today().isoformat())).pack(side="left", padx=(4, 0))
         ttk.Label(fields, text="Dokumente / Anhänge:").grid(row=3, column=0, sticky="nw", pady=4)
         doc_path_var = tk.StringVar()
         link_var = tk.StringVar()
@@ -892,8 +898,9 @@ class MailManagerMixin:
                 email = str(users[int(idx)].get("email", "") or "").strip()
                 if email:
                     emails.append(email)
-            for var, group in group_vars:
-                if not var.get():
+            selected_indices: set[int] = set(group_listbox.curselection() if group_listbox is not None else [])
+            for idx, group in enumerate(groups):
+                if idx not in selected_indices:
                     continue
                 for member in list(group.get("members", []) or []) + list(group.get("external_members", []) or []):
                     email = str(member.get("email", "") or "").strip()
@@ -925,11 +932,14 @@ class MailManagerMixin:
                 document_block = build_documents_block(force_links=True)
             elif selected_docs and send_mode_var.get() == "attachment" and not document_block:
                 document_block = "\n".join(f"Datei: {Path(x).name}" for x in selected_docs)
-            return (body.get("1.0", "end")
-                    .replace("{dokumente}", document_block)
-                    .replace("{link}", document_block)
-                    .replace("{datei}", doc_name)
-                    .strip())
+            rendered = (body.get("1.0", "end")
+                        .replace("{dokumente}", document_block)
+                        .replace("{link}", document_block)
+                        .replace("{datei}", doc_name)
+                        .strip())
+            if document_block:
+                rendered += "\n\nAnlagen:\n" + document_block
+            return rendered
 
         def copy_mail_text():
             recipients = collect_recipients()

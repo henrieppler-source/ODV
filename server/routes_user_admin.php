@@ -225,6 +225,8 @@ if ($method === 'PUT' && preg_match('#^/api/users/(\d+)$#', $path, $matches)) {
     $password = (string)($input['password'] ?? '');
     $displayName = trim((string)($input['display_name'] ?? ''));
     $email = trim((string)($input['email'] ?? ''));
+    $nextcloudUsername = trim((string)($input['nextcloud_username'] ?? ''));
+    $nextcloudPassword = (string)($input['nextcloud_password'] ?? '');
     $role = normalize_role((string)($input['role'] ?? 'ortschronist'));
     $place = trim((string)($input['place'] ?? ''));
     $isActive = isset($input['is_active']) ? (int)(bool)$input['is_active'] : 1;

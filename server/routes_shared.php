@@ -458,12 +458,14 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
         }
         $message .= "--{$boundary}--\r\n";
         $headers[] = "Content-Type: multipart/mixed; boundary=\"{$boundary}\"";
-        return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers));
+        $params = '-f noreply@ortschronik.info';
+        return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers), $params);
     }
 
     $headers[] = "Content-Type: text/plain; charset=UTF-8";
     $headers[] = "Content-Transfer-Encoding: 8bit";
-    return mail($recipient, $encodedSubject, $body, implode("\r\n", $headers));
+    $params = '-f noreply@ortschronik.info';
+    return mail($recipient, $encodedSubject, $body, implode("\r\n", $headers), $params);
 }
 
 function create_nextcloud_public_share(string $remotePath, string $expiresAt = ''): array

@@ -59,12 +59,13 @@ class UserAdminMixin:
         dev_tree.grid(row=0, column=0, sticky="nsew")
         ttk.Scrollbar(dev_frame, orient="vertical", command=dev_tree.yview).grid(row=0, column=1, sticky="ns")
 
-        state = {"devices": [], "sessions": []}
+        state = {"devices": [], "device_lookup": {}, "sessions": []}
 
         def refresh():
             try:
                 data = self.api.list_sessions_and_devices(self.api_token)
                 state["devices"] = list(data.get("devices", []))
+                state["device_lookup"] = {}
                 state["sessions"] = list(data.get("sessions", []))
             except ApiError as exc:
                 messagebox.showerror("Sitzungen und Geräte", f"Daten konnten nicht geladen werden:\n{exc}", parent=dialog)
@@ -79,7 +80,9 @@ class UserAdminMixin:
                     row.get("last_seen_at", ""), row.get("expires_at", ""),
                 ))
             for idx, row in enumerate(state["devices"]):
-                dev_tree.insert("", "end", iid=str(idx), values=(
+                iid = str(row.get("device_id") or idx)
+                state["device_lookup"][iid] = row
+                dev_tree.insert("", "end", iid=iid, values=(
                     row.get("user_id", ""), row.get("display_name", ""), row.get("device_id", ""),
                     row.get("device_name", ""), row.get("windows_user", ""), row.get("app_version", ""),
                     row.get("last_ip", ""), row.get("first_seen_at", ""), row.get("last_login_at", ""),
@@ -105,7 +108,7 @@ class UserAdminMixin:
             if not sel:
                 return None
             try:
-                return state["devices"][int(sel[0])]
+                return state["device_lookup"].get(sel[0])
             except Exception:
                 return None
 
@@ -371,6 +374,7 @@ class UserAdminMixin:
             name = name_var.get().strip()
             username = normalize_username(username_var.get().strip())
             password = password_var.get()
+            nextcloud_username = nextcloud_username_var.get().strip()
             role = role_var.get().strip() or "Ortschronist"
             place = place_var.get().strip()
             if not name:
@@ -381,7 +385,7 @@ class UserAdminMixin:
                 "display_name": name,
                 "username": username,
                 "email": email_var.get().strip(),
-                "nextcloud_username": nextcloud_username_var.get().strip(),
+                "nextcloud_username": nextcloud_username,
                 "role": self.local_role_to_api(role),
                 "place": place,
                 "is_active": bool(active_var.get()),
@@ -410,6 +414,9 @@ class UserAdminMixin:
                     refresh_tree(select_id=new_id or None)
                 else:
                     payload = build_payload(include_password=False)
+                    nextcloud_username = nextcloud_username_var.get().strip()
+                    if nextcloud_username:
+                        payload["nextcloud_username"] = nextcloud_username
                     # Schutz gegen Selbst-Deaktivierung: Der angemeldete Benutzer darf
                     # sich nicht versehentlich über die Benutzerverwaltung deaktivieren.
                     current_username = normalize_username(self.username_var.get().strip())
