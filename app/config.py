@@ -23,6 +23,7 @@ DB_FILE = APP_DIR / "history.sqlite"
 DEFAULT_CONFIG: dict[str, Any] = {
     "display_name": "Ortschronist/in",
     "current_username": "",
+    "current_email": "",
     "nextcloud_base_folder": "",
     "metadata_folder": "",
     "metadata_folder_name": ".ortschronik_metadaten",

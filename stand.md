@@ -26,6 +26,9 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Standardtext-Auswahl im Rundmail-Dialog soll direkt über dem Textfeld stehen; beim Wechsel wird der Text ersetzt.
 - Im Rundmail-Dialog kann optional eine `Antwort an`-Adresse gepflegt werden, während der Versand über `info@ortschronik.info` läuft.
 - Für Mailtexte ist das leichte Markup `/bText/b` erlaubt und wird beim Direktversand als HTML-Fettschrift gerendert.
+- Mailrechte: Admin/Superadmin dürfen an alle senden und externe Empfänger nutzen; Bearbeiter nur an Benutzer und orts-/eigene Verteiler, ohne externe Empfänger.
+- Verteiler speichern den Ersteller; normale Nutzer sehen nur eigene und ortsbezogene Verteiler, Admin/Superadmin nur von Admin/Superadmin angelegte Verteiler.
+- Versandhistorie bleibt benutzerbezogen und zeigt jeweils nur die eigenen Sendungen.
 - Die API-Endpunkte für Ordnerrechte und Ortsordner-Stammdaten müssen aktiv bleiben; fehlende Routen wurden wieder ergänzt.
 - Die Handbücher und die README werden bei Änderungen immer zusammen gedacht, damit die Dokumentation nicht auseinanderläuft.
 - Die aktuelle Versionshistorie in der `README.md` muss immer zum Code- und Handbuchstand passen.

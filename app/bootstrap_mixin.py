@@ -56,6 +56,7 @@ class BootstrapMixin:
         # mehr auf den Arbeitsseiten ein.
         self.display_name_var = tk.StringVar(value=self.config_data.get("display_name", ""))
         self.username_var = tk.StringVar(value=self.config_data.get("current_username", ""))
+        self.email_var = tk.StringVar(value=self.config_data.get("current_email", ""))
         self.role_var = tk.StringVar(value=self.config_data.get("current_role", "Ortschronist"))
         self.role_label_var = tk.StringVar(value=self.role_var.get())
         self.place_var = tk.StringVar(value=self.config_data.get("current_place", ""))

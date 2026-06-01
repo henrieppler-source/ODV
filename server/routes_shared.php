@@ -1476,9 +1476,15 @@ function ensure_mail_group_tables(PDO $pdo): void
         name VARCHAR(150) NOT NULL UNIQUE,
         description TEXT DEFAULT NULL,
         is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_by_user_id INT DEFAULT NULL,
+        created_by_display_name VARCHAR(200) DEFAULT NULL,
+        created_by_role VARCHAR(40) DEFAULT NULL,
+        created_by_place VARCHAR(200) DEFAULT NULL,
         updated_by_user_id INT DEFAULT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_mail_groups_creator (created_by_user_id),
+        INDEX idx_mail_groups_creator_place (created_by_place),
         CONSTRAINT fk_mail_groups_updated_by FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
     $pdo->exec("CREATE TABLE IF NOT EXISTS mail_group_members (
@@ -1490,6 +1496,22 @@ function ensure_mail_group_tables(PDO $pdo): void
         CONSTRAINT fk_mgm_group FOREIGN KEY (group_id) REFERENCES mail_groups(id) ON DELETE CASCADE,
         CONSTRAINT fk_mgm_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+}
+
+function ensure_mail_group_creator_columns(PDO $pdo): void
+{
+    if (!db_column_exists($pdo, 'mail_groups', 'created_by_user_id')) {
+        $pdo->exec("ALTER TABLE mail_groups ADD COLUMN created_by_user_id INT DEFAULT NULL AFTER is_active");
+    }
+    if (!db_column_exists($pdo, 'mail_groups', 'created_by_display_name')) {
+        $pdo->exec("ALTER TABLE mail_groups ADD COLUMN created_by_display_name VARCHAR(200) DEFAULT NULL AFTER created_by_user_id");
+    }
+    if (!db_column_exists($pdo, 'mail_groups', 'created_by_role')) {
+        $pdo->exec("ALTER TABLE mail_groups ADD COLUMN created_by_role VARCHAR(40) DEFAULT NULL AFTER created_by_display_name");
+    }
+    if (!db_column_exists($pdo, 'mail_groups', 'created_by_place')) {
+        $pdo->exec("ALTER TABLE mail_groups ADD COLUMN created_by_place VARCHAR(200) DEFAULT NULL AFTER created_by_role");
+    }
 }
 
 function nextcloud_credentials_crypto_key(PDO $pdo): string

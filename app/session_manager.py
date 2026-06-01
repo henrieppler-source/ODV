@@ -323,6 +323,7 @@ class SessionManagerMixin:
         self.config_data["api_token_expires_at"] = old_config_expires
         self.config_data["current_username"] = old_username
         self.config_data["display_name"] = old_display
+        self.config_data["current_email"] = str(self.config_data.get("current_email", "") or "")
         self.config_data["current_role"] = old_role
         self.config_data["current_place"] = old_place
         save_config(self.config_data)
@@ -334,6 +335,7 @@ class SessionManagerMixin:
         self.current_user = user
         self.display_name_var.set(user.get("display_name", ""))
         self.username_var.set(user.get("username", ""))
+        self.email_var.set(user.get("email", "") or "")
         self.role_var.set(user.get("role", "Ortschronist"))
         self.role_label_var.set(self.role_var.get())
         self.place_var.set(user.get("place", ""))
@@ -342,6 +344,7 @@ class SessionManagerMixin:
             self.meta_vars["place"].set(self.place_var.get().strip())
         self.config_data["display_name"] = self.display_name_var.get()
         self.config_data["current_username"] = self.username_var.get()
+        self.config_data["current_email"] = self.email_var.get()
         self.config_data["current_role"] = self.role_var.get()
         self.config_data["current_place"] = self.place_var.get()
         self.load_current_folder_permissions()

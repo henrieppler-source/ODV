@@ -219,6 +219,14 @@ Unterschied zwischen Prüftypen:
 
 ODV kann für Informationen und Rundmails genutzt werden. Je nach Berechtigung können Dokumente als Anhang, als Nextcloud-Link oder ohne Anlage versendet werden.
 
+Für Bearbeiter gilt:
+
+- Versand nur an andere Benutzer und an eigene oder ortsbezogene Verteiler.
+- Keine externen weiteren Empfänger.
+- Keine Auswahl von Standardtexten; diese stehen nur Admin/Superadmin zur Verfügung.
+- Das Feld `Antwort an` ist vorbelegt mit der eigenen Mailadresse.
+- Die Versandhistorie zeigt nur die eigenen Sendungen.
+
 Für Bearbeiter ist wichtig:
 
 - Versandinformationen sorgfältig prüfen.

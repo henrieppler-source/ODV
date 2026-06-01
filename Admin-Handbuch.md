@@ -197,7 +197,17 @@ ODV unterstützt Rundmails und Informationen mit:
 
 Empfänger werden nicht gegenseitig offengelegt. Fehlende Downloadlinks können beim Versand automatisch erzeugt werden.
 
-Admin-Aufgabe ist die Pflege von Verteilern und die Kontrolle der Versandhistorie.
+## Rechte und Sichtbarkeit im Mailbereich
+
+| Rolle | Empfänger | Externe Empfänger | Sichtbare Verteiler | Standardtexte | Versandhistorie |
+| --- | --- | --- | --- | --- | --- |
+| Bearbeiter | Nur Benutzer und eigene/ortsbezogene Verteiler | Nein | Eigene Verteiler und Verteiler aus dem gleichen Ort | Nein | Nur eigene Sendungen |
+| Admin | Alle Benutzer | Ja | Nur Verteiler, die von Admin/Superadmin angelegt wurden | Ja | Nur eigene Sendungen |
+| Superadmin | Alle Benutzer | Ja | Nur Verteiler, die von Admin/Superadmin angelegt wurden | Ja | Nur eigene Sendungen |
+
+Verteiler speichern den Ersteller mit. Normale Nutzer sehen damit nur die von ihnen selbst oder im gleichen Ort angelegten Verteiler. Bearbeiter dürfen in ihren Verteilern auch Benutzer aus anderen Orten als Empfänger aufnehmen. Admin/Superadmin sehen ausschließlich Verteiler, die von Admin/Superadmin angelegt wurden.
+
+Admin-Aufgabe ist die Pflege von Verteilern, Standardtexten und die Kontrolle der Versandhistorie.
 
 # 8. Serverbetrieb
 

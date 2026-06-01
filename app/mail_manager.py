@@ -4,7 +4,7 @@ import base64
 import calendar
 import json
 import mimetypes
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -147,9 +147,6 @@ class MailManagerMixin:
 
     def open_mail_history_dialog(self) -> None:
         """Zeigt die serverseitige Historie der über ODV versendeten Rundmails."""
-        if not self.is_current_admin():
-            messagebox.showwarning("Keine Berechtigung", "Die Versandhistorie ist Admins und Superadmins vorbehalten.")
-            return
         if not self.api_token:
             messagebox.showerror("API", "Keine API-Anmeldung vorhanden. Bitte neu anmelden.")
             return
@@ -259,6 +256,7 @@ class MailManagerMixin:
             return
         users = self.load_email_users()
         groups = self.load_mail_groups()
+        is_admin = self.is_current_admin()
 
         dialog = tk.Toplevel(self)
         dialog.title("Verteiler verwalten")
@@ -321,14 +319,15 @@ class MailManagerMixin:
             ttk.Checkbutton(members_inner, text=label, variable=var).grid(row=idx, column=0, sticky="w", pady=1)
 
         external_frame = ttk.LabelFrame(right, text="Externe Empfänger (Vorname; Name; E-Mail)", padding=6)
-        external_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 4))
-        external_frame.columnconfigure(0, weight=1)
         external_text = tk.Text(external_frame, height=5, wrap="none")
-        external_text.grid(row=0, column=0, sticky="ew")
         external_scroll = ttk.Scrollbar(external_frame, orient="vertical", command=external_text.yview)
         external_text.configure(yscrollcommand=external_scroll.set)
-        external_scroll.grid(row=0, column=1, sticky="ns")
-        ttk.Label(external_frame, text="Eine Zeile je Kontakt, z. B.: Max; Mustermann; max@example.de", foreground="#555555").grid(row=1, column=0, sticky="w", pady=(3, 0))
+        if is_admin:
+            external_frame.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 4))
+            external_frame.columnconfigure(0, weight=1)
+            external_text.grid(row=0, column=0, sticky="ew")
+            external_scroll.grid(row=0, column=1, sticky="ns")
+            ttk.Label(external_frame, text="Eine Zeile je Kontakt, z. B.: Max; Mustermann; max@example.de", foreground="#555555").grid(row=1, column=0, sticky="w", pady=(3, 0))
 
         def parse_external_members() -> list[dict]:
             result = []
@@ -348,6 +347,8 @@ class MailManagerMixin:
             return result
 
         def set_external_members(members: list[dict]) -> None:
+            if not is_admin:
+                return
             external_text.delete("1.0", "end")
             lines = []
             for m in members or []:
@@ -409,7 +410,7 @@ class MailManagerMixin:
                 "description": desc_var.get().strip(),
                 "is_active": bool(active_var.get()),
                 "member_user_ids": member_ids,
-                "external_members": parse_external_members(),
+                "external_members": parse_external_members() if is_admin else [],
             }
             # API erwartet vollständige Liste; bestehenden Verteiler ersetzen/ergänzen.
             out = []
@@ -642,11 +643,12 @@ class MailManagerMixin:
 
     def open_information_mail_dialog(self) -> None:
         """Rundmail erstellen und optional direkt über die Server-API versenden."""
-        if not self.is_current_admin():
-            messagebox.showerror("Rundmail", "Nur Admins und Superadmins können Rundmails erstellen.")
-            return
         users = self.load_email_users()
         groups = [g for g in self.load_mail_groups() if int(g.get("is_active", 1) or 0) == 1]
+        is_admin = self.is_current_admin()
+        if not self.api_token:
+            messagebox.showerror("Rundmail", "Keine API-Anmeldung vorhanden. Bitte neu anmelden.")
+            return
 
         dialog = tk.Toplevel(self)
         dialog.title("Rundmail erstellen")
@@ -656,11 +658,34 @@ class MailManagerMixin:
         dialog.transient(self)
         dialog.columnconfigure(0, weight=0)
         dialog.columnconfigure(1, weight=1)
-        dialog.rowconfigure(8, weight=1)
+        dialog.rowconfigure(7, weight=1)
 
-        ttk.Label(dialog, text="Empfänger aus Benutzern:").grid(row=0, column=0, sticky="nw", padx=10, pady=8)
+        ttk.Label(dialog, text="Antwort an:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
+        reply_to_var = tk.StringVar(value=(self.email_var.get().strip() or (self.current_user.get("email", "") if self.current_user else "") or ""))
+        ttk.Entry(dialog, textvariable=reply_to_var).grid(row=0, column=1, sticky="ew", padx=10, pady=8)
+
+        ttk.Label(dialog, text="Verteiler:").grid(row=1, column=0, sticky="nw", padx=10, pady=8)
+        group_frame = ttk.Frame(dialog)
+        group_frame.grid(row=1, column=1, sticky="ew", padx=10, pady=8)
+        group_frame.columnconfigure(0, weight=1)
+        group_listbox: tk.Listbox | None = None
+        if groups:
+            group_listbox = tk.Listbox(group_frame, selectmode="extended", height=min(6, max(3, len(groups))), exportselection=False)
+            group_listbox.grid(row=0, column=0, sticky="ew")
+            group_scroll = ttk.Scrollbar(group_frame, orient="vertical", command=group_listbox.yview)
+            group_listbox.configure(yscrollcommand=group_scroll.set)
+            group_scroll.grid(row=0, column=1, sticky="ns")
+            for group in groups:
+                text = f"{group.get('name','')} ({len(group.get('members', []))} Empfänger)"
+                group_listbox.insert("end", text)
+            group_listbox.bind("<<ListboxSelect>>", lambda _e: update_group_highlights())
+            ttk.Label(group_frame, text="Mehrfachauswahl mit Strg/Shift möglich.", foreground="#555").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        else:
+            ttk.Label(group_frame, text="Keine Verteiler vorhanden. Über Informationen > Verteiler verwalten anlegen.").grid(row=0, column=0, sticky="w")
+
+        ttk.Label(dialog, text="Empfänger (Benutzer):").grid(row=2, column=0, sticky="nw", padx=10, pady=8)
         rec_frame = ttk.Frame(dialog)
-        rec_frame.grid(row=0, column=1, sticky="nsew", padx=10, pady=8)
+        rec_frame.grid(row=2, column=1, sticky="nsew", padx=10, pady=8)
         rec_frame.columnconfigure(0, weight=1)
         user_list = tk.Listbox(rec_frame, selectmode="extended", height=8, exportselection=False)
         user_list.grid(row=0, column=0, sticky="nsew")
@@ -687,62 +712,49 @@ class MailManagerMixin:
                 else:
                     user_list.itemconfig(idx, background="")
 
-        ttk.Label(dialog, text="Verteiler:").grid(row=1, column=0, sticky="nw", padx=10, pady=8)
-        group_frame = ttk.Frame(dialog)
-        group_frame.grid(row=1, column=1, sticky="ew", padx=10, pady=8)
-        group_frame.columnconfigure(0, weight=1)
-        group_listbox: tk.Listbox | None = None
-        if groups:
-            group_listbox = tk.Listbox(group_frame, selectmode="extended", height=min(6, max(3, len(groups))), exportselection=False)
-            group_listbox.grid(row=0, column=0, sticky="ew")
-            group_scroll = ttk.Scrollbar(group_frame, orient="vertical", command=group_listbox.yview)
-            group_listbox.configure(yscrollcommand=group_scroll.set)
-            group_scroll.grid(row=0, column=1, sticky="ns")
-            for group in groups:
-                text = f"{group.get('name','')} ({len(group.get('members', []))} Empfänger)"
-                group_listbox.insert("end", text)
-            group_listbox.bind("<<ListboxSelect>>", lambda _e: update_group_highlights())
-            ttk.Label(group_frame, text="Mehrfachauswahl mit Strg/Shift möglich.", foreground="#555").grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        if is_admin:
+            ttk.Label(dialog, text="Weitere Empfänger:").grid(row=3, column=0, sticky="w", padx=10, pady=8)
+            manual_var = tk.StringVar()
+            ttk.Entry(dialog, textvariable=manual_var).grid(row=3, column=1, sticky="ew", padx=10, pady=8)
+            ttk.Label(dialog, text="E-Mail-Adressen mit Semikolon trennen. Direkter Versand erfolgt einzeln je Empfänger.", foreground="#555").grid(row=4, column=1, sticky="w", padx=10)
         else:
-            ttk.Label(group_frame, text="Keine Verteiler vorhanden. Über Informationen > Verteiler verwalten anlegen.").grid(row=0, column=0, sticky="w")
+            manual_var = tk.StringVar(value="")
 
-        ttk.Label(dialog, text="Weitere Empfänger:").grid(row=2, column=0, sticky="w", padx=10, pady=8)
-        manual_var = tk.StringVar()
-        ttk.Entry(dialog, textvariable=manual_var).grid(row=2, column=1, sticky="ew", padx=10, pady=8)
-        ttk.Label(dialog, text="E-Mail-Adressen mit Semikolon trennen. Direkter Versand erfolgt einzeln je Empfänger.", foreground="#555").grid(row=3, column=1, sticky="w", padx=10)
-
-        ttk.Label(dialog, text="Versandart:").grid(row=4, column=0, sticky="w", padx=10, pady=8)
-        mode_frame = ttk.Frame(dialog)
-        mode_frame.grid(row=4, column=1, sticky="w", padx=10, pady=8)
-        send_mode_var = tk.StringVar(value="none")
-        ttk.Radiobutton(mode_frame, text="Keine Anlage", variable=send_mode_var, value="none").pack(side="left", padx=(0, 18))
-        ttk.Radiobutton(mode_frame, text="Nextcloud-Downloadlink versenden", variable=send_mode_var, value="link").pack(side="left", padx=(0, 18))
-        ttk.Radiobutton(mode_frame, text="Dokument anhängen", variable=send_mode_var, value="attachment").pack(side="left")
-
-        fields = ttk.Frame(dialog)
-        fields.grid(row=5, column=0, columnspan=2, sticky="ew", padx=10, pady=8)
-        fields.columnconfigure(1, weight=1)
-        ttk.Label(fields, text="Betreff:").grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(dialog, text="Betreff:").grid(row=5, column=0, sticky="w", padx=10, pady=8)
         subject_var = tk.StringVar(value="Information der Ortschronisten")
-        ttk.Entry(fields, textvariable=subject_var).grid(row=0, column=1, sticky="ew", pady=4)
-        ttk.Label(fields, text="Antwort an:").grid(row=1, column=0, sticky="w", pady=4)
-        reply_to_var = tk.StringVar()
-        ttk.Entry(fields, textvariable=reply_to_var).grid(row=1, column=1, sticky="ew", pady=4)
-        ttk.Label(fields, text="Verfallsdatum:").grid(row=2, column=0, sticky="w", pady=4)
-        share_expires_at_var = tk.StringVar(value=date.today().isoformat())
-        expiry_frame = ttk.Frame(fields)
-        expiry_frame.grid(row=2, column=1, sticky="w", pady=4)
-        expiry_entry = ttk.Entry(expiry_frame, textvariable=share_expires_at_var, width=16)
-        expiry_entry.pack(side="left")
-        ttk.Button(expiry_frame, text="Kalender", width=9, command=lambda: open_date_picker()).pack(side="left", padx=(4, 0))
-        ttk.Button(expiry_frame, text="Heute", width=7, command=lambda: share_expires_at_var.set(date.today().isoformat())).pack(side="left", padx=(4, 0))
-        ttk.Label(fields, text="Dokumente / Anhänge:").grid(row=3, column=0, sticky="nw", pady=4)
+        ttk.Entry(dialog, textvariable=subject_var).grid(row=5, column=1, sticky="ew", padx=10, pady=8)
+
+        send_mode_var = tk.StringVar(value="none")
+        if is_admin:
+            ttk.Label(dialog, text="Standardtext:").grid(row=6, column=0, sticky="w", padx=10, pady=8)
+            template_var = tk.StringVar()
+            template_names = [item.get("label", "") for item in self.get_mail_text_templates()]
+            template_frame = ttk.Frame(dialog)
+            template_frame.grid(row=6, column=1, sticky="ew", padx=10, pady=8)
+            template_frame.columnconfigure(0, weight=1)
+            template_combo = ttk.Combobox(template_frame, textvariable=template_var, values=template_names, state="readonly")
+            template_combo.grid(row=0, column=0, sticky="ew")
+            ttk.Button(template_frame, text="Laden", width=8, command=lambda: apply_selected_template()).grid(row=0, column=1, padx=(6, 0))
+        else:
+            template_var = tk.StringVar()
+            template_combo = None
+
+        ttk.Label(dialog, text="Text:").grid(row=7, column=0, sticky="nw", padx=10, pady=4)
+        body, body_frame = self.make_scrolled_text(dialog, height=16, wrap="word")
+        body_frame.grid(row=7, column=1, sticky="nsew", padx=10, pady=4)
+        body.insert("1.0", "Liebe Ortschronistinnen und Ortschronisten,\n\n"
+                         "es liegt eine neue Information / Einladung vor.\n\n"
+                         "DOKUMENTE:\n{dokumente}\n\n"
+                         "Viele Grüße\n"
+                         f"{self.display_name_var.get().strip() or 'Ortschronisten'}")
+
+        ttk.Label(dialog, text="Dokument / Anhänge:").grid(row=8, column=0, sticky="nw", padx=10, pady=8)
         doc_path_var = tk.StringVar()
         link_var = tk.StringVar()
         selected_docs: list[str] = []
         generated_links: dict[str, str] = {}
-        doc_frame = ttk.Frame(fields)
-        doc_frame.grid(row=3, column=1, sticky="ew", pady=4)
+        doc_frame = ttk.Frame(dialog)
+        doc_frame.grid(row=8, column=1, sticky="ew", padx=10, pady=8)
         doc_frame.columnconfigure(1, weight=1)
         ttk.Button(doc_frame, text="+", width=3, command=lambda: add_doc()).grid(row=0, column=0, padx=(0, 6), sticky="w")
         ttk.Entry(doc_frame, textvariable=doc_path_var).grid(row=0, column=1, sticky="ew")
@@ -751,22 +763,21 @@ class MailManagerMixin:
         doc_list = tk.Listbox(doc_frame, height=4, exportselection=False)
         doc_list.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         ttk.Label(doc_frame, text="Mit + können Dokumente nacheinander hinzugefügt werden. Bei Downloadlink werden alle ausgewählten Dateien als Linkliste in die Mail geschrieben.", foreground="#555").grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        ttk.Label(fields, text="Dokumentenliste:").grid(row=4, column=0, sticky="nw", pady=4)
-        link_frame = ttk.Frame(fields)
-        link_frame.grid(row=4, column=1, sticky="ew", pady=4)
+
+        ttk.Label(dialog, text="Versandart:").grid(row=9, column=0, sticky="w", padx=10, pady=8)
+        mode_frame = ttk.Frame(dialog)
+        mode_frame.grid(row=9, column=1, sticky="w", padx=10, pady=8)
+        ttk.Radiobutton(mode_frame, text="Keine Anlage", variable=send_mode_var, value="none").pack(side="left", padx=(0, 18))
+        ttk.Radiobutton(mode_frame, text="Nextcloud-Downloadlink versenden", variable=send_mode_var, value="link").pack(side="left", padx=(0, 18))
+        ttk.Radiobutton(mode_frame, text="Dokument anhängen", variable=send_mode_var, value="attachment").pack(side="left")
+
+        ttk.Label(dialog, text="Dokumentenliste:").grid(row=10, column=0, sticky="nw", padx=10, pady=4)
+        link_frame = ttk.Frame(dialog)
+        link_frame.grid(row=10, column=1, sticky="ew", padx=10, pady=4)
         link_frame.columnconfigure(0, weight=1)
         link_text, link_text_frame = self.make_scrolled_text(link_frame, height=5, wrap="word")
         link_text_frame.grid(row=0, column=0, sticky="ew")
         ttk.Button(link_frame, text="Downloadlinks erzeugen", command=lambda: refresh_document_block(force_links=True)).grid(row=0, column=1, padx=(6, 0), sticky="n")
-        ttk.Label(fields, text="Standardtext:").grid(row=6, column=0, sticky="w", pady=4)
-        template_var = tk.StringVar()
-        template_names = [item.get("label", "") for item in self.get_mail_text_templates()]
-        template_frame = ttk.Frame(fields)
-        template_frame.grid(row=6, column=1, sticky="ew", pady=4)
-        template_frame.columnconfigure(0, weight=1)
-        template_combo = ttk.Combobox(template_frame, textvariable=template_var, values=template_names, state="readonly")
-        template_combo.grid(row=0, column=0, sticky="ew")
-        ttk.Button(template_frame, text="Laden", width=8, command=lambda: apply_selected_template()).grid(row=0, column=1, padx=(6, 0))
 
         def refresh_doc_display():
             doc_list.delete(0, "end")
@@ -836,15 +847,6 @@ class MailManagerMixin:
             link_text.delete("1.0", "end")
             link_text.insert("1.0", block)
 
-        ttk.Label(dialog, text="Text:").grid(row=7, column=0, sticky="nw", padx=10, pady=4)
-        body, body_frame = self.make_scrolled_text(dialog, height=18, wrap="word")
-        body_frame.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=10, pady=4)
-        body.insert("1.0", "Liebe Ortschronistinnen und Ortschronisten,\n\n"
-                         "es liegt eine neue Information / Einladung vor.\n\n"
-                         "DOKUMENTE:\n{dokumente}\n\n"
-                         "Viele Grüße\n"
-                         f"{self.display_name_var.get().strip() or 'Ortschronisten'}")
-
         def apply_selected_template() -> None:
             label = template_var.get().strip()
             if not label:
@@ -856,7 +858,8 @@ class MailManagerMixin:
                     refresh_document_block(force_links=False)
                     return
 
-        template_combo.bind("<<ComboboxSelected>>", lambda _e: apply_selected_template())
+        if template_combo is not None:
+            template_combo.bind("<<ComboboxSelected>>", lambda _e: apply_selected_template())
 
         def open_date_picker() -> None:
             try:
@@ -919,6 +922,15 @@ class MailManagerMixin:
             ttk.Button(nav, text="▶", width=3, command=next_month).pack(side="left")
             ttk.Button(header, text="Heute", command=lambda: (share_expires_at_var.set(date.today().isoformat()), picker.destroy())).grid(row=0, column=2, sticky="e")
             render_month()
+
+        ttk.Label(dialog, text="Verfallsdatum:").grid(row=11, column=0, sticky="w", padx=10, pady=8)
+        share_expires_at_var = tk.StringVar(value=(date.today() + timedelta(days=14)).isoformat())
+        expiry_frame = ttk.Frame(dialog)
+        expiry_frame.grid(row=11, column=1, sticky="w", padx=10, pady=8)
+        expiry_entry = ttk.Entry(expiry_frame, textvariable=share_expires_at_var, width=16)
+        expiry_entry.pack(side="left")
+        ttk.Button(expiry_frame, text="Kalender", width=9, command=lambda: open_date_picker()).pack(side="left", padx=(4, 0))
+        ttk.Button(expiry_frame, text="Heute", width=7, command=lambda: share_expires_at_var.set(date.today().isoformat())).pack(side="left", padx=(4, 0))
 
         def collect_recipients() -> list[str]:
             emails: list[str] = []

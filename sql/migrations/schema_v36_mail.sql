@@ -10,9 +10,15 @@ CREATE TABLE IF NOT EXISTS mail_groups (
     name VARCHAR(150) NOT NULL UNIQUE,
     description TEXT DEFAULT NULL,
     is_active TINYINT(1) NOT NULL DEFAULT 1,
+    created_by_user_id INT DEFAULT NULL,
+    created_by_display_name VARCHAR(200) DEFAULT NULL,
+    created_by_role VARCHAR(40) DEFAULT NULL,
+    created_by_place VARCHAR(200) DEFAULT NULL,
     updated_by_user_id INT DEFAULT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_mail_groups_creator (created_by_user_id),
+    INDEX idx_mail_groups_creator_place (created_by_place),
     CONSTRAINT fk_mail_groups_updated_by FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

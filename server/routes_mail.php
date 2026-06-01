@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 if ($method === 'POST' && $path === '/api/mails/send') {
-    $currentUser = require_role(['admin', 'superadmin']);
+    $currentUser = current_user();
     $input = get_json_input();
     $recipients = sanitize_email_list(is_array($input['recipients'] ?? null) ? $input['recipients'] : []);
     $subject = trim((string)($input['subject'] ?? ''));
@@ -26,6 +26,22 @@ if ($method === 'POST' && $path === '/api/mails/send') {
         json_response(['success' => false, 'error' => 'Nachrichtentext fehlt'], 400);
     }
     $replyTo = trim((string)($input['reply_to'] ?? ''));
+    $isAdminSender = in_array(role_key($currentUser), ['admin', 'superadmin'], true);
+    if (!$isAdminSender) {
+        $internalRecipients = [];
+        $userStmt = db()->query("SELECT LOWER(TRIM(email)) AS email FROM users WHERE is_active = 1 AND email IS NOT NULL AND email <> ''");
+        foreach ($userStmt->fetchAll() as $row) {
+            $mail = trim((string)($row['email'] ?? ''));
+            if ($mail !== '') {
+                $internalRecipients[$mail] = true;
+            }
+        }
+        foreach ($recipients as $recipient) {
+            if (!isset($internalRecipients[strtolower($recipient)])) {
+                json_response(['success' => false, 'error' => 'Externe Empfänger sind nur für Admins und Superadmins erlaubt.'], 403);
+            }
+        }
+    }
     if ($mode === 'link' && $link === '') {
         $localFilePath = trim((string)($input['local_file_path'] ?? ''));
         $localBasePath = trim((string)($input['local_nextcloud_base'] ?? ''));
@@ -175,12 +191,12 @@ Gültig bis:
 }
 
 if ($method === 'GET' && $path === '/api/mails/history') {
-    $currentUser = require_role(['admin', 'superadmin']);
+    $currentUser = current_user();
     $limit = max(1, min(1000, (int)($_GET['limit'] ?? 200)));
     $pdo = db();
     ensure_mail_history_table($pdo);
-    $stmt = $pdo->prepare("SELECT id, sent_at, sent_by_user_id, sent_by_name AS sender_name, recipient_email, subject, body_preview, mode, status, error_message, documents_json FROM mail_history ORDER BY sent_at DESC, id DESC LIMIT " . $limit);
-    $stmt->execute();
+    $stmt = $pdo->prepare("SELECT id, sent_at, sent_by_user_id, sent_by_name AS sender_name, recipient_email, subject, body_preview, mode, status, error_message, documents_json FROM mail_history WHERE sent_by_user_id = :uid ORDER BY sent_at DESC, id DESC LIMIT " . $limit);
+    $stmt->execute([':uid' => (int)$currentUser['id']]);
     $items = [];
     foreach ($stmt->fetchAll() as $row) {
         $docs = [];
