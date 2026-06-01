@@ -64,6 +64,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Server-Backups sollen aufräumbar bleiben; Standardregel ist, pro Serverdatei nur die letzten drei Sicherungskopien aufzubewahren.
 - API-Token und OpenAI-API-Schlüssel werden lokal verschlüsselt gespeichert und nicht mehr im Klartext in der Konfiguration abgelegt.
 - `server/routes.php` wird schrittweise modularisiert; der Admin-/Backup-/Wartungsblock liegt jetzt bereits in `server/routes_admin_endpoints.php`.
+- Die Mail-Verteiler-Routen liegen jetzt in `server/routes_mail_groups.php`.
 - Das FTP-Deployment nimmt `routes*.php`-Dateien im Serverordner jetzt automatisch mit.
 
 ## Kurzform für die nächste Sitzung
