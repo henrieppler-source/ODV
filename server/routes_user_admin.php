@@ -46,6 +46,121 @@ if ($method === 'POST' && $path === '/api/admin/devices/block') {
     json_response(['success'=>true, 'message'=>$blocked ? 'Gerät gesperrt' : 'Gerät freigegeben']);
 }
 
+if ($method === 'GET' && $path === '/api/folder-permissions') {
+    $user = current_user();
+    $pdo = db();
+    ensure_user_folder_permissions_table($pdo);
+    $permissions = fetch_user_folder_permissions($pdo, (int)$user['id'], role_key($user));
+    json_response(['success' => true, 'permissions' => $permissions]);
+}
+
+if ($method === 'GET' && preg_match('#^/api/users/(\d+)/folder-permissions$#', $path, $matches)) {
+    require_role(['superadmin']);
+    $userId = (int)$matches[1];
+    $pdo = db();
+    ensure_user_folder_permissions_table($pdo);
+    $stmt = $pdo->prepare("SELECT id, role FROM users WHERE id = :id LIMIT 1");
+    $stmt->execute([':id' => $userId]);
+    $row = $stmt->fetch();
+    if (!$row) {
+        json_response(['success' => false, 'error' => 'Benutzer nicht gefunden'], 404);
+    }
+    $permissions = fetch_user_folder_permissions($pdo, $userId, (string)$row['role']);
+    json_response(['success' => true, 'permissions' => $permissions]);
+}
+
+if ($method === 'PUT' && preg_match('#^/api/users/(\d+)/folder-permissions$#', $path, $matches)) {
+    $currentUser = require_role(['superadmin']);
+    $userId = (int)$matches[1];
+    $input = get_json_input();
+    $permissions = $input['permissions'] ?? null;
+    if (!is_array($permissions)) {
+        json_response(['success' => false, 'error' => 'permissions muss ein Array sein'], 400);
+    }
+    $pdo = db();
+    ensure_user_folder_permissions_table($pdo);
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE id = :id LIMIT 1");
+    $stmt->execute([':id' => $userId]);
+    if (!$stmt->fetch()) {
+        json_response(['success' => false, 'error' => 'Benutzer nicht gefunden'], 404);
+    }
+    $allowedGroups = array_keys(folder_groups());
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare("DELETE FROM user_folder_permissions WHERE user_id = :id")->execute([':id' => $userId]);
+        $ins = $pdo->prepare("INSERT INTO user_folder_permissions (user_id, folder_group, can_read, can_write, updated_by_user_id) VALUES (:user_id, :folder_group, :can_read, :can_write, :updated_by_user_id)");
+        foreach ($permissions as $row) {
+            if (!is_array($row)) { continue; }
+            $group = trim((string)($row['folder_group'] ?? ''));
+            if ($group === '' || !in_array($group, $allowedGroups, true)) { continue; }
+            $ins->execute([
+                ':user_id' => $userId,
+                ':folder_group' => $group,
+                ':can_read' => !empty($row['can_read']) ? 1 : 0,
+                ':can_write' => !empty($row['can_write']) ? 1 : 0,
+                ':updated_by_user_id' => $currentUser['id'],
+            ]);
+        }
+        $pdo->commit();
+        $roleStmt = $pdo->prepare("SELECT role FROM users WHERE id = :id LIMIT 1");
+        $roleStmt->execute([':id' => $userId]);
+        $roleRow = $roleStmt->fetch();
+        $permissionsOut = fetch_user_folder_permissions($pdo, $userId, (string)($roleRow['role'] ?? 'ortschronist'));
+        json_response(['success' => true, 'message' => 'Ordnerrechte gespeichert', 'permissions' => $permissionsOut]);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        api_log('error', 'Ordnerrechte konnten nicht gespeichert werden', ['error' => $e->getMessage(), 'user_id' => $userId]);
+        json_response(['success' => false, 'error' => 'Ordnerrechte konnten nicht gespeichert werden'], 500);
+    }
+}
+
+if ($method === 'GET' && $path === '/api/place-folders') {
+    current_user();
+    $pdo = db();
+    ensure_place_folders_table($pdo);
+    $stmt = $pdo->query("SELECT id, place, folder_name, is_active, updated_by_user_id, created_at, updated_at FROM place_folders ORDER BY place ASC");
+    json_response(['success' => true, 'places' => $stmt->fetchAll()]);
+}
+
+if ($method === 'PUT' && $path === '/api/place-folders') {
+    $currentUser = require_role(['superadmin']);
+    $input = get_json_input();
+    $places = $input['places'] ?? null;
+    if (!is_array($places)) {
+        json_response(['success' => false, 'error' => 'places muss ein Array sein'], 400);
+    }
+    $pdo = db();
+    ensure_place_folders_table($pdo);
+    try {
+        $pdo->beginTransaction();
+        $pdo->exec("DELETE FROM place_folders");
+        $ins = $pdo->prepare("INSERT INTO place_folders (place, folder_name, is_active, updated_by_user_id) VALUES (:place, :folder_name, :is_active, :updated_by_user_id)");
+        foreach ($places as $placeRow) {
+            if (!is_array($placeRow)) { continue; }
+            $place = trim((string)($placeRow['place'] ?? ''));
+            $folderName = trim((string)($placeRow['folder_name'] ?? ''));
+            if ($place === '' || $folderName === '') { continue; }
+            $ins->execute([
+                ':place' => $place,
+                ':folder_name' => $folderName,
+                ':is_active' => isset($placeRow['is_active']) ? (int)(bool)$placeRow['is_active'] : 1,
+                ':updated_by_user_id' => $currentUser['id'],
+            ]);
+        }
+        $pdo->commit();
+        $stmt = $pdo->query("SELECT id, place, folder_name, is_active, updated_by_user_id, created_at, updated_at FROM place_folders ORDER BY place ASC");
+        json_response(['success' => true, 'message' => 'Ortsordner-Stammdaten gespeichert', 'places' => $stmt->fetchAll()]);
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        api_log('error', 'Ortsordner-Stammdaten konnten nicht gespeichert werden', ['error' => $e->getMessage()]);
+        json_response(['success' => false, 'error' => 'Ortsordner-Stammdaten konnten nicht gespeichert werden'], 500);
+    }
+}
+
 if ($method === 'GET' && $path === '/api/users') {
     require_role(['superadmin']);
     $pdo = db();

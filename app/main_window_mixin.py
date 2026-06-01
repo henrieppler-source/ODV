@@ -174,6 +174,10 @@ class MainWindowMixin:
             file_admin_menu.add_command(label="Lokale Sicherungsdateien prüfen/bereinigen...", command=self.open_local_backup_cleanup_dialog)
             admin_menu.add_cascade(label="Dateien", menu=file_admin_menu)
 
+            mail_admin_menu = tk.Menu(admin_menu, tearoff=False)
+            mail_admin_menu.add_command(label="Standard-Mail-Texte...", command=self.open_standard_mail_texts_dialog)
+            admin_menu.add_cascade(label="Mail", menu=mail_admin_menu)
+
             database_menu = tk.Menu(admin_menu, tearoff=False)
             database_menu.add_command(label="Wartungsmodus / Datenbanksperre...", command=self.open_maintenance_dialog)
             database_menu.add_command(label="Datenbankmigrationen prüfen/ausführen...", command=self.open_database_migrations_dialog)

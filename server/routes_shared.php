@@ -1384,6 +1384,77 @@ function ensure_user_nextcloud_columns(PDO $pdo): void
     }
 }
 
+function ensure_user_folder_permissions_table(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS user_folder_permissions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT NOT NULL,
+        folder_group VARCHAR(80) NOT NULL,
+        can_read TINYINT(1) NOT NULL DEFAULT 0,
+        can_write TINYINT(1) NOT NULL DEFAULT 0,
+        updated_by_user_id INT DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_user_folder_group (user_id, folder_group),
+        CONSTRAINT fk_ufp_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        CONSTRAINT fk_ufp_updated_by FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+}
+
+function ensure_place_folders_table(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS place_folders (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        place VARCHAR(150) NOT NULL UNIQUE,
+        folder_name VARCHAR(255) NOT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        updated_by_user_id INT DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_place_folders_updated_by FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+}
+
+function ensure_mail_group_external_table(PDO $pdo): void
+{
+    ensure_mail_group_tables($pdo);
+    $pdo->exec("CREATE TABLE IF NOT EXISTS mail_group_external_members (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        group_id INT NOT NULL,
+        first_name VARCHAR(255) DEFAULT NULL,
+        last_name VARCHAR(255) DEFAULT NULL,
+        email VARCHAR(255) NOT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_mgem_group (group_id),
+        INDEX idx_mgem_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
+function ensure_mail_group_tables(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS mail_groups (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(150) NOT NULL UNIQUE,
+        description TEXT DEFAULT NULL,
+        is_active TINYINT(1) NOT NULL DEFAULT 1,
+        updated_by_user_id INT DEFAULT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        CONSTRAINT fk_mail_groups_updated_by FOREIGN KEY (updated_by_user_id) REFERENCES users(id) ON DELETE SET NULL
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS mail_group_members (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        group_id INT NOT NULL,
+        user_id INT NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uniq_group_user (group_id, user_id),
+        CONSTRAINT fk_mgm_group FOREIGN KEY (group_id) REFERENCES mail_groups(id) ON DELETE CASCADE,
+        CONSTRAINT fk_mgm_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+}
+
 function nextcloud_credentials_crypto_key(PDO $pdo): string
 {
     ensure_system_settings_table($pdo);

@@ -41,6 +41,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "openai_text_sample_chars": 4000,
     "openai_metadata_points": 1,
     "archive_collection_options": [],
+    "mail_text_templates": [],
     "mysql_host": "",
     "mysql_port": "3306",
     "mysql_database": "",

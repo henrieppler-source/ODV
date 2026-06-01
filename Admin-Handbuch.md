@@ -187,7 +187,8 @@ ODV unterstützt Rundmails und Informationen mit:
 - Versand ohne Anlage.
 - Versand mit Dokumentanhang.
 - Versand mit Nextcloud-Downloadlink.
-- Das Verfallsdatum für Nextcloud-Links kann manuell eingegeben werden.
+- Das Verfallsdatum für Nextcloud-Links wird im Rundmail-Dialog vorbefüllt und kann per Kalender gewählt werden.
+- Standard-Mail-Texte können im Superadmin-Menü unter `Admin > Mail > Standard-Mail-Texte...` gepflegt und in der Rundmail geladen werden.
 - In der Benutzerverwaltung können optional Nextcloud-Benutzername und -Passwort für spätere Anbindungen erfasst werden; aktuell dienen sie nur als Vorbereitung.
 - Versandhistorie.
 

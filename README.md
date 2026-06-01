@@ -116,7 +116,9 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Stammdaten-Verschmelzung für Archiv/Sammlung führt jetzt per Auswahlfeld auf einen bestehenden Zieleintrag.
 - Beitragsauswertung erweitert: Prämienbetrag zeigt `EUR`, Geldbeträge werden mit zwei Nachkommastellen angezeigt, und je Nutzer wird der berechnete Wert nach Gesamtpunkten angezeigt und exportiert.
 - Rundmail-Dialog markiert Benutzer farblich, die über ausgewählte Verteiler enthalten sind.
-- In der Benutzerverwaltung können optionale Nextcloud-Zugangsdaten für spätere Nutzung erfasst werden; der Rundmail-Dialog kann einen öffentlichen Nextcloud-Link mit manuell eingetragenem Verfallsdatum vorbereiten.
+- Rundmail kann Vorlagen aus dem neuen Admin-Menüpunkt `Standard-Mail-Texte...` laden; Verfallsdatum wird im Dialog vorbefüllt und kann per Kalender gewählt werden.
+- In der Benutzerverwaltung können optionale Nextcloud-Zugangsdaten für spätere Nutzung erfasst werden.
+- Server/API decken wieder die Ordnerrechte und Ortsordner-Stammdaten ab; Mail-Verteiler laden die externen Empfänger wieder robust mit an.
 - Admin-Bearbeitung zeigt den Dokumentstatus leer an, solange kein Dokument ausgewählt ist.
 - Admin-Einstellungen melden beim unveränderten Öffnen und Schließen keine ungespeicherten Änderungen mehr.
 - Geänderte Dateien: `app/app_constants.py`, `app/main.py`, `app/bootstrap_mixin.py`, `app/main_window_mixin.py`, `app/uploader.py`, `README.md`, `Handbuch.md`, `Admin-Handbuch.md`

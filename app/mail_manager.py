@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import base64
+import calendar
 import json
 import mimetypes
+from datetime import date
 from pathlib import Path
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -11,9 +13,36 @@ import webbrowser
 
 from .api_client import ApiError
 from .app_logging import app_log, app_log_exception
+from .config import save_config
 
 
 class MailManagerMixin:
+    def get_mail_text_templates(self) -> list[dict]:
+        templates = self.config_data.get("mail_text_templates", [])
+        if not isinstance(templates, list):
+            return []
+        out: list[dict] = []
+        for item in templates:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label", "") or item.get("name", "") or "").strip()
+            text = str(item.get("text", "") or "").strip()
+            if label and text:
+                out.append({"label": label, "text": text})
+        return out
+
+    def set_mail_text_templates(self, templates: list[dict]) -> None:
+        cleaned = []
+        for item in templates or []:
+            if not isinstance(item, dict):
+                continue
+            label = str(item.get("label", "") or item.get("name", "") or "").strip()
+            text = str(item.get("text", "") or "").rstrip()
+            if label and text:
+                cleaned.append({"label": label, "text": text})
+        self.config_data["mail_text_templates"] = cleaned
+        save_config(self.config_data)
+
     def load_email_users(self) -> list[dict]:
         """Aktive Benutzer mit E-Mail-Adresse aus der API laden."""
         if not self.api_token:
@@ -393,6 +422,139 @@ class MailManagerMixin:
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
         refresh_group_list()
 
+    def open_standard_mail_texts_dialog(self) -> None:
+        if not self.is_current_admin():
+            messagebox.showwarning("Standard-Mail-Texte", "Nur Admins und Superadmins können Standard-Mail-Texte verwalten.")
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Standard-Mail-Texte verwalten")
+        try: self.track_window_geometry(dialog, "Standard-Mail-Texte verwalten")
+        except Exception: pass
+        dialog.geometry("980x640")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=0)
+        dialog.columnconfigure(1, weight=1)
+        dialog.rowconfigure(0, weight=1)
+
+        templates = [dict(item) for item in self.get_mail_text_templates()]
+        selected_index = {"idx": None}
+
+        left = ttk.LabelFrame(dialog, text="Vorlagen", padding=8)
+        left.grid(row=0, column=0, sticky="nsew", padx=(10, 6), pady=10)
+        left.rowconfigure(0, weight=1)
+        left.columnconfigure(0, weight=1)
+        template_list = tk.Listbox(left, width=28, exportselection=False)
+        template_list.grid(row=0, column=0, sticky="nsew")
+        template_scroll = ttk.Scrollbar(left, orient="vertical", command=template_list.yview)
+        template_list.configure(yscrollcommand=template_scroll.set)
+        template_scroll.grid(row=0, column=1, sticky="ns")
+
+        right = ttk.LabelFrame(dialog, text="Vorlage bearbeiten", padding=8)
+        right.grid(row=0, column=1, sticky="nsew", padx=(6, 10), pady=10)
+        right.columnconfigure(1, weight=1)
+        right.rowconfigure(2, weight=1)
+
+        label_var = tk.StringVar()
+        label_entry = ttk.Entry(right, textvariable=label_var)
+        ttk.Label(right, text="Kurzbezeichnung:").grid(row=0, column=0, sticky="w", pady=4)
+        label_entry.grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Label(right, text="Textvorlage:").grid(row=1, column=0, sticky="nw", pady=4)
+        text_widget = tk.Text(right, wrap="word", height=18)
+        text_widget.grid(row=2, column=0, columnspan=2, sticky="nsew", pady=4)
+        text_scroll = ttk.Scrollbar(right, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=text_scroll.set)
+        text_scroll.grid(row=2, column=2, sticky="ns")
+        ttk.Label(right, text="Platzhalter bleiben erhalten, z. B. {dokumente}, {link}, {datei}.", foreground="#555").grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        def refresh_list(select_idx: int | None = None) -> None:
+            template_list.delete(0, "end")
+            for item in templates:
+                template_list.insert("end", item.get("label", ""))
+            if select_idx is not None and 0 <= select_idx < len(templates):
+                template_list.selection_set(select_idx)
+                template_list.see(select_idx)
+
+        def load_selected(_event=None) -> None:
+            sel = template_list.curselection()
+            if not sel:
+                return
+            idx = int(sel[0])
+            if idx < 0 or idx >= len(templates):
+                return
+            selected_index["idx"] = idx
+            item = templates[idx]
+            label_var.set(str(item.get("label", "")))
+            text_widget.delete("1.0", "end")
+            text_widget.insert("1.0", str(item.get("text", "")))
+
+        def clear_form() -> None:
+            selected_index["idx"] = None
+            label_var.set("")
+            text_widget.delete("1.0", "end")
+            try:
+                template_list.selection_clear(0, "end")
+            except tk.TclError:
+                pass
+
+        def save_selected() -> None:
+            label = label_var.get().strip()
+            text = text_widget.get("1.0", "end").rstrip()
+            if not label or not text.strip():
+                messagebox.showwarning("Standard-Mail-Texte", "Bitte Kurzbezeichnung und Textvorlage erfassen.", parent=dialog)
+                return
+            payload = {"label": label, "text": text}
+            idx = selected_index.get("idx")
+            if idx is None:
+                templates.append(payload)
+                idx = len(templates) - 1
+            else:
+                templates[idx] = payload
+            self.set_mail_text_templates(templates)
+            refresh_list(idx)
+            messagebox.showinfo("Standard-Mail-Texte", "Vorlage gespeichert.", parent=dialog)
+
+        def delete_selected() -> None:
+            idx = selected_index.get("idx")
+            if idx is None or idx < 0 or idx >= len(templates):
+                return
+            if not messagebox.askyesno("Standard-Mail-Texte", f"Vorlage '{templates[idx].get('label', '')}' wirklich löschen?", parent=dialog):
+                return
+            del templates[idx]
+            self.set_mail_text_templates(templates)
+            clear_form()
+            refresh_list()
+
+        def move_item(offset: int) -> None:
+            idx = selected_index.get("idx")
+            if idx is None:
+                return
+            new_idx = idx + offset
+            if new_idx < 0 or new_idx >= len(templates):
+                return
+            templates[idx], templates[new_idx] = templates[new_idx], templates[idx]
+            selected_index["idx"] = new_idx
+            self.set_mail_text_templates(templates)
+            refresh_list(new_idx)
+            load_selected()
+
+        template_list.bind("<<ListboxSelect>>", load_selected)
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=1, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
+        ttk.Button(buttons, text="Neu", command=clear_form).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Speichern", command=save_selected).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Löschen", command=delete_selected).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Hoch", command=lambda: move_item(-1)).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Runter", command=lambda: move_item(1)).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right", padx=4)
+
+        refresh_list()
+        if templates:
+            template_list.selection_set(0)
+            load_selected()
+
     def fallback_nextcloud_folder_link_for_local_path(self, file_path: str) -> str:
         """Fallback: Link in die Nextcloud-Dateiansicht des Ordners erzeugen."""
         raw = (file_path or "").strip()
@@ -470,7 +632,7 @@ class MailManagerMixin:
         dialog.transient(self)
         dialog.columnconfigure(0, weight=0)
         dialog.columnconfigure(1, weight=1)
-        dialog.rowconfigure(7, weight=1)
+        dialog.rowconfigure(8, weight=1)
 
         ttk.Label(dialog, text="Empfänger aus Benutzern:").grid(row=0, column=0, sticky="nw", padx=10, pady=8)
         rec_frame = ttk.Frame(dialog)
@@ -532,16 +694,31 @@ class MailManagerMixin:
         ttk.Label(fields, text="Betreff:").grid(row=0, column=0, sticky="w", pady=4)
         subject_var = tk.StringVar(value="Information der Ortschronisten")
         ttk.Entry(fields, textvariable=subject_var).grid(row=0, column=1, sticky="ew", pady=4)
-        ttk.Label(fields, text="Verfallsdatum (YYYY-MM-DD):").grid(row=1, column=0, sticky="w", pady=4)
-        share_expires_at_var = tk.StringVar()
-        ttk.Entry(fields, textvariable=share_expires_at_var).grid(row=1, column=1, sticky="ew", pady=4)
-        ttk.Label(fields, text="Dokumente / Anhänge:").grid(row=2, column=0, sticky="nw", pady=4)
+        ttk.Label(fields, text="Standardtext:").grid(row=1, column=0, sticky="w", pady=4)
+        template_var = tk.StringVar()
+        template_names = [item.get("label", "") for item in self.get_mail_text_templates()]
+        template_frame = ttk.Frame(fields)
+        template_frame.grid(row=1, column=1, sticky="ew", pady=4)
+        template_frame.columnconfigure(0, weight=1)
+        template_combo = ttk.Combobox(template_frame, textvariable=template_var, values=template_names, state="readonly")
+        template_combo.grid(row=0, column=0, sticky="ew")
+        ttk.Button(template_frame, text="Laden", width=8, command=lambda: apply_selected_template()).grid(row=0, column=1, padx=(6, 0))
+        ttk.Label(fields, text="Verfallsdatum:").grid(row=2, column=0, sticky="w", pady=4)
+        share_expires_at_var = tk.StringVar(value=date.today().isoformat())
+        expiry_frame = ttk.Frame(fields)
+        expiry_frame.grid(row=2, column=1, sticky="ew", pady=4)
+        expiry_frame.columnconfigure(0, weight=1)
+        expiry_entry = ttk.Entry(expiry_frame, textvariable=share_expires_at_var, width=16)
+        expiry_entry.grid(row=0, column=0, sticky="w")
+        ttk.Button(expiry_frame, text="Kalender", width=9, command=lambda: open_date_picker()).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(expiry_frame, text="Heute", width=7, command=lambda: share_expires_at_var.set(date.today().isoformat())).grid(row=0, column=2, padx=(6, 0))
+        ttk.Label(fields, text="Dokumente / Anhänge:").grid(row=3, column=0, sticky="nw", pady=4)
         doc_path_var = tk.StringVar()
         link_var = tk.StringVar()
         selected_docs: list[str] = []
         generated_links: dict[str, str] = {}
         doc_frame = ttk.Frame(fields)
-        doc_frame.grid(row=2, column=1, sticky="ew", pady=4)
+        doc_frame.grid(row=3, column=1, sticky="ew", pady=4)
         doc_frame.columnconfigure(1, weight=1)
         ttk.Button(doc_frame, text="+", width=3, command=lambda: add_doc()).grid(row=0, column=0, padx=(0, 6), sticky="w")
         ttk.Entry(doc_frame, textvariable=doc_path_var).grid(row=0, column=1, sticky="ew")
@@ -550,9 +727,9 @@ class MailManagerMixin:
         doc_list = tk.Listbox(doc_frame, height=4, exportselection=False)
         doc_list.grid(row=1, column=0, columnspan=4, sticky="ew", pady=(6, 0))
         ttk.Label(doc_frame, text="Mit + können Dokumente nacheinander hinzugefügt werden. Bei Downloadlink werden alle ausgewählten Dateien als Linkliste in die Mail geschrieben.", foreground="#555").grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 0))
-        ttk.Label(fields, text="Dokumentenliste:").grid(row=3, column=0, sticky="nw", pady=4)
+        ttk.Label(fields, text="Dokumentenliste:").grid(row=4, column=0, sticky="nw", pady=4)
         link_frame = ttk.Frame(fields)
-        link_frame.grid(row=3, column=1, sticky="ew", pady=4)
+        link_frame.grid(row=4, column=1, sticky="ew", pady=4)
         link_frame.columnconfigure(0, weight=1)
         link_text, link_text_frame = self.make_scrolled_text(link_frame, height=5, wrap="word")
         link_text_frame.grid(row=0, column=0, sticky="ew")
@@ -626,14 +803,88 @@ class MailManagerMixin:
             link_text.delete("1.0", "end")
             link_text.insert("1.0", block)
 
-        ttk.Label(dialog, text="Text:").grid(row=6, column=0, sticky="nw", padx=10, pady=4)
+        ttk.Label(dialog, text="Text:").grid(row=7, column=0, sticky="nw", padx=10, pady=4)
         body, body_frame = self.make_scrolled_text(dialog, height=18, wrap="word")
-        body_frame.grid(row=7, column=0, columnspan=2, sticky="nsew", padx=10, pady=4)
+        body_frame.grid(row=8, column=0, columnspan=2, sticky="nsew", padx=10, pady=4)
         body.insert("1.0", "Liebe Ortschronistinnen und Ortschronisten,\n\n"
                          "es liegt eine neue Information / Einladung vor.\n\n"
                          "DOKUMENTE:\n{dokumente}\n\n"
                          "Viele Grüße\n"
                          f"{self.display_name_var.get().strip() or 'Ortschronisten'}")
+
+        def apply_selected_template() -> None:
+            label = template_var.get().strip()
+            if not label:
+                return
+            for item in self.get_mail_text_templates():
+                if item.get("label", "") == label:
+                    body.delete("1.0", "end")
+                    body.insert("1.0", item.get("text", ""))
+                    return
+
+        template_combo.bind("<<ComboboxSelected>>", lambda _e: apply_selected_template())
+
+        def open_date_picker() -> None:
+            try:
+                current = date.fromisoformat(share_expires_at_var.get().strip())
+            except Exception:
+                current = date.today()
+            state = {"year": current.year, "month": current.month}
+            picker = tk.Toplevel(dialog)
+            picker.title("Datum wählen")
+            picker.transient(dialog)
+            picker.grab_set()
+            picker.resizable(False, False)
+            picker.columnconfigure(0, weight=1)
+
+            header = ttk.Frame(picker, padding=8)
+            header.grid(row=0, column=0, sticky="ew")
+            header.columnconfigure(1, weight=1)
+            month_label = ttk.Label(header, text="")
+            month_label.grid(row=0, column=1, sticky="n")
+
+            grid = ttk.Frame(picker, padding=(8, 0, 8, 8))
+            grid.grid(row=1, column=0, sticky="nsew")
+
+            def render_month() -> None:
+                for child in grid.winfo_children():
+                    child.destroy()
+                month_label.configure(text=f"{calendar.month_name[state['month']]} {state['year']}")
+                for idx, wd in enumerate(["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]):
+                    ttk.Label(grid, text=wd, width=4).grid(row=0, column=idx, padx=2, pady=(0, 4))
+                weeks = calendar.monthcalendar(state["year"], state["month"])
+                for r, week in enumerate(weeks, start=1):
+                    for c, day in enumerate(week):
+                        if day == 0:
+                            ttk.Label(grid, text="", width=4).grid(row=r, column=c, padx=2, pady=2)
+                            continue
+                        def choose(d=day):
+                            share_expires_at_var.set(date(state["year"], state["month"], d).isoformat())
+                            picker.destroy()
+                        ttk.Button(grid, text=str(day), width=4, command=choose).grid(row=r, column=c, padx=2, pady=2)
+
+            nav = ttk.Frame(header)
+            nav.grid(row=0, column=0, sticky="w")
+            def prev_month() -> None:
+                if state["month"] == 1:
+                    state["month"] = 12
+                    state["year"] -= 1
+                else:
+                    state["month"] -= 1
+                render_month()
+
+            def next_month() -> None:
+                if state["month"] == 12:
+                    state["month"] = 1
+                    state["year"] += 1
+                else:
+                    state["month"] += 1
+                render_month()
+
+            ttk.Button(nav, text="◀", width=3, command=prev_month).pack(side="left", padx=(0, 4))
+            ttk.Button(nav, text="▶", width=3, command=next_month).pack(side="left")
+            ttk.Button(header, text="Heute", command=lambda: (share_expires_at_var.set(date.today().isoformat()), picker.destroy())).grid(row=0, column=2, sticky="e")
+            render_month()
 
         def collect_recipients() -> list[str]:
             emails: list[str] = []
@@ -785,7 +1036,7 @@ class MailManagerMixin:
         send_mode_var.trace_add("write", on_send_mode_changed)
 
         buttons = ttk.Frame(dialog)
-        buttons.grid(row=8, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
+        buttons.grid(row=9, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
         ttk.Button(buttons, text="Empfänger prüfen", command=preview_recipients).pack(side="left", padx=4)
         ttk.Button(buttons, text="Text kopieren", command=copy_mail_text).pack(side="left", padx=4)
         ttk.Button(buttons, text="Im Mailprogramm öffnen", command=open_mail_client).pack(side="left", padx=4)
