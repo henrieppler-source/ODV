@@ -16,19 +16,38 @@ from .models import HistoryEntry
 
 class FileAccessManagerMixin:
     def open_file_with_default_app(self, path: Path) -> None:
+        open_path = self.preferred_pdf_open_path(path)
         try:
             system = platform.system().lower()
             if system == "windows":
-                os.startfile(str(path))  # type: ignore[attr-defined]
+                os.startfile(str(open_path))  # type: ignore[attr-defined]
             elif system == "darwin":
-                subprocess.Popen(["open", str(path)])
+                subprocess.Popen(["open", str(open_path)])
             else:
-                subprocess.Popen(["xdg-open", str(path)])
-            app_log("info", "Datei mit Standardprogramm geöffnet", path=str(path))
-            self.log_document_access(path, "opened")
+                subprocess.Popen(["xdg-open", str(open_path)])
+            app_log("info", "Datei mit Standardprogramm geöffnet", path=str(open_path), requested_path=str(path))
+            self.log_document_access(open_path, "opened")
         except Exception as exc:
             app_log_exception("Datei konnte nicht geöffnet werden", exc)
-            messagebox.showerror("Datei öffnen", f"Die Datei konnte nicht geöffnet werden:\n{path}\n\n{exc}")
+            messagebox.showerror("Datei öffnen", f"Die Datei konnte nicht geöffnet werden:\n{open_path}\n\n{exc}")
+
+    def preferred_pdf_open_path(self, path: Path) -> Path:
+        """Open the archival PDF/A for PDFs when it exists."""
+        try:
+            if path.suffix.lower() != ".pdf":
+                return path
+            stem = path.stem.lower()
+            if stem.endswith("_pdfa") or stem.endswith("_ocr"):
+                return path
+            pdfa_getter = getattr(self, "pdfa_path_for_document", None)
+            if not callable(pdfa_getter):
+                return path
+            pdfa = pdfa_getter(path)
+            if pdfa and pdfa.exists() and pdfa.is_file():
+                return pdfa
+        except Exception:
+            pass
+        return path
 
     def resolve_item_ocr_pdf_path(self, item: dict | None) -> Path | None:
         if not item:

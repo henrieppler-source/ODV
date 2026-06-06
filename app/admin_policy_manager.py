@@ -64,7 +64,7 @@ class AdminPolicyManagerMixin:
             return False
         if self.is_current_admin():
             return True
-        return self.is_selected_document_owner(item) and str(item.get("status") or "") != "uebernommen"
+        return self.is_selected_document_owner(item)
 
     def configure_admin_actions_for_role(self) -> None:
         is_admin = self.is_current_admin()
@@ -82,6 +82,12 @@ class AdminPolicyManagerMixin:
                     widget.grid() if wname != "merge_pdfs_top_button" else widget.pack(side="left", padx=(16, 0))
                 else:
                     widget.grid_remove() if wname != "merge_pdfs_top_button" else widget.pack_forget()
+            except Exception:
+                pass
+        merge_button = getattr(self, "file_view_merge_pdfs_button", None)
+        if merge_button is not None:
+            try:
+                merge_button.grid() if is_admin else merge_button.grid_remove()
             except Exception:
                 pass
         if hasattr(self, "admin_rename_button"):

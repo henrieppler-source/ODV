@@ -86,7 +86,7 @@ function current_user(): array
     }
 
     $pdo = db();
-    $stmt = $pdo->prepare("\n        SELECT\n            t.id AS token_id,\n            t.expires_at,\n            u.id,\n            u.username,\n            u.display_name,\n            u.role,\n            u.place,\n            u.is_active\n        FROM api_tokens t\n        INNER JOIN users u ON u.id = t.user_id\n        WHERE t.token_hash = :token_hash\n        LIMIT 1\n    ");
+    $stmt = $pdo->prepare("\n        SELECT\n            t.id AS token_id,\n            t.expires_at,\n            u.id,\n            u.username,\n            u.display_name,\n            u.email,\n            u.role,\n            u.place,\n            u.is_active\n        FROM api_tokens t\n        INNER JOIN users u ON u.id = t.user_id\n        WHERE t.token_hash = :token_hash\n        LIMIT 1\n    ");
     $stmt->execute([':token_hash' => token_hash($token)]);
     $row = $stmt->fetch();
 
@@ -416,13 +416,36 @@ function build_nextcloud_remote_path(string $localFilePath, string $localNextclo
     return ltrim($file, '/');
 }
 
+function sanitize_email_list(array $emails): array
+{
+    $cleaned = [];
+    $seen = [];
+    foreach ($emails as $email) {
+        $email = trim((string)$email);
+        if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            continue;
+        }
+        $key = strtolower($email);
+        if (isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $cleaned[] = $email;
+    }
+    return $cleaned;
+}
+
 function send_text_mail(string $to, string $subject, string $body, array $attachments = [], string $replyTo = '', string $bodyHtml = ''): bool
 {
     $recipient = trim($to);
     if ($recipient === '') {
         return false;
     }
-    $encodedSubject = mb_encode_mimeheader($subject, 'UTF-8', 'Q', "\r\n");
+    if (function_exists('mb_encode_mimeheader')) {
+        $encodedSubject = mb_encode_mimeheader($subject, 'UTF-8', 'Q', "\r\n");
+    } else {
+        $encodedSubject = '=?UTF-8?B?' . base64_encode($subject) . '?=';
+    }
     $headers = [
         'MIME-Version: 1.0',
         'From: Ortschronik <info@ortschronik.info>',
@@ -442,44 +465,69 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
 
     $hasHtml = trim($bodyHtml) !== '';
     $params = '-f info@ortschronik.info';
+    $sendPlainFallback = static function (string $recipient, string $encodedSubject, string $body, array $headers, string $params): bool {
+        $plainHeaders = [];
+        foreach ($headers as $header) {
+            if (stripos($header, 'Content-Type:') === 0 || stripos($header, 'Content-Transfer-Encoding:') === 0) {
+                continue;
+            }
+            $plainHeaders[] = $header;
+        }
+        $plainHeaders[] = "Content-Type: text/plain; charset=UTF-8";
+        $plainHeaders[] = "Content-Transfer-Encoding: 8bit";
+        return mail($recipient, $encodedSubject, $body, implode("\r\n", $plainHeaders), $params);
+    };
 
     if ($cleanAttachments) {
         $boundaryMixed = '=_odv_mixed_' . bin2hex(random_bytes(12));
-        $headers[] = "Content-Type: multipart/mixed; boundary=\"{$boundaryMixed}\"";
-        $message = "This is a multi-part message in MIME format.\r\n";
-        $message .= "--{$boundaryMixed}\r\n";
-        if ($hasHtml) {
-            $boundaryAlt = '=_odv_alt_' . bin2hex(random_bytes(12));
-            $message .= "Content-Type: multipart/alternative; boundary=\"{$boundaryAlt}\"\r\n\r\n";
-            $message .= "--{$boundaryAlt}\r\n";
-            $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
-            $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-            $message .= $body . "\r\n";
-            $message .= "--{$boundaryAlt}\r\n";
-            $message .= "Content-Type: text/html; charset=UTF-8\r\n";
-            $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-            $message .= $bodyHtml . "\r\n";
-            $message .= "--{$boundaryAlt}--\r\n";
-        } else {
-            $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
-            $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
-            $message .= $body . "\r\n";
-        }
-        foreach ($cleanAttachments as $attachment) {
-            $filename = trim((string)($attachment['filename'] ?? 'Anhang'));
-            $mime = trim((string)($attachment['mime_type'] ?? 'application/octet-stream'));
-            $raw = base64_decode((string)$attachment['content_base64'], true);
-            if ($raw === false) {
-                continue;
-            }
+        $buildMixedMessage = static function (bool $includeHtml) use ($boundaryMixed, $body, $bodyHtml, $cleanAttachments): string {
+            $message = "This is a multi-part message in MIME format.\r\n";
             $message .= "--{$boundaryMixed}\r\n";
-            $message .= "Content-Type: {$mime}; name=\"" . str_replace('"', '\\"', $filename) . "\"\r\n";
-            $message .= "Content-Transfer-Encoding: base64\r\n";
-            $message .= "Content-Disposition: attachment; filename=\"" . str_replace('"', '\\"', $filename) . "\"\r\n\r\n";
-            $message .= chunk_split(base64_encode($raw)) . "\r\n";
+            if ($includeHtml) {
+                $boundaryAlt = '=_odv_alt_' . bin2hex(random_bytes(12));
+                $message .= "Content-Type: multipart/alternative; boundary=\"{$boundaryAlt}\"\r\n\r\n";
+                $message .= "--{$boundaryAlt}\r\n";
+                $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+                $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+                $message .= $body . "\r\n";
+                $message .= "--{$boundaryAlt}\r\n";
+                $message .= "Content-Type: text/html; charset=UTF-8\r\n";
+                $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+                $message .= $bodyHtml . "\r\n";
+                $message .= "--{$boundaryAlt}--\r\n";
+            } else {
+                $message .= "Content-Type: text/plain; charset=UTF-8\r\n";
+                $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
+                $message .= $body . "\r\n";
+            }
+            foreach ($cleanAttachments as $attachment) {
+                $filename = trim((string)($attachment['filename'] ?? 'Anhang'));
+                $mime = trim((string)($attachment['mime_type'] ?? 'application/octet-stream'));
+                $raw = base64_decode((string)$attachment['content_base64'], true);
+                if ($raw === false) {
+                    continue;
+                }
+                $message .= "--{$boundaryMixed}\r\n";
+                $message .= "Content-Type: {$mime}; name=\"" . str_replace('"', '\\"', $filename) . "\"\r\n";
+                $message .= "Content-Transfer-Encoding: base64\r\n";
+                $message .= "Content-Disposition: attachment; filename=\"" . str_replace('"', '\\"', $filename) . "\"\r\n\r\n";
+                $message .= chunk_split(base64_encode($raw)) . "\r\n";
+            }
+            $message .= "--{$boundaryMixed}--\r\n";
+            return $message;
+        };
+        $headersMixed = $headers;
+        $headersMixed[] = "Content-Type: multipart/mixed; boundary=\"{$boundaryMixed}\"";
+        $message = $buildMixedMessage($hasHtml);
+        $sent = mail($recipient, $encodedSubject, $message, implode("\r\n", $headersMixed), $params);
+        if (!$sent && $hasHtml) {
+            $messageFallback = $buildMixedMessage(false);
+            $sent = mail($recipient, $encodedSubject, $messageFallback, implode("\r\n", $headersMixed), $params);
         }
-        $message .= "--{$boundaryMixed}--\r\n";
-        return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers), $params);
+        if (!$sent) {
+            $sent = $sendPlainFallback($recipient, $encodedSubject, $body, $headers, $params);
+        }
+        return $sent;
     }
 
     if ($hasHtml) {
@@ -495,33 +543,318 @@ function send_text_mail(string $to, string $subject, string $body, array $attach
         $message .= "Content-Transfer-Encoding: 8bit\r\n\r\n";
         $message .= $bodyHtml . "\r\n";
         $message .= "--{$boundary}--\r\n";
-        return mail($recipient, $encodedSubject, $message, implode("\r\n", $headers), $params);
+        $sent = mail($recipient, $encodedSubject, $message, implode("\r\n", $headers), $params);
+        if (!$sent) {
+            $sent = $sendPlainFallback($recipient, $encodedSubject, $body, $headers, $params);
+        }
+        return $sent;
     }
 
-    $headers[] = "Content-Type: text/plain; charset=UTF-8";
-    $headers[] = "Content-Transfer-Encoding: 8bit";
-    return mail($recipient, $encodedSubject, $body, implode("\r\n", $headers), $params);
+    return $sendPlainFallback($recipient, $encodedSubject, $body, $headers, $params);
 }
 
-function create_nextcloud_public_share(string $remotePath, string $expiresAt = ''): array
+function server_env_value(string $key, string $default = ''): string
+{
+    $value = getenv($key);
+    if ($value !== false && trim((string)$value) !== '') {
+        return trim((string)$value);
+    }
+    static $env = null;
+    if ($env === null) {
+        $env = [];
+        $path = __DIR__ . '/.env';
+        if (is_file($path) && is_readable($path)) {
+            foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+                $line = trim((string)$line);
+                if ($line === '' || str_starts_with($line, '#') || strpos($line, '=') === false) {
+                    continue;
+                }
+                [$name, $rawValue] = explode('=', $line, 2);
+                $env[trim($name)] = trim(trim($rawValue), "\"'");
+            }
+        }
+    }
+    return trim((string)($env[$key] ?? $default));
+}
+
+function nextcloud_base_url(PDO $pdo): string
+{
+    $webUrl = trim((string)(setting_get($pdo, 'nextcloud_base_url', '') ?? ''));
+    if ($webUrl === '') {
+        $webUrl = server_env_value('NEXTCLOUD_BASE_URL');
+    }
+    if ($webUrl === '') {
+        $webUrl = 'https://nx94165.your-storageshare.de';
+    }
+    $parts = parse_url($webUrl);
+    if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+        throw new RuntimeException('Nextcloud-Basis-URL ist ungültig.');
+    }
+    $base = $parts['scheme'] . '://' . $parts['host'];
+    if (!empty($parts['port'])) {
+        $base .= ':' . $parts['port'];
+    }
+    $path = (string)($parts['path'] ?? '');
+    $marker = '/apps/files';
+    $pos = strpos($path, $marker);
+    if ($pos !== false) {
+        $prefix = substr($path, 0, $pos);
+        if ($prefix !== '') {
+            $base .= rtrim($prefix, '/');
+        }
+    }
+    return rtrim($base, '/');
+}
+
+function nextcloud_remote_base_from_web_files_url(PDO $pdo): string
+{
+    $webUrl = trim((string)(setting_get($pdo, 'nextcloud_web_files_url', '') ?? ''));
+    if ($webUrl === '') {
+        return '';
+    }
+    $parts = parse_url($webUrl);
+    if (!is_array($parts) || empty($parts['query'])) {
+        return '';
+    }
+    parse_str((string)$parts['query'], $query);
+    $dir = trim(str_replace('\\', '/', (string)($query['dir'] ?? '')), '/');
+    return $dir;
+}
+
+function nextcloud_credentials_for_user(PDO $pdo, array $user): array
+{
+    $systemUsername = trim((string)(setting_get($pdo, 'nextcloud_technical_username', '') ?? ''));
+    $systemPasswordEnc = trim((string)(setting_get($pdo, 'nextcloud_technical_password_enc', '') ?? ''));
+    if ($systemUsername !== '' && $systemPasswordEnc !== '') {
+        $systemPassword = decrypt_nextcloud_credential($pdo, $systemPasswordEnc);
+        if ($systemPassword !== '') {
+            return [
+                'username' => $systemUsername,
+                'password' => $systemPassword,
+                'source_user_id' => 0,
+                'source_role' => 'system',
+            ];
+        }
+    }
+
+    $envUsername = server_env_value('NEXTCLOUD_USERNAME');
+    $envPassword = server_env_value('NEXTCLOUD_APP_PASSWORD');
+    if ($envUsername !== '' && $envPassword !== '') {
+        return [
+            'username' => $envUsername,
+            'password' => $envPassword,
+            'source_user_id' => 0,
+            'source_role' => 'system',
+        ];
+    }
+
+    ensure_user_nextcloud_columns($pdo);
+    $stmt = $pdo->prepare("SELECT id, username, display_name, role, nextcloud_username, nextcloud_password_enc FROM users WHERE id = :id LIMIT 1");
+    $stmt->execute([':id' => (int)($user['id'] ?? 0)]);
+    $row = $stmt->fetch();
+
+    $candidates = [];
+    if (is_array($row)) {
+        $candidates[] = $row;
+    }
+
+    $fallback = $pdo->query("
+        SELECT id, username, display_name, role, nextcloud_username, nextcloud_password_enc
+        FROM users
+        WHERE is_active = 1
+          AND role IN ('superadmin', 'admin')
+          AND COALESCE(nextcloud_username, '') <> ''
+          AND COALESCE(nextcloud_password_enc, '') <> ''
+        ORDER BY FIELD(role, 'superadmin', 'admin'), id ASC
+    ");
+    foreach ($fallback->fetchAll() as $candidate) {
+        if ((int)($candidate['id'] ?? 0) === (int)($user['id'] ?? 0)) {
+            continue;
+        }
+        $candidates[] = $candidate;
+    }
+
+    foreach ($candidates as $candidate) {
+        $username = trim((string)($candidate['nextcloud_username'] ?? ''));
+        $passwordEnc = trim((string)($candidate['nextcloud_password_enc'] ?? ''));
+        if ($username === '' || $passwordEnc === '') {
+            continue;
+        }
+        $password = decrypt_nextcloud_credential($pdo, $passwordEnc);
+        if ($password === '') {
+            continue;
+        }
+        return [
+            'username' => $username,
+            'password' => $password,
+            'source_user_id' => (int)($candidate['id'] ?? 0),
+            'source_role' => (string)($candidate['role'] ?? ''),
+        ];
+    }
+
+    throw new RuntimeException('Es sind keine technischen Nextcloud-Zugangsdaten, keine .env-Zugangsdaten und keine Benutzer-Zugangsdaten gespeichert.');
+}
+
+function nextcloud_ocs_request(string $method, string $url, string $username, string $password, array $data = []): array
+{
+    $body = http_build_query($data);
+    $headers = [
+        'OCS-APIRequest: true',
+        'Accept: application/json',
+        'Content-Type: application/x-www-form-urlencoded',
+    ];
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_USERPWD, $username . ':' . $password);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        if ($body !== '') {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+        $raw = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($raw === false) {
+            throw new RuntimeException('Nextcloud-API nicht erreichbar: ' . $error);
+        }
+    } else {
+        $headers[] = 'Authorization: Basic ' . base64_encode($username . ':' . $password);
+        $context = stream_context_create([
+            'http' => [
+                'method' => strtoupper($method),
+                'header' => implode("\r\n", $headers),
+                'content' => $body,
+                'timeout' => 30,
+                'ignore_errors' => true,
+            ],
+        ]);
+        $raw = file_get_contents($url, false, $context);
+        $status = 0;
+        foreach (($http_response_header ?? []) as $header) {
+            if (preg_match('#^HTTP/\S+\s+(\d+)#', $header, $matches)) {
+                $status = (int)$matches[1];
+                break;
+            }
+        }
+        if ($raw === false) {
+            throw new RuntimeException('Nextcloud-API nicht erreichbar.');
+        }
+    }
+    $decoded = json_decode((string)$raw, true);
+    if (!is_array($decoded)) {
+        throw new RuntimeException('Nextcloud-API hat keine gültige JSON-Antwort geliefert.');
+    }
+    $ocs = $decoded['ocs'] ?? null;
+    if (!is_array($ocs)) {
+        throw new RuntimeException('Nextcloud-API-Antwort hat ein unerwartetes Format.');
+    }
+    $meta = is_array($ocs['meta'] ?? null) ? $ocs['meta'] : [];
+    $statusCode = (int)($meta['statuscode'] ?? 0);
+    if ($status >= 400 || !in_array($statusCode, [100, 200], true)) {
+        $message = trim((string)($meta['message'] ?? 'Unbekannter Nextcloud-Fehler'));
+        throw new RuntimeException($message !== '' ? $message : 'Nextcloud-Freigabe konnte nicht erstellt werden.');
+    }
+    return $ocs;
+}
+
+function nextcloud_webdav_request(string $method, string $url, string $username, string $password, string $body = '', array $extraHeaders = []): string
+{
+    $headers = array_merge([
+        'Accept: application/xml',
+    ], $extraHeaders);
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_CUSTOMREQUEST, strtoupper($method));
+        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+        curl_setopt($ch, CURLOPT_USERPWD, $username . ':' . $password);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+        if ($body !== '') {
+            curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+        }
+        $raw = curl_exec($ch);
+        $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $error = curl_error($ch);
+        curl_close($ch);
+        if ($raw === false) {
+            throw new RuntimeException('Nextcloud-WebDAV nicht erreichbar: ' . $error);
+        }
+    } else {
+        $streamHeaders = $headers;
+        $streamHeaders[] = 'Authorization: Basic ' . base64_encode($username . ':' . $password);
+        $context = stream_context_create([
+            'http' => [
+                'method' => strtoupper($method),
+                'header' => implode("\r\n", $streamHeaders),
+                'content' => $body,
+                'timeout' => 30,
+                'ignore_errors' => true,
+            ],
+        ]);
+        $raw = file_get_contents($url, false, $context);
+        $status = 0;
+        foreach (($http_response_header ?? []) as $header) {
+            if (preg_match('#^HTTP/\S+\s+(\d+)#', $header, $matches)) {
+                $status = (int)$matches[1];
+                break;
+            }
+        }
+        if ($raw === false) {
+            throw new RuntimeException('Nextcloud-WebDAV nicht erreichbar.');
+        }
+    }
+    if ($status < 200 || $status >= 300) {
+        throw new RuntimeException('Nextcloud-WebDAV antwortet mit HTTP ' . $status . '.');
+    }
+    return (string)$raw;
+}
+
+function create_nextcloud_public_share(string $remotePath, string $expiresAt = '', ?array $currentUser = null): array
 {
     $path = trim(str_replace('\\', '/', $remotePath));
     $pdo = db();
-    $baseUrl = trim((string)(setting_get($pdo, 'nextcloud_web_files_url', '') ?? ''));
-    if ($baseUrl === '') {
-        $baseUrl = 'https://nx94165.your-storageshare.de/apps/files/files';
-    }
-    $baseUrl = rtrim($baseUrl, '/');
     if ($path === '') {
-        return ['share_url' => $baseUrl, 'download_url' => $baseUrl, 'url' => $baseUrl];
+        throw new RuntimeException('Nextcloud-Dateipfad fehlt.');
     }
-    $dir = '/' . trim(dirname($path), '.');
-    if ($dir === '/' || $dir === '/.') {
-        $dir = '/';
+    if ($currentUser === null) {
+        $currentUser = current_user();
     }
-    $link = $baseUrl . '?dir=' . rawurlencode($dir);
-    $result = ['share_url' => $link, 'download_url' => $link, 'url' => $link];
+    $credentials = nextcloud_credentials_for_user($pdo, $currentUser);
+    $baseUrl = nextcloud_base_url($pdo);
+    $remoteBase = trim(str_replace('\\', '/', (string)(setting_get($pdo, 'nextcloud_remote_base', '') ?? '')), '/');
+    if ($remoteBase === '') {
+        $remoteBase = nextcloud_remote_base_from_web_files_url($pdo);
+    }
+    if ($remoteBase === '') {
+        $remoteBase = trim(str_replace('\\', '/', server_env_value('NEXTCLOUD_REMOTE_BASE')), '/');
+    }
+    $sharePath = '/' . ltrim(($remoteBase !== '' ? $remoteBase . '/' : '') . ltrim($path, '/'), '/');
+    $payload = [
+        'path' => $sharePath,
+        'shareType' => '3',
+        'permissions' => '1',
+    ];
     $expiresAt = trim($expiresAt);
+    if ($expiresAt !== '') {
+        $payload['expireDate'] = $expiresAt;
+    }
+    $ocs = nextcloud_ocs_request(
+        'POST',
+        $baseUrl . '/ocs/v2.php/apps/files_sharing/api/v1/shares?format=json',
+        $credentials['username'],
+        $credentials['password'],
+        $payload
+    );
+    $data = is_array($ocs['data'] ?? null) ? $ocs['data'] : [];
+    $shareUrl = trim((string)($data['url'] ?? ''));
+    if ($shareUrl === '') {
+        throw new RuntimeException('Nextcloud hat keinen Freigabelink zurückgegeben.');
+    }
+    $downloadUrl = rtrim($shareUrl, '/') . '/download';
+    $result = ['share_url' => $shareUrl, 'download_url' => $downloadUrl, 'url' => $downloadUrl];
     if ($expiresAt !== '') {
         $result['expires_at'] = $expiresAt;
     }
@@ -655,7 +988,7 @@ function user_has_folder_permission(PDO $pdo, array $user, string $path, string 
 
 function allowed_status_values(): array
 {
-    return ['hochgeladen', 'rueckfrage', 'geprueft', 'uebernommen', 'archiviert'];
+    return ['hochgeladen', 'erfasst', 'geaendert', 'rueckfrage', 'geprueft', 'archiviert'];
 }
 
 function canonical_document_status(string $status): string
@@ -751,7 +1084,7 @@ function points_year_budget(PDO $pdo, int $year): float
 
 function points_year_total(PDO $pdo, int $year): array
 {
-    $stmt = $pdo->prepare("\n        SELECT\n            COALESCE(SUM(cp.points), 0) AS total_points,\n            COUNT(DISTINCT cp.user_id) AS participant_count\n        FROM contribution_points cp\n        LEFT JOIN documents d ON d.id = cp.document_id\n        WHERE cp.points_year = :year\n          AND cp.is_confirmed = 1\n          AND (d.status = 'uebernommen' OR cp.is_manual = 1)\n    ");
+    $stmt = $pdo->prepare("\n        SELECT\n            COALESCE(SUM(cp.points), 0) AS total_points,\n            COUNT(DISTINCT cp.user_id) AS participant_count\n        FROM contribution_points cp\n        LEFT JOIN documents d ON d.id = cp.document_id\n        WHERE cp.points_year = :year\n          AND cp.is_confirmed = 1\n          AND (d.status IN ('erfasst', 'geprueft', 'archiviert') OR cp.is_manual = 1)\n    ");
     $stmt->execute([':year' => $year]);
     $row = $stmt->fetch();
     return [
@@ -1366,10 +1699,10 @@ function recalculate_points_for_document(PDO $pdo, array $doc, array $currentUse
             }
         }
     }
-    if ((string)($doc['status'] ?? '') === 'uebernommen') {
-        $beneficiary = admin_review_beneficiary($pdo, $doc, 'status', 'uebernommen');
+    if ((string)($doc['status'] ?? '') === 'erfasst') {
+        $beneficiary = admin_review_beneficiary($pdo, $doc, 'status', 'erfasst');
         if ($beneficiary) {
-            $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $beneficiary, $currentUser, 'admin_review', 'admin_review_accepted', 'Dokument geprüft und übernommen', 'status', point_rule_points($pdo, $year, 'admin_review_accepted', 1));
+            $result = add_contribution_point_retro($pdo, $documentId, $uploadId, $beneficiary, $currentUser, 'admin_review', 'admin_review_accepted', 'Dokument erfasst', 'status', point_rule_points($pdo, $year, 'admin_review_accepted', 1));
             $stats[$result] = ($stats[$result] ?? 0) + 1;
         }
     }

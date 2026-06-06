@@ -367,7 +367,7 @@ class PointsRulesManagerMixin:
                 )
                 for idx, row in enumerate(resp.get("events", []) or []):
                     status = row.get("document_status", "")
-                    credit = "gewertet" if status == "uebernommen" or int(row.get("is_manual", 0) or 0) == 1 else "vorläufig"
+                    credit = "gewertet" if status in {"erfasst", "geprueft", "archiviert"} or int(row.get("is_manual", 0) or 0) == 1 else "vorläufig"
                     iid = f"row{idx}"
                     tree.insert("", "end", iid=iid, values=(row.get("created_at", ""), row.get("filename", row.get("upload_id", "")), row.get("category", ""), row.get("reason", ""), row.get("points", 0), status, credit))
                     row_upload_ids[iid] = str(row.get("upload_id") or "")

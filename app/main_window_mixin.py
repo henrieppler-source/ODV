@@ -91,14 +91,13 @@ class MainWindowMixin:
 
         notebook.add(self.history_tab, text="Dashboard")
         notebook.add(self.upload_tab_container, text="Dateien hochladen")
-        notebook.add(self.viewer_tab, text="Dateien anzeigen")
-        notebook.add(self.admin_tab, text="Dateien bearbeiten")
+        notebook.add(self.viewer_tab, text="Dateien anzeigen/bearbeiten")
         notebook.bind("<<NotebookTabChanged>>", self.on_notebook_tab_changed)
 
         self.create_history_tab()
         self.create_upload_tab()
-        self.create_file_view_tab()
         self.create_admin_tab()
+        self.create_file_view_tab()
         self.ensure_standard_metadata_folder()
         self.apply_selected_user()
         self.update_tab_labels()
@@ -158,6 +157,7 @@ class MainWindowMixin:
         if self.current_role() == "Superadmin":
             admin_menu = tk.Menu(menubar, tearoff=False)
             admin_menu.add_command(label="Admin-Einstellungen...", command=self.open_admin_settings_dialog)
+            admin_menu.add_command(label="Normalisierung...", command=self.open_filename_normalization_dialog)
             admin_menu.add_command(label="Betriebsmodus...", command=self.open_operating_mode_dialog)
 
             user_admin_menu = tk.Menu(admin_menu, tearoff=False)
@@ -200,11 +200,34 @@ class MainWindowMixin:
         points_menu = tk.Menu(menubar, tearoff=False)
         points_menu.add_command(label="Mein Punktestand...", command=self.open_my_points_dialog)
         if self.is_current_admin():
+            document_points_label = "Sonderpunkte zum ausgewählten Dokument..."
+
+            def is_file_view_active() -> bool:
+                try:
+                    return hasattr(self, "notebook") and self.notebook.select() == str(self.viewer_tab)
+                except Exception:
+                    return False
+
+            def update_points_menu() -> None:
+                try:
+                    end = points_menu.index("end")
+                    if end is not None:
+                        for idx in range(end, -1, -1):
+                            try:
+                                if points_menu.entrycget(idx, "label") == document_points_label:
+                                    points_menu.delete(idx)
+                            except tk.TclError:
+                                pass
+                    if is_file_view_active():
+                        points_menu.insert_command(4, label=document_points_label, command=self.open_manual_points_dialog)
+                except tk.TclError:
+                    pass
+
+            points_menu.configure(postcommand=update_points_menu)
             points_menu.add_separator()
             points_menu.add_command(label="Punkteübersicht...", command=self.open_points_summary_dialog)
             points_menu.add_command(label="Manuelle Sonderpunkte vergeben...", command=self.open_manual_special_points_dialog)
             points_menu.add_command(label="Übersicht manuelle Sonderpunkte...", command=self.open_manual_special_points_overview_dialog)
-            points_menu.add_command(label="Sonderpunkte zum ausgewählten Dokument...", command=self.open_manual_points_dialog)
             if self.current_role() == "Superadmin":
                 points_menu.add_separator()
                 points_menu.add_command(label="Punkteregeln verwalten...", command=self.open_point_rules_dialog)
@@ -212,18 +235,20 @@ class MainWindowMixin:
                 points_menu.add_command(label="Punkte-Einstellungen...", command=self.open_points_settings_dialog)
         menubar.add_cascade(label="Punkte", menu=points_menu)
 
+        mail_menu = tk.Menu(menubar, tearoff=False)
+        mail_menu.add_command(label="Rundmail erstellen...", command=self.open_information_mail_dialog)
+        mail_menu.add_command(label="Verteiler verwalten...", command=self.open_mail_group_management_dialog)
+        mail_menu.add_command(label="Versandhistorie...", command=self.open_mail_history_dialog)
         if self.is_current_admin():
-            mail_menu = tk.Menu(menubar, tearoff=False)
-            mail_menu.add_command(label="Rundmail erstellen...", command=self.open_information_mail_dialog)
-            mail_menu.add_command(label="Verteiler verwalten...", command=self.open_mail_group_management_dialog)
             mail_menu.add_separator()
-            mail_menu.add_command(label="Versandhistorie...", command=self.open_mail_history_dialog)
-            menubar.add_cascade(label="Mail", menu=mail_menu)
+            mail_menu.add_command(label="Standard-Mail-Texte...", command=self.open_standard_mail_texts_dialog)
+        menubar.add_cascade(label="Mail", menu=mail_menu)
 
         if self.is_current_admin():
             overview_menu = tk.Menu(menubar, tearoff=False)
             overview_menu.add_command(label="Dokumentzugriffe...", command=self.open_document_access_log_dialog)
             overview_menu.add_command(label="Sitzungen und Geräte...", command=self.open_sessions_devices_dialog)
+            overview_menu.add_command(label="PDF-Dateien...", command=self.open_pdf_overview_dialog)
             overview_menu.add_command(label="Backup-Status...", command=self.open_backup_status_dialog)
             menubar.add_cascade(label="Übersichten", menu=overview_menu)
 

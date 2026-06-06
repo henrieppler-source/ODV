@@ -325,7 +325,7 @@ class UploadTabMixin:
             value = OPENAI_TEXT_SAMPLE_CHARS
         return max(500, min(100000, value))
 
-    def format_openai_usage(self, usage: dict[str, Any]) -> str:
+    def format_openai_usage(self, usage: dict[str, Any], model_name: str | None = None) -> str:
         if not usage:
             return "Verbrauch: k.A."
         total = usage.get("total_tokens")
@@ -336,7 +336,7 @@ class UploadTabMixin:
         details = f"{total} Tokens"
         if prompt is not None and completion is not None:
             details += f" (p{prompt}+c{completion})"
-        model_key = str(getattr(self, "config_data", {}).get("openai_model", "") or "").strip().lower()
+        model_key = str(model_name or getattr(self, "config_data", {}).get("openai_model", "") or "").strip().lower()
         price = OPENAI_USAGE_MODELS.get(model_key)
         if price and prompt is not None and completion is not None:
             cost = (float(prompt) * price["input"] + float(completion) * price["output"]) / 1_000_000
@@ -1108,7 +1108,7 @@ class UploadTabMixin:
                     applied_fields.append(key)
             elif key == "description" and getattr(self, "description_text", None):
                 current = self.description_text.get("1.0", "end-1c").strip()
-                merged = self.append_openai_description(current, str(value).strip())
+                merged = self.normalize_description_text(self.append_openai_description(current, str(value).strip()))
                 if merged != current:
                     self.description_text.delete("1.0", "end")
                     self.description_text.insert("1.0", merged)

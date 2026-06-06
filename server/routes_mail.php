@@ -49,7 +49,7 @@ if ($method === 'POST' && $path === '/api/mails/send') {
             try {
                 $escapedLink = '';
                 $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
-                $share = create_nextcloud_public_share($remotePath, $shareExpiresAt);
+                $share = create_nextcloud_public_share($remotePath, $shareExpiresAt, $currentUser);
                 $link = $share['download_url'] ?: $share['share_url'];
                 $body = str_replace('{link}', $link, $body);
                 if ($bodyHtml !== '') {
@@ -75,8 +75,9 @@ Gültig bis:
                     }
                 }
             } catch (Throwable $e) {
-                api_log('error', 'Nextcloud-Link für Rundmail konnte nicht erzeugt werden', ['error' => $e->getMessage()]);
-                json_response(['success' => false, 'error' => 'Nextcloud-Link konnte nicht erzeugt werden: ' . $e->getMessage()], 500);
+                api_log('error', 'Nextcloud-Link für Rundmail konnte nicht erzeugt werden', ['error' => $e->getMessage(), 'remote_path' => $remotePath ?? '']);
+                $suffix = !empty($remotePath) ? ' (gesucht: /' . ltrim((string)$remotePath, '/') . ')' : '';
+                json_response(['success' => false, 'error' => 'Nextcloud-Link konnte nicht erzeugt werden: ' . $e->getMessage() . $suffix], 500);
             }
         }
     }
@@ -124,7 +125,17 @@ Gültig bis:
     $failed = 0;
     $failedRecipients = [];
     foreach ($recipients as $recipient) {
-        $ok = send_text_mail($recipient, $subject, $body, $attachments, $replyTo, $bodyHtml);
+        try {
+            $ok = send_text_mail($recipient, $subject, $body, $attachments, $replyTo, $bodyHtml);
+        } catch (Throwable $e) {
+            $ok = false;
+            api_log('error', 'Rundmail-Versand an Empfänger fehlgeschlagen', [
+                'recipient' => $recipient,
+                'error' => $e->getMessage(),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+            ]);
+        }
         if ($ok) {
             $sent++;
         } else {
@@ -220,20 +231,37 @@ if ($method === 'POST' && $path === '/api/nextcloud/share') {
     if ($localFilePath === '' || $localBasePath === '') {
         json_response(['success' => false, 'error' => 'local_file_path und local_nextcloud_base sind erforderlich'], 400);
     }
-    $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
-    $share = create_nextcloud_public_share($remotePath, $shareExpiresAt);
-    api_log('info', 'Nextcloud-Freigabe-Link erzeugt', [
-        'by_user_id' => $currentUser['id'],
-        'local_file_path' => $localFilePath,
-        'local_nextcloud_base' => $localBasePath,
-        'share_expires_at' => $shareExpiresAt,
-    ]);
-    json_response([
-        'success' => true,
-        'remote_path' => $remotePath,
-        'download_url' => $share['download_url'] ?? '',
-        'share_url' => $share['share_url'] ?? '',
-        'url' => $share['url'] ?? '',
-        'share_expires_at' => $shareExpiresAt,
-    ]);
+    $remotePath = '';
+    try {
+        $remotePath = build_nextcloud_remote_path($localFilePath, $localBasePath);
+        $share = create_nextcloud_public_share($remotePath, $shareExpiresAt, $currentUser);
+        api_log('info', 'Nextcloud-Freigabe-Link erzeugt', [
+            'by_user_id' => $currentUser['id'],
+            'local_file_path' => $localFilePath,
+            'local_nextcloud_base' => $localBasePath,
+            'remote_path' => $remotePath,
+            'share_expires_at' => $shareExpiresAt,
+        ]);
+        json_response([
+            'success' => true,
+            'remote_path' => $remotePath,
+            'download_url' => $share['download_url'] ?? '',
+            'share_url' => $share['share_url'] ?? '',
+            'url' => $share['url'] ?? '',
+            'share_expires_at' => $shareExpiresAt,
+        ]);
+    } catch (Throwable $e) {
+        api_log('error', 'Nextcloud-Freigabe-Link konnte nicht erzeugt werden', [
+            'by_user_id' => $currentUser['id'],
+            'local_file_path' => $localFilePath,
+            'local_nextcloud_base' => $localBasePath,
+            'share_expires_at' => $shareExpiresAt,
+            'remote_path' => $remotePath,
+            'error' => $e->getMessage(),
+            'file' => $e->getFile(),
+            'line' => $e->getLine(),
+        ]);
+        $suffix = $remotePath !== '' ? ' (gesucht: /' . ltrim($remotePath, '/') . ')' : '';
+        json_response(['success' => false, 'error' => 'Nextcloud-Link konnte nicht erzeugt werden: ' . $e->getMessage() . $suffix], 500);
+    }
 }

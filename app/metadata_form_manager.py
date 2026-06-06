@@ -1,50 +1,60 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .app_logging import app_log_exception
-from .file_service import make_upload_id, save_metadata_file
+from .api_client import ApiError
+from .app_logging import app_log, app_log_exception
+from .database import add_history
+from .file_service import append_metadata_history, detect_document_type, is_image_file, is_writable_folder, make_upload_id, save_metadata_file
 from .models import HistoryEntry
+from .person_tagger import PersonTagger
 
 
 class MetadataFormManagerMixin:
     def load_file_view_metadata_form(self) -> None:
+        self._loading_file_view_metadata = True
         path = self.file_view_current_path
         item = self.file_view_current_metadata or {}
-        writable = self.can_edit_file_view_metadata(path, item)
-        if writable:
-            self.file_view_write_hint_var.set("Metadaten bearbeitbar" if item else "Datei noch nicht in ODV aufgenommen – Metadaten können angelegt werden")
-        else:
-            if item and item.get("upload_id") and not (str(item.get("uploaded_by_user_id") or item.get("user_id") or "").strip() or str(item.get("uploaded_by") or item.get("uploaded_by_name") or "").strip()) and not self.is_current_admin():
-                self.file_view_write_hint_var.set("Nur Anzeige: kein Erfasser hinterlegt – Bearbeitung nur durch Admin/Superadmin")
+        try:
+            writable = self.can_edit_file_view_metadata(path, item)
+            if writable:
+                self.file_view_write_hint_var.set("Metadaten bearbeitbar" if item else "Datei noch nicht in ODV aufgenommen – Metadaten können angelegt werden")
             else:
-                self.file_view_write_hint_var.set("Nur Anzeige: keine Bearbeitungsberechtigung für diese Datei")
-        if hasattr(self, "file_view_uploaded_by_combo"):
-            self.refresh_file_view_uploaded_by_options()
-            if "uploaded_by" in self.file_view_meta_vars:
-                uid = str(item.get("uploaded_by_user_id") or "")
-                name = str(item.get("uploaded_by") or item.get("uploaded_by_name") or "")
-                if not name and not item:
-                    name = self.display_name_var.get().strip() or ""
-                    uid = str(self.current_user.get("id", "") if getattr(self, "current_user", None) else "")
-                label = next((lbl for lbl, u in getattr(self, "file_view_uploaded_by_user_map", {}).items() if str(u.get("id") or "") == uid), "")
-                if not label:
-                    label = next((lbl for lbl, u in getattr(self, "file_view_uploaded_by_user_map", {}).items() if str(u.get("display_name") or u.get("name") or "") == name), name)
-                try:
-                    self.file_view_meta_vars["uploaded_by"].set(label)
-                except Exception:
-                    pass
-        for key, var in self.file_view_meta_vars.items():
-            if key == "uploaded_by" and self.is_current_admin():
-                continue
-            value = item.get(key, "")
-            if key == "document_type" and not value and path and path.is_file():
-                value = detect_document_type(path)
-            if key == "transcription_done" and isinstance(var, tk.BooleanVar):
-                var.set(str(value).strip().lower() in {"1", "ja", "yes", "true", "x"})
-            else:
-                var.set(str(value or ""))
+                if item and item.get("upload_id") and not (str(item.get("uploaded_by_user_id") or item.get("user_id") or "").strip() or str(item.get("uploaded_by") or item.get("uploaded_by_name") or "").strip()) and not self.is_current_admin():
+                    self.file_view_write_hint_var.set("Nur Anzeige: kein Erfasser hinterlegt – Bearbeitung nur durch Admin/Superadmin")
+                else:
+                    self.file_view_write_hint_var.set("Nur Anzeige: keine Bearbeitungsberechtigung für diese Datei")
+            if hasattr(self, "file_view_uploaded_by_combo"):
+                self.refresh_file_view_uploaded_by_options()
+                if "uploaded_by" in self.file_view_meta_vars:
+                    uid = str(item.get("uploaded_by_user_id") or "")
+                    name = str(item.get("uploaded_by") or item.get("uploaded_by_name") or "")
+                    if not name and not item:
+                        name = self.display_name_var.get().strip() or ""
+                        uid = str(self.current_user.get("id", "") if getattr(self, "current_user", None) else "")
+                    label = next((lbl for lbl, u in getattr(self, "file_view_uploaded_by_user_map", {}).items() if str(u.get("id") or "") == uid), "")
+                    if not label:
+                        label = next((lbl for lbl, u in getattr(self, "file_view_uploaded_by_user_map", {}).items() if str(u.get("display_name") or u.get("name") or "") == name), name)
+                    try:
+                        self.file_view_meta_vars["uploaded_by"].set(label)
+                    except Exception:
+                        pass
+            for key, var in self.file_view_meta_vars.items():
+                if key == "uploaded_by" and self.is_current_admin():
+                    continue
+                value = item.get(key, "")
+                if key == "document_type" and not value and path and path.is_file():
+                    value = detect_document_type(path)
+                if key == "transcription_done" and isinstance(var, tk.BooleanVar):
+                    var.set(str(value).strip().lower() in {"1", "ja", "yes", "true", "x"})
+                else:
+                    var.set(str(value or ""))
+        finally:
+            self._loading_file_view_metadata = False
+            self._file_view_uploaded_by_user_interaction = False
         try:
             self.file_view_description_text.configure(state="normal")
             self.file_view_note_text.configure(state="normal")
@@ -273,8 +283,7 @@ class MetadataFormManagerMixin:
                 f"Kopie für Admin-Bearbeitung:\n{target_file}\n\n"
                 f"Metadaten:\n{metadata_file}",
             )
-            self.refresh_file_view_tree()
-            self.refresh_admin_uploads(show_message=False)
+            self.refresh_document_work_area(show_message=False)
         self.refresh_history()
 
     def edit_persons_for_admin_file(self) -> None:
@@ -308,7 +317,10 @@ class MetadataFormManagerMixin:
                 messagebox.showwarning("API", api_msg)
         self.save_item_json_if_present(item)
         add_history(HistoryEntry.now(display_name, "Personenzuordnung geändert", f"{path.name}: {len(result)} Personenmarkierungen | {api_msg}", item.get("upload_id")))
-        self.show_selected_admin_details()
+        if hasattr(self, "load_file_view_metadata_form"):
+            self.file_view_current_metadata = item
+            self.load_file_view_metadata_form()
+        self.refresh_document_work_area(show_message=False)
         self.refresh_history()
 
     def save_file_view_metadata(self, auto: bool = False) -> None:
@@ -322,7 +334,10 @@ class MetadataFormManagerMixin:
             return
         item, metadata_file = self.ensure_file_view_metadata_item(path)
         changed = []
+        technical_edit_keys = {"edited_by", "edited_at"}
         for key, var in self.file_view_meta_vars.items():
+            if key in technical_edit_keys:
+                continue
             if key == "uploaded_by" and self.is_current_admin():
                 continue
             old = str(item.get(key, "") or "")
@@ -334,12 +349,25 @@ class MetadataFormManagerMixin:
         for key, widget in [("description", self.file_view_description_text), ("note", self.file_view_note_text)]:
             old = str(item.get(key, "") or "")
             new = widget.get("1.0", "end").strip()
+            if key == "description":
+                new = self.normalize_description_text(new)
+                current_widget_text = widget.get("1.0", "end").strip()
+                if new != current_widget_text:
+                    widget.delete("1.0", "end")
+                    widget.insert("1.0", new)
             if old != new:
                 item[key] = new
                 changed.append(key)
         if not changed:
             return
         display_name = self.display_name_var.get().strip() or "Benutzer"
+        edited_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        item["edited_by"] = display_name
+        item["edited_at"] = edited_at
+        if "edited_by" in getattr(self, "file_view_meta_vars", {}):
+            self.file_view_meta_vars["edited_by"].set(display_name)
+        if "edited_at" in getattr(self, "file_view_meta_vars", {}):
+            self.file_view_meta_vars["edited_at"].set(edited_at)
         is_new_existing_file = bool(item.pop("_pending_existing_file_metadata", False))
         if is_new_existing_file:
             append_metadata_history(item, display_name, "Vorhandene Nextcloud-Datei in ODV aufgenommen", f"Dateiansicht: {path.name}; Felder: {', '.join(changed)}")
@@ -347,7 +375,7 @@ class MetadataFormManagerMixin:
             append_metadata_history(item, display_name, "Metadaten geändert", f"Dateiansicht: {path.name}; Felder: {', '.join(changed)}")
         api_ok, api_msg = self.save_file_view_item_to_storage(item, metadata_file, is_new_existing_file)
         if not api_ok:
-            app_log("warning", "Dateiansicht-Metadaten nur lokal gespeichert", upload_id=item.get("upload_id"), message=api_msg)
+            app_log("warning", "Dateiansicht-Metadaten nur lokal gespeichert", upload_id=item.get("upload_id"), api_message=api_msg)
         if hasattr(self, "file_view_json_text"):
             self.file_view_json_text.configure(state="normal")
             self.file_view_json_text.delete("1.0", "end")
@@ -432,6 +460,11 @@ class MetadataFormManagerMixin:
             return False, str(exc)
 
     def file_view_uploaded_by_changed(self, _event=None) -> None:
+        if getattr(self, "_loading_file_view_metadata", False):
+            return
+        if not getattr(self, "_file_view_uploaded_by_user_interaction", False):
+            return
+        self._file_view_uploaded_by_user_interaction = False
         if not self.is_current_admin():
             return
         path = self.file_view_current_path
@@ -467,6 +500,11 @@ class MetadataFormManagerMixin:
         self.refresh_history()
 
     def admin_uploaded_by_changed(self, _event=None) -> None:
+        if getattr(self, "_loading_admin_details", False):
+            return
+        if not getattr(self, "_admin_uploaded_by_user_interaction", False):
+            return
+        self._admin_uploaded_by_user_interaction = False
         if not self.is_current_admin():
             return
         item = self.selected_admin_upload()
@@ -490,25 +528,34 @@ class MetadataFormManagerMixin:
             messagebox.showwarning("Erfasst von", api_msg)
             return
         add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Admin", "Erfasst von geändert", f"{old_name} → {new_name}", item.get("upload_id")))
-        self.refresh_admin_uploads(show_message=False)
-        try:
-            self.admin_tree.selection_set(str(item.get("upload_id")))
-        except Exception:
-            pass
-        self.show_selected_admin_details()
+        self.refresh_document_work_area(show_message=False)
+        if hasattr(self, "load_file_view_metadata_form"):
+            self.file_view_current_metadata = item
+            self.load_file_view_metadata_form()
 
     def open_document_in_admin_by_upload_id(self, upload_id: str) -> None:
         if not upload_id:
             return
         try:
-            self.notebook.select(self.admin_tab)
+            self.notebook.select(self.viewer_tab)
         except Exception:
             pass
-        self.refresh_admin_uploads(show_message=False)
         try:
-            self.admin_tree.selection_set(upload_id)
-            self.admin_tree.see(upload_id)
-            self.show_selected_admin_details()
+            item = self.api_get_document_item(upload_id) if self.api_token else None
         except Exception:
-            messagebox.showwarning("Dokument öffnen", "Das Dokument ist in der aktuellen Bearbeitungsliste nicht sichtbar.")
+            item = None
+        if item:
+            self.normalize_admin_item_path_for_current_pc(item)
+            path = self.resolve_document_local_path(item)
+            if path and path.exists():
+                self.file_view_current_path = path
+                self.file_view_current_metadata = item
+                if hasattr(self, "refresh_file_view_tree"):
+                    self.refresh_file_view_tree()
+                if hasattr(self, "load_file_view_metadata_form"):
+                    self.load_file_view_metadata_form()
+                return
+        if hasattr(self, "refresh_file_view_tree"):
+            self.refresh_file_view_tree()
+        messagebox.showwarning("Dokument öffnen", "Das Dokument konnte in der aktuellen Dateiansicht nicht direkt ausgewählt werden.")
 

@@ -47,6 +47,7 @@ def default_users(display_name: str | None = None) -> list[dict[str, Any]]:
             "password_hash": hash_password("admin"),
             "role": "Superadmin",
             "place": "",
+            "email": "",
             "active": True,
         }
     ]
@@ -61,6 +62,7 @@ def normalize_user(item: dict[str, Any], fallback_name: str | None = None) -> di
     if role not in ROLES:
         role = "Ortschronist"
     place = str(item.get("place") or item.get("area") or "").strip()
+    email = str(item.get("email") or item.get("mail") or item.get("mail_address") or item.get("mailadresse") or item.get("e_mail") or "").strip()
     password_hash = str(item.get("password_hash") or "").strip()
     if not password_hash:
         # Migrationshilfe für alte MVP-Benutzer: Standardpasswort admin.
@@ -72,6 +74,7 @@ def normalize_user(item: dict[str, Any], fallback_name: str | None = None) -> di
         "password_hash": password_hash,
         "role": role,
         "place": place,
+        "email": email,
         "active": bool(item.get("active", True)),
     }
 

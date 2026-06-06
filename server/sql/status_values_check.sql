@@ -6,7 +6,8 @@ ORDER BY status;
 
 -- Empfohlene Statuswerte im Testbetrieb:
 -- hochgeladen
+-- erfasst
+-- geaendert
 -- rueckfrage
 -- geprueft
--- uebernommen
 -- archiviert

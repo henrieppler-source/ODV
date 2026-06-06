@@ -157,6 +157,51 @@ class OpenAIClient:
         result["usage"] = response.get("usage", {})
         return result
 
+    def analyze_place_contexts(self, filename: str, contexts: list[dict[str, str]], fallback_text: str | None = None, max_context_chars: int = 1200) -> dict[str, Any]:
+        """Erstellt eine ortsbezogene Inhaltszusammenfassung aus lokalen Fundstellen."""
+        clean_contexts = []
+        max_context_chars = max(300, min(15000, int(max_context_chars or 1200)))
+        for context in contexts:
+            place = str(context.get("place", "") or "").strip()
+            text = str(context.get("text", "") or "").strip()
+            if place and text:
+                clean_contexts.append({"place": place, "text": text[:max_context_chars]})
+        fallback = str(fallback_text or "").strip()
+        if not clean_contexts and not fallback:
+            raise OpenAIError("Keine Ortsfundstellen oder Textprobe für OpenAI vorhanden")
+        prompt = (
+            "Du bist ein Assistent für eine historische Ortschronik. "
+            "Du erhältst entweder Textausschnitte, in denen Orte aus der Ortsverwaltung vorkommen, oder eine begrenzte Textprobe, falls lokal kein Ort gefunden wurde. "
+            "Erstelle daraus eine sachliche Inhaltszusammenfassung und passende Stichwörter. "
+            "Wenn Orte erkennbar sind, liste sie in places und place_summaries auf. "
+            "Erfinde keine Angaben, die nicht in den Ausschnitten stehen. "
+            "Antworte ausschließlich mit gültigem JSON im Format: "
+            "{\"summary\":\"...\", \"keywords\":\"...\", \"places\":\"...\", "
+            "\"document_date\":\"...\", \"event\":\"...\", \"primary_source\":\"...\", "
+            "\"place_summaries\":[{\"place\":\"...\", \"summary\":\"...\"}]}. "
+            "Die Stichwörter sollen kommasepariert sein. "
+            "document_date, event und primary_source nur füllen, wenn sie aus dem Text ableitbar sind."
+        )
+        response = self.request(
+            "/chat/completions",
+            {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": prompt},
+                    {"role": "user", "content": json.dumps({"filename": filename, "contexts": clean_contexts, "fallback_text": fallback[:4000]}, ensure_ascii=False)},
+                ],
+                "response_format": {"type": "json_object"},
+                "temperature": 0.0,
+                "max_tokens": 1000,
+            },
+        )
+        if "choices" not in response or not response["choices"]:
+            raise OpenAIError("OpenAI-Antwort enthält keine Auswahl")
+        content = response["choices"][0].get("message", {}).get("content", "")
+        result = self.parse_json_content(content)
+        result["usage"] = response.get("usage", {})
+        return result
+
     def classify_file(self, filename: str, extension: str, sample: str | None = None) -> dict[str, str]:
         prompt = (
             "Du bist ein Assistent für eine historische Archiv-Uploader-Anwendung. "

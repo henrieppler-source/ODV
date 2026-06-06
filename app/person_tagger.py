@@ -45,6 +45,8 @@ class PersonTagger(tk.Toplevel):
                 except Exception:
                     continue
         self._result: list[PersonMark] | None = None
+        self.selected_number: int | None = None
+        self.pending_mark: PersonMark | None = None
         self._current_number_var = tk.StringVar(value=f"Nächste Markierung: {self.next_person_number()}")
 
         self.original_image = Image.open(image_path)
@@ -76,6 +78,7 @@ class PersonTagger(tk.Toplevel):
         self.tree.column("certainty", width=110, anchor="w", stretch=False)
         self.tree.column("note", width=180, anchor="w")
         self.tree.grid(row=0, column=0, sticky="nsew")
+        self.tree.bind("<<TreeviewSelect>>", self.on_tree_select)
 
         ttk.Label(side, textvariable=self._current_number_var, foreground="#555555").grid(row=1, column=0, sticky="w", pady=(6, 0))
         btn_frame = ttk.Frame(side)
@@ -104,11 +107,20 @@ class PersonTagger(tk.Toplevel):
         self.canvas.delete("all")
         self.canvas.create_image(self.offset_x, self.offset_y, anchor="nw", image=self.photo)
 
-        for p in self.persons:
+        marks = list(self.persons)
+        if self.pending_mark is not None:
+            marks.append(self.pending_mark)
+        for p in marks:
             x = self.offset_x + int(p.x * new_w)
             y = self.offset_y + int(p.y * new_h)
-            self.canvas.create_oval(x - 12, y - 12, x + 12, y + 12, fill="white", outline="black", width=2)
-            self.canvas.create_text(x, y, text=str(p.number), fill="black", font=("Arial", 11, "bold"))
+            is_selected = p.number == self.selected_number
+            is_pending = self.pending_mark is not None and p.number == self.pending_mark.number
+            radius = 18 if is_selected or is_pending else 12
+            fill = "#ffe680" if is_selected or is_pending else "white"
+            outline = "#d00000" if is_selected or is_pending else "black"
+            width_line = 4 if is_selected or is_pending else 2
+            self.canvas.create_oval(x - radius, y - radius, x + radius, y + radius, fill=fill, outline=outline, width=width_line)
+            self.canvas.create_text(x, y, text=str(p.number), fill="black", font=("Arial", 13 if is_selected or is_pending else 11, "bold"))
 
     def next_person_number(self) -> int:
         used = {p.number for p in self.persons if p.number > 0}
@@ -121,6 +133,20 @@ class PersonTagger(tk.Toplevel):
         number = number or self.next_person_number()
         prefix = "Markierung" if selected else "Nächste Markierung"
         self._current_number_var.set(f"{prefix}: {number}")
+
+    def on_tree_select(self, _event: tk.Event | None = None) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            self.selected_number = None
+            self.update_current_number_hint()
+        else:
+            try:
+                self.selected_number = int(selected[0])
+                self.update_current_number_hint(self.selected_number, selected=True)
+            except Exception:
+                self.selected_number = None
+        self.pending_mark = None
+        self.redraw()
 
     def edit_person_dialog(
         self,
@@ -196,14 +222,28 @@ class PersonTagger(tk.Toplevel):
         rel_x = (event.x - self.offset_x) / img_w
         rel_y = (event.y - self.offset_y) / img_h
         number = self.next_person_number()
+        self.selected_number = number
+        self.pending_mark = PersonMark(number=number, x=rel_x, y=rel_y, display_name="", certainty="unbekannt", note="")
         self.update_current_number_hint(number, selected=True)
+        self.redraw()
         data = self.edit_person_dialog(number=number, title=f"Person {number} erfassen")
         if data is None:
+            self.pending_mark = None
+            self.selected_number = None
+            self.update_current_number_hint()
+            self.redraw()
             return
         name, certainty, note = data
         mark = PersonMark(number=number, x=rel_x, y=rel_y, display_name=name, certainty=certainty or "unbekannt", note=note)
+        self.pending_mark = None
         self.persons.append(mark)
         self.refresh_tree()
+        try:
+            self.tree.selection_set(str(number))
+            self.tree.see(str(number))
+            self.selected_number = number
+        except Exception:
+            pass
         self.redraw()
 
     def refresh_tree(self) -> None:
@@ -223,7 +263,9 @@ class PersonTagger(tk.Toplevel):
         person = next((p for p in self.persons if p.number == number), None)
         if person is None:
             return
+        self.selected_number = number
         self.update_current_number_hint(number, selected=True)
+        self.redraw()
         data = self.edit_person_dialog(
             number=number,
             title=f"Person {number} bearbeiten",
@@ -238,6 +280,12 @@ class PersonTagger(tk.Toplevel):
         person.certainty = certainty or "unbekannt"
         person.note = note
         self.refresh_tree()
+        try:
+            self.tree.selection_set(str(number))
+            self.tree.see(str(number))
+            self.selected_number = number
+        except Exception:
+            pass
         self.redraw()
 
     def delete_selected(self) -> None:
@@ -246,6 +294,8 @@ class PersonTagger(tk.Toplevel):
             return
         numbers = {int(iid) for iid in selected}
         self.persons = [p for p in self.persons if p.number not in numbers]
+        self.selected_number = None
+        self.pending_mark = None
         self.refresh_tree()
         self.redraw()
 

@@ -1,6 +1,6 @@
 # ODV-Handbuch für Bearbeiter
 
-Stand: v120
+Stand: v121
 
 Dieses Handbuch beschreibt die Arbeit mit der Ortschronisten-Datei-Verwaltung (ODV) aus Sicht von Bearbeiterinnen und Bearbeitern. Es konzentriert sich auf die tägliche Erfassung, Pflege und Suche von Dateien und Metadaten.
 
@@ -49,7 +49,9 @@ Admins und Superadmins haben zusätzliche Verwaltungsfunktionen. Diese sind im A
 | Metadaten | Beschreibung und Kontext einer Datei. |
 | OCR | Texterkennung für gescannte oder bildhafte PDFs. |
 | OpenAI-Prüfung | Unterstützende Analyse einer Datei zur Metadatenvorschlagserstellung. |
-| Status | Bearbeitungszustand eines Dokuments, z. B. hochgeladen, rückfrage oder übernommen. |
+| Status | Bearbeitungszustand eines Dokuments, z. B. ohne, hochgeladen, erfasst, geaendert, rueckfrage, geprueft oder archiviert. |
+| `!!` vor PDF-Dateien | Hinweis auf eine sehr große PDF-Datei, bei der eine Optimierung empfohlen ist. |
+| Optimiert durch ODV | Technischer Nachweis, ob die PDF-Optimierung bereits von ODV durchgeführt wurde. |
 
 # 3. Erster Start und Anmeldung
 
@@ -112,6 +114,8 @@ Wichtige Felder:
 
 Für gute Beschreibungen hilft die Leitfrage: Was ist zu sehen oder enthalten, wo gehört es hin, wann ist es entstanden und warum ist es für die Ortschronik relevant?
 
+ODV beginnt gespeicherte Beschreibungen automatisch mit `enthält u.a.`. Wird der Einstieg bei manueller Eingabe vergessen, ergänzt ODV ihn beim Speichern.
+
 # 7. OpenAI und OCR nutzen
 
 OpenAI wird nicht automatisch beim Auswählen einer Datei aufgerufen. Die Prüfung erfolgt bewusst über `OpenAI prüfen`.
@@ -124,7 +128,15 @@ OpenAI kann helfen bei:
 
 OpenAI-Vorschläge müssen immer geprüft werden. Wenn ein OpenAI-Wert korrigiert wird, gilt die endgültige fachliche Leistung als manuelle Bearbeitung.
 
+In `Dateien bearbeiten` zeigt ODV vor einer erneuten OpenAI-Prüfung, welches Modell bereits verwendet wurde. Dasselbe Modell wird nicht erneut aufgerufen. Nach der Prüfung kann pro Feld entschieden werden, ob der Vorschlag übernommen, überschrieben oder angefügt wird; leere Felder sind mit `übernehmen` vorbelegt, ohne Auswahl bleibt das Feld unverändert. Der Dokumenttyp wird dabei nicht durch OpenAI geändert.
+
+Mit `Orte prüfen` sucht ODV im gesamten lokal lesbaren Dokument gezielt nach Orten aus der Ortsverwaltung. Nur die gefundenen Textausschnitte werden an OpenAI geschickt. Vor dem OpenAI-Start wird das Modell ausgewählt; derselbe Ortsanalyse-Aufruf mit demselben Modell wird für das Dokument nicht erneut gestartet. Wenn kein Ort gefunden wird, prüft ODV eine begrenzte Textprobe nach den OpenAI-Einstellungen. Daraus werden eine Inhaltszusammenfassung und Stichwörter vorgeschlagen.
+
 OCR hilft bei PDFs, die nur aus Bildern oder Scans bestehen. ODV kann eine durchsuchbare OCR-Fassung erzeugen. Das Original bleibt das Archivdokument; die OCR-Datei dient als verknüpfte Analysefassung.
+
+Wenn PDF-Aktionen wie Optimierung oder PDF/A-Erzeugung länger dauern, zeigt ODV `Datei wird verarbeitet` mit laufendem Fortschrittsbalken. Bitte warten Sie in diesem Fall, bis die Ergebnis- oder Fehlermeldung erscheint.
+
+Falls eine optimierte PDF nicht ersetzt werden kann, ist die Datei meist noch geöffnet oder durch Nextcloud-Sync bzw. die Explorer-Vorschau gesperrt. Schließen Sie die Vorschau oder das PDF-Programm, warten Sie kurz auf den Sync und starten Sie die Aktion erneut.
 
 # 8. Bilder und Personenmarkierung
 
@@ -143,6 +155,12 @@ Personenmarkierungen sind auch für Punkte relevant: Ein Bild mit Personenmarkie
 
 Im Bereich `Dateien anzeigen` können Dateien nach Berechtigung angezeigt und durchsucht werden. Die Suche ist normalisiert, sodass unterschiedliche Schreibweisen häufig trotzdem gefunden werden.
 
+Im gemeinsamen Bereich `Dateien anzeigen/bearbeiten` ist rechts standardmäßig der Reiter `Metadaten` aktiv. Der Reiter `Vorschau / Personen` wird nur bei Bilddateien eingeblendet.
+
+In der Bildvorschau verändert das Mausrad die Bildgröße. Beim Wechsel auf ein anderes Bild setzt ODV die Vorschau wieder auf Normalgröße zurück.
+
+Im Dialog `Personen markieren` hebt ODV die aktuell angeklickte oder in der Liste ausgewählte Markierung direkt im Bild hervor.
+
 Möglichkeiten:
 
 - Dateibaum durchsuchen.
@@ -158,6 +176,8 @@ Die Anzeige ersetzt nicht die fachliche Pflege. Wenn Metadaten fehlen oder offen
 
 Bearbeiter können je nach Rechtekonzept eigene bzw. berechtigte Dateien bearbeiten. Übernommene oder gesperrte Dokumente können eingeschränkt sein.
 
+Im Reiter `Dateien bearbeiten` gibt es zusätzlich einen Ordnerfilter. Standard ist `alle`; damit lassen sich gezielt nur die Dokumente aus einem der konfigurierten Arbeitsordner anzeigen.
+
 Typische Bearbeitungen:
 
 - Beschreibung ergänzen.
@@ -165,6 +185,10 @@ Typische Bearbeitungen:
 - Datum, Ort oder Thema korrigieren.
 - Rechtehinweise ergänzen.
 - Personenmarkierungen nachtragen.
+
+Die Upload-ID ist eine technische Kennung und wird nur angezeigt. Sie kann nicht bearbeitet werden.
+
+Bei bestehenden Dokumenten zeigen `Bearbeitet von` und `Bearbeitet am`, wer die Metadaten zuletzt nachträglich geändert hat.
 
 Wenn ein anderer Benutzer ein Dokument gerade bearbeitet, kann eine Bearbeitungssperre greifen. Das verhindert parallele widersprüchliche Änderungen.
 
@@ -182,10 +206,11 @@ Grundlogik seit v116:
 - Bild mit Personenmarkierung und einzelne Personenmarkierungen können eigene Punkte auslösen.
 - `Mein Punktestand` aktualisiert sich beim Öffnen und beim Wechsel des Bearbeiters automatisch; ein manueller Aktualisieren-Button ist nicht mehr nötig.
 - Im Upload-Reiter gibt es ein eigenes Feld für den geplanten Nextcloud-Dateinamen; es wird beim Auswählen einer Datei vorbefüllt und kann vor dem Upload angepasst werden.
+- Dateinamen werden beim Speichern/Verschieben nach den von Superadmins gepflegten Normalisierungsregeln gebildet. Die Standardregel bleibt Datum, Ort und bisheriger Dateiname; für bestimmte Ordner können Sonderregeln gelten.
 - Die Personenmarkierung zeigt die Nummer sofort, nutzt eine kompaktere Eingabemaske und lässt vorhandene Nummern beim Löschen bestehen.
 - In `Dateien anzeigen` springt der Metadatenbereich bei neuer Auswahl wieder nach oben; die Punkthinweise sind kürzer formuliert.
 - Bei einer Rückfrage erhält der Bearbeiter einen klaren Hinweis; der Statushinweis wird getrennt vom allgemeinen Bemerkungsfeld gespeichert.
-- Sichtbar verwendet ODV nur noch die Status `hochgeladen`, `rueckfrage`, `geprueft`, `uebernommen` und `archiviert`.
+- Sichtbar verwendet ODV die Status `ohne`, `hochgeladen`, `erfasst`, `geaendert`, `rueckfrage`, `geprueft` und `archiviert`; `ohne` betrifft Dateien, die physisch vorhanden, aber noch nicht in ODV erfasst sind.
 - Die Statuslogik wird technisch in einem eigenen Modul verarbeitet; für die Bedienung ändert sich dadurch nichts.
 - Datei öffnen, OCR-Verknüpfung und Download laufen technisch über ein eigenes Zugriffsmodul; die Bedienung bleibt gleich.
 - Der App-Start ist technisch in Launcher, Bootstrap, Fensterlogik und App-Klasse aufgeteilt; für Bearbeiter ändert sich an der Bedienung nichts.
@@ -226,6 +251,7 @@ Für Bearbeiter gilt:
 - Keine Auswahl von Standardtexten; diese stehen nur Admin/Superadmin zur Verfügung.
 - Das Feld `Antwort an` ist vorbelegt mit der eigenen Mailadresse.
 - In der Versandart werden Nextcloud-Dateien als Downloadlink, andere ausgewählte Dateien als normale Anlage behandelt.
+- Downloadlinks sind echte öffentliche Nextcloud-Freigaben. Wenn kein echter Link erzeugt werden kann, zeigt ODV eine Fehlermeldung statt eines internen Nextcloud-Ordnerlinks.
 - Die Versandhistorie zeigt nur die eigenen Sendungen.
 
 Für Bearbeiter ist wichtig:
@@ -251,7 +277,7 @@ Die Anzeige hängt von Rolle und Ordnerrechten ab.
 
 ## Warum kann ich manche Dateien nicht bearbeiten?
 
-Mögliche Gründe sind fehlendes Schreibrecht, ein übernommener Status oder eine aktive Bearbeitungssperre.
+Mögliche Gründe sind fehlendes Schreibrecht, fehlende Zuständigkeit oder eine aktive Bearbeitungssperre.
 
 ## Was passiert, wenn ich OpenAI-Vorschläge korrigiere?
 

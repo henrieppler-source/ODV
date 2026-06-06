@@ -8,6 +8,19 @@ from .file_service import is_image_file
 
 
 class PreviewManagerMixin:
+    def on_file_preview_mousewheel(self, event) -> str:
+        path = getattr(self, "file_view_current_path", None)
+        if not path or not path.exists() or not is_image_file(path):
+            return "break"
+        delta = getattr(event, "delta", 0)
+        if delta == 0:
+            delta = 120 if getattr(event, "num", 0) == 4 else -120
+        factor = 1.12 if delta > 0 else 1 / 1.12
+        current = float(getattr(self, "file_preview_zoom", 1.0) or 1.0)
+        self.file_preview_zoom = max(0.3, min(4.0, current * factor))
+        self.show_file_preview()
+        return "break"
+
     def set_file_legend(self, lines: list[str]) -> None:
         if hasattr(self, "person_legend_text"):
             self.person_legend_text.configure(state="normal")
@@ -24,12 +37,16 @@ class PreviewManagerMixin:
 
     def show_file_preview(self) -> None:
         path = self.file_view_current_path
+        if hasattr(self, "update_file_view_preview_tab_visibility"):
+            self.update_file_view_preview_tab_visibility()
         if not path or not path.exists() or path.is_dir():
-            self.file_preview_label.configure(image="", text="Keine Datei ausgewählt.")
+            if hasattr(self, "file_preview_label"):
+                self.file_preview_label.configure(image="", text="Keine Datei ausgewählt.")
             self.hide_file_person_ui()
             return
         if not is_image_file(path):
-            self.file_preview_label.configure(image="", text=f"Keine Bildvorschau für:\n{path.name}")
+            if hasattr(self, "file_preview_label"):
+                self.file_preview_label.configure(image="", text="")
             self.hide_file_person_ui()
             return
         persons = []
@@ -49,8 +66,9 @@ class PreviewManagerMixin:
                 self.person_legend_frame.grid_remove()
         try:
             img = Image.open(path).convert("RGB")
-            max_w = max(500, self.file_preview_label.winfo_width() - 20)
-            max_h = max(260, self.file_preview_label.winfo_height() - 20)
+            zoom = float(getattr(self, "file_preview_zoom", 1.0) or 1.0)
+            max_w = int(max(500, self.file_preview_label.winfo_width() - 20) * zoom)
+            max_h = int(max(260, self.file_preview_label.winfo_height() - 20) * zoom)
             img.thumbnail((max_w, max_h))
             img, legend_lines = self.draw_person_overlays(img, persons, has_persons and self.show_persons_var.get(), font_size=14)
             self.set_file_legend(legend_lines if has_persons and self.show_persons_var.get() else [])

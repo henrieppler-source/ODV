@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 import tkinter as tk
@@ -83,6 +84,7 @@ class BootstrapMixin:
         self.refresh_history()
         self.load_folders_from_config()
         self.refresh_window_title()
+        self.after(1200, lambda: threading.Thread(target=self.ensure_ghostscript_on_startup, daemon=True).start())
         self.after(500, self.show_startup_action_warnings)
         if not self.skip_update_check_once:
             self.after(7600, self.check_app_update_on_startup)

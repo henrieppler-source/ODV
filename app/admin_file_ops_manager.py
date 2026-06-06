@@ -11,6 +11,158 @@ from .models import HistoryEntry
 
 
 class AdminFileOpsManagerMixin:
+    def refresh_file_view_destination_choices(self) -> None:
+        if not hasattr(self, "file_view_destination_combo"):
+            return
+        base = self.nextcloud_base_path(show_message=False)
+        self.file_view_destination_map = {}
+        values: list[str] = []
+        if base and base.exists():
+            folder_names = {str(folder).strip() for folder in getattr(self, "admin_work_folder_names", set()) if str(folder).strip()}
+            folder_names.add("00_ORTSCHRONIK")
+            for folder_name in sorted(folder_names, key=str.lower):
+                folder = self.admin_root_for_folder_filter(folder_name) if hasattr(self, "admin_root_for_folder_filter") else base / folder_name
+                if folder and folder.exists() and folder.is_dir():
+                    self.file_view_destination_map[folder_name] = folder
+                    values.append(folder_name)
+        try:
+            self.file_view_destination_combo.configure(values=values)
+        except Exception:
+            pass
+
+    def choose_file_view_destination(self) -> None:
+        if not self.is_current_admin():
+            return
+        self.refresh_file_view_destination_choices()
+        folders = list(getattr(self, "file_view_destination_map", {}).values())
+        selected = self.open_folder_tree_dialog("Zielordner auswählen", folders, self.file_view_destination_var.get())
+        if selected:
+            label = str(selected)
+            for existing_label, path in getattr(self, "file_view_destination_map", {}).items():
+                if Path(path) == selected:
+                    label = existing_label
+                    break
+            if label not in getattr(self, "file_view_destination_map", {}):
+                self.file_view_destination_map[label] = selected
+                values = list(self.file_view_destination_combo["values"])
+                if label not in values:
+                    values.append(label)
+                    self.file_view_destination_combo.configure(values=values)
+            self.file_view_destination_var.set(label)
+
+    def update_file_view_admin_actions_for_selection(self) -> None:
+        if not hasattr(self, "file_view_actions_frame"):
+            return
+        if not self.is_current_admin():
+            self.file_view_actions_frame.grid_remove()
+            return
+        self.file_view_actions_frame.grid()
+        path = getattr(self, "file_view_current_path", None)
+        state = "normal" if path and path.exists() and path.is_file() else "disabled"
+        item = getattr(self, "file_view_current_metadata", None) if state == "normal" else None
+        has_real_odv_entry = bool(item and item.get("upload_id") and not item.get("_missing_odv_entry"))
+        if hasattr(self, "new_status_var"):
+            self.new_status_var.set(str((item or {}).get("status") or ("ohne" if state == "normal" else "")))
+        if hasattr(self, "new_status_combo"):
+            self.new_status_combo.configure(state=("readonly" if has_real_odv_entry else "disabled"))
+        for widget in (
+            getattr(self, "file_view_destination_combo", None),
+            getattr(self, "file_view_rename_button", None),
+        ):
+            if widget is not None:
+                widget.configure(state=("readonly" if widget is getattr(self, "file_view_destination_combo", None) and state == "normal" else state))
+        if state == "normal":
+            item = item or {"current_filename": path.name, "current_path": str(path), "target_folder": str(path.parent), "status": "ohne"}
+            if hasattr(self, "update_admin_document_points_display"):
+                self.update_admin_document_points_display(str(item.get("upload_id") or ""))
+            self.file_view_new_filename_var.set(make_normalized_archive_filename(item, path.name))
+            current_folder = path.parent
+            selected_label = str(current_folder)
+            for label, folder in getattr(self, "file_view_destination_map", {}).items():
+                try:
+                    if Path(folder).resolve() == current_folder.resolve():
+                        selected_label = label
+                        break
+                except Exception:
+                    if Path(folder) == current_folder:
+                        selected_label = label
+                        break
+            if selected_label not in getattr(self, "file_view_destination_map", {}):
+                self.file_view_destination_map[selected_label] = current_folder
+                values = list(self.file_view_destination_combo["values"])
+                if selected_label not in values:
+                    values.append(selected_label)
+                    self.file_view_destination_combo.configure(values=values)
+            self.file_view_destination_var.set(selected_label)
+        elif hasattr(self, "admin_document_points_var"):
+            self.admin_document_points_var.set("keine Datei ausgewählt")
+
+    def file_view_rename_or_move(self) -> None:
+        if not self.is_current_admin():
+            messagebox.showwarning("Keine Berechtigung", "Diese Funktion ist nur für Admin/Superadmin sichtbar.")
+            return
+        current_path = getattr(self, "file_view_current_path", None)
+        if current_path is None or not current_path.exists() or not current_path.is_file():
+            messagebox.showwarning("Keine Datei", "Bitte zuerst im Baum eine Datei auswählen.")
+            return
+        destination_text = self.file_view_destination_var.get().strip()
+        destination_folder = getattr(self, "file_view_destination_map", {}).get(destination_text)
+        if destination_folder is None:
+            destination_folder = Path(destination_text).expanduser() if destination_text else current_path.parent
+        requested_filename = self.file_view_new_filename_var.get().strip() or current_path.name
+        item = self.file_view_current_metadata or {
+            "current_filename": current_path.name,
+            "stored_filename": current_path.name,
+            "original_filename": current_path.name,
+            "current_path": str(current_path),
+            "target_folder": str(current_path.parent),
+            "document_type": self.file_view_meta_vars.get("document_type").get() if hasattr(self, "file_view_meta_vars") and "document_type" in self.file_view_meta_vars else "",
+        }
+        new_filename = make_normalized_archive_filename(item, requested_filename)
+        destination_folder.mkdir(parents=True, exist_ok=True)
+        candidate_path = destination_folder / new_filename
+        new_path = candidate_path if candidate_path == current_path else unique_path_with_counter(candidate_path)
+        self.file_view_new_filename_var.set(new_path.name)
+        if new_path == current_path:
+            messagebox.showinfo("Keine Dateiänderung", "Dateiname und Ordner sind unverändert.")
+            return
+        if not messagebox.askyesno("Datei verschieben/umbenennen", f"Datei verschieben/umbenennen?\n\nVon:\n{current_path}\n\nNach:\n{new_path}"):
+            return
+        try:
+            shutil.move(str(current_path), str(new_path))
+        except Exception as exc:
+            messagebox.showerror("Fehler", str(exc))
+            return
+
+        old_value = str(current_path)
+        new_value = str(new_path)
+        item["current_filename"] = new_path.name
+        item["current_path"] = str(new_path)
+        item["target_folder"] = str(destination_folder)
+        ocr_msg = self.move_linked_ocr_pdf_for_item(item, new_path)
+        display_name = self.display_name_var.get().strip() or "Admin"
+        api_ok = True
+        api_msg = "kein ODV-Datensatz vorhanden"
+        if self.file_view_current_metadata:
+            try:
+                from .metadata_helpers import append_metadata_history
+                append_metadata_history(item, display_name, "Datei verschoben/umbenannt", f"{old_value} → {new_value}{ocr_msg}", old_value=old_value, new_value=new_value)
+            except Exception as exc:
+                app_log_exception("Metadatenhistorie für Dateiansicht-Umbenennen konnte nicht geschrieben werden", exc, upload_id=item.get("upload_id"))
+            api_ok, api_msg = self.save_item_to_api(item)
+            self.save_item_json_if_present(item)
+        add_history(HistoryEntry.now(display_name, "Datei verschoben/umbenannt", f"{old_value} → {new_value} | {api_msg}", item.get("upload_id")))
+        self.refresh_history()
+        self.file_view_current_path = new_path
+        if self.file_view_current_metadata:
+            self.file_view_current_metadata = item
+        try:
+            self.refresh_file_view_tree()
+            self.refresh_admin_uploads(show_message=False)
+        except Exception:
+            pass
+        messagebox.showinfo("Datei", "Datei wurde verschoben/umbenannt." if api_ok else f"Datei wurde lokal geändert; MySQL nicht aktualisiert:\n{api_msg}")
+
     def admin_rename_or_move(self) -> None:
         item = self.selected_admin_upload()
         if not item:
@@ -66,10 +218,10 @@ class AdminFileOpsManagerMixin:
         item["target_folder"] = str(destination_folder)
         ocr_msg = self.move_linked_ocr_pdf_for_item(item, new_path)
         old_status = str(item.get("status", "") or "")
-        item["status"] = "uebernommen"
+        item["status"] = "erfasst"
         if hasattr(self, "new_status_var"):
-            self.new_status_var.set("uebernommen")
-        append_text = f"{old_value} → {new_value}{ocr_msg}; Status: {old_status} → uebernommen"
+            self.new_status_var.set("erfasst")
+        append_text = f"{old_value} → {new_value}{ocr_msg}; Status: {old_status} → erfasst"
         try:
             from .metadata_helpers import append_metadata_history
             append_metadata_history(item, display_name, "Datei verschoben/umbenannt", append_text, old_value=old_value, new_value=new_value)

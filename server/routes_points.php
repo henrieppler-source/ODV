@@ -82,8 +82,8 @@ if ($method === 'GET' && $path === '/api/points/me') {
             SUM(CASE WHEN cp.category = 'persons' THEN cp.points ELSE 0 END) AS persons_points,
             SUM(CASE WHEN cp.category = 'admin_review' THEN cp.points ELSE 0 END) AS admin_points,
             SUM(CASE WHEN cp.is_manual = 1 THEN cp.points ELSE 0 END) AS manual_points,
-            SUM(CASE WHEN (d.status = 'uebernommen' OR cp.is_manual = 1) THEN cp.points ELSE 0 END) AS total_points,
-            SUM(CASE WHEN (d.status <> 'uebernommen' AND cp.is_manual = 0) THEN cp.points ELSE 0 END) AS provisional_points
+            SUM(CASE WHEN (d.status IN ('erfasst', 'geprueft', 'archiviert') OR cp.is_manual = 1) THEN cp.points ELSE 0 END) AS total_points,
+            SUM(CASE WHEN ((d.status IS NULL OR d.status NOT IN ('erfasst', 'geprueft', 'archiviert')) AND cp.is_manual = 0) THEN cp.points ELSE 0 END) AS provisional_points
         FROM contribution_points cp
         LEFT JOIN users u ON u.id = cp.user_id
         LEFT JOIN documents d ON d.id = cp.document_id
@@ -158,7 +158,7 @@ if ($method === 'GET' && $path === '/api/points/summary') {
     require_role(['admin', 'superadmin']);
     $year = (int)($_GET['year'] ?? date('Y'));
     $pdo = db();
-    $stmt = $pdo->prepare("\n        SELECT\n            cp.user_id,\n            cp.user_display_name,\n            COALESCE(u.place, '') AS place,\n            SUM(CASE WHEN cp.category = 'upload' THEN cp.points ELSE 0 END) AS upload_points,\n            SUM(CASE WHEN cp.category = 'metadata' THEN cp.points ELSE 0 END) AS metadata_points,\n            SUM(CASE WHEN cp.category = 'persons' THEN cp.points ELSE 0 END) AS persons_points,\n            SUM(CASE WHEN cp.category = 'admin_review' THEN cp.points ELSE 0 END) AS admin_points,\n            SUM(CASE WHEN cp.is_manual = 1 THEN cp.points ELSE 0 END) AS manual_points,\n            SUM(cp.points) AS total_points\n        FROM contribution_points cp\n        LEFT JOIN users u ON u.id = cp.user_id\n        LEFT JOIN documents d ON d.id = cp.document_id\n        WHERE cp.points_year = :year\n          AND cp.is_confirmed = 1\n          AND (d.status = 'uebernommen' OR cp.is_manual = 1)\n        GROUP BY cp.user_id, cp.user_display_name, u.place\n        ORDER BY total_points DESC, cp.user_display_name ASC\n    ");
+    $stmt = $pdo->prepare("\n        SELECT\n            cp.user_id,\n            cp.user_display_name,\n            COALESCE(u.place, '') AS place,\n            SUM(CASE WHEN cp.category = 'upload' THEN cp.points ELSE 0 END) AS upload_points,\n            SUM(CASE WHEN cp.category = 'metadata' THEN cp.points ELSE 0 END) AS metadata_points,\n            SUM(CASE WHEN cp.category = 'persons' THEN cp.points ELSE 0 END) AS persons_points,\n            SUM(CASE WHEN cp.category = 'admin_review' THEN cp.points ELSE 0 END) AS admin_points,\n            SUM(CASE WHEN cp.is_manual = 1 THEN cp.points ELSE 0 END) AS manual_points,\n            SUM(cp.points) AS total_points\n        FROM contribution_points cp\n        LEFT JOIN users u ON u.id = cp.user_id\n        LEFT JOIN documents d ON d.id = cp.document_id\n        WHERE cp.points_year = :year\n          AND cp.is_confirmed = 1\n          AND (d.status IN ('erfasst', 'geprueft', 'archiviert') OR cp.is_manual = 1)\n        GROUP BY cp.user_id, cp.user_display_name, u.place\n        ORDER BY total_points DESC, cp.user_display_name ASC\n    ");
     $stmt->execute([':year' => $year]);
     json_response(['success' => true, 'year' => $year, 'summary' => $stmt->fetchAll()]);
 }
@@ -281,6 +281,87 @@ if ($method === 'POST' && preg_match('#^/api/documents/([^/]+)/manual-points$#',
     $hist = $pdo->prepare("INSERT INTO document_history (document_id, upload_id, user_id, user_display_name, action, details, new_value) VALUES (:document_id, :upload_id, :user_id, :user_display_name, :action, :details, :new_value)");
     $hist->execute([':document_id' => (int)$doc['id'], ':upload_id' => $uploadId, ':user_id' => $currentUser['id'], ':user_display_name' => $currentUser['display_name'], ':action' => 'manual_points_added', ':details' => $reason, ':new_value' => (string)$points]);
     json_response(['success' => true, 'message' => 'Sonderpunkte wurden gespeichert']);
+}
+
+if ($method === 'PUT' && preg_match('#^/api/document-manual-points/(\d+)$#', $path, $matches)) {
+    $currentUser = require_role(['admin', 'superadmin']);
+    $pointId = (int)$matches[1];
+    $input = get_json_input();
+    $targetUserId = (int)($input['user_id'] ?? 0);
+    $points = (int)($input['points'] ?? 0);
+    $reason = trim((string)($input['reason'] ?? ''));
+    $category = trim((string)($input['category'] ?? 'manual_bonus')) ?: 'manual_bonus';
+    $ruleKey = trim((string)($input['rule_key'] ?? ''));
+    $sourceField = trim((string)($input['source_field'] ?? ''));
+    if ($targetUserId <= 0 || $points === 0 || $reason === '') {
+        json_response(['success' => false, 'error' => 'Benutzer, Punkte und Begründung sind erforderlich'], 400);
+    }
+    if ($ruleKey === '') {
+        $ruleKey = 'manual_bonus_' . time();
+    }
+    if ($sourceField === '') {
+        $sourceField = point_rule_source_field_from_key($ruleKey);
+    }
+    $pdo = db();
+    $pointStmt = $pdo->prepare("SELECT id, document_id, upload_id, points_year FROM contribution_points WHERE id = :id AND is_manual = 1 LIMIT 1");
+    $pointStmt->execute([':id' => $pointId]);
+    $point = $pointStmt->fetch();
+    if (!$point) {
+        json_response(['success' => false, 'error' => 'Manueller Dokument-Sonderpunkt nicht gefunden'], 404);
+    }
+    require_points_year_editable($pdo, (int)$point['points_year']);
+    $userStmt = $pdo->prepare("SELECT id, display_name FROM users WHERE id = :id LIMIT 1");
+    $userStmt->execute([':id' => $targetUserId]);
+    $beneficiary = $userStmt->fetch();
+    if (!$beneficiary) {
+        json_response(['success' => false, 'error' => 'Benutzer nicht gefunden'], 404);
+    }
+    $stmt = $pdo->prepare("
+        UPDATE contribution_points
+        SET user_id = :user_id,
+            user_display_name = :user_display_name,
+            category = :category,
+            rule_key = :rule_key,
+            reason = :reason,
+            source_field = :source_field,
+            points = :points,
+            created_by_user_id = :created_by_user_id,
+            created_by_name = :created_by_name
+        WHERE id = :id AND is_manual = 1
+    ");
+    $stmt->execute([
+        ':user_id' => (int)$beneficiary['id'],
+        ':user_display_name' => (string)$beneficiary['display_name'],
+        ':category' => $category,
+        ':rule_key' => $ruleKey,
+        ':reason' => $reason,
+        ':source_field' => $sourceField,
+        ':points' => $points,
+        ':created_by_user_id' => (int)$currentUser['id'],
+        ':created_by_name' => (string)$currentUser['display_name'],
+        ':id' => $pointId,
+    ]);
+    $hist = $pdo->prepare("INSERT INTO document_history (document_id, upload_id, user_id, user_display_name, action, details, new_value) VALUES (:document_id, :upload_id, :user_id, :user_display_name, :action, :details, :new_value)");
+    $hist->execute([':document_id' => (int)$point['document_id'], ':upload_id' => (string)$point['upload_id'], ':user_id' => $currentUser['id'], ':user_display_name' => $currentUser['display_name'], ':action' => 'manual_points_updated', ':details' => $reason, ':new_value' => (string)$points]);
+    json_response(['success' => true, 'message' => 'Sonderpunkte wurden aktualisiert']);
+}
+
+if ($method === 'DELETE' && preg_match('#^/api/document-manual-points/(\d+)$#', $path, $matches)) {
+    $currentUser = require_role(['admin', 'superadmin']);
+    $pointId = (int)$matches[1];
+    $pdo = db();
+    $pointStmt = $pdo->prepare("SELECT id, document_id, upload_id, points_year, reason, points FROM contribution_points WHERE id = :id AND is_manual = 1 LIMIT 1");
+    $pointStmt->execute([':id' => $pointId]);
+    $point = $pointStmt->fetch();
+    if (!$point) {
+        json_response(['success' => false, 'error' => 'Manueller Dokument-Sonderpunkt nicht gefunden'], 404);
+    }
+    require_points_year_editable($pdo, (int)$point['points_year']);
+    $stmt = $pdo->prepare("DELETE FROM contribution_points WHERE id = :id AND is_manual = 1");
+    $stmt->execute([':id' => $pointId]);
+    $hist = $pdo->prepare("INSERT INTO document_history (document_id, upload_id, user_id, user_display_name, action, details, old_value) VALUES (:document_id, :upload_id, :user_id, :user_display_name, :action, :details, :old_value)");
+    $hist->execute([':document_id' => (int)$point['document_id'], ':upload_id' => (string)$point['upload_id'], ':user_id' => $currentUser['id'], ':user_display_name' => $currentUser['display_name'], ':action' => 'manual_points_deleted', ':details' => (string)$point['reason'], ':old_value' => (string)$point['points']]);
+    json_response(['success' => true, 'message' => 'Sonderpunkte wurden gelöscht']);
 }
 
 if ($method === 'GET' && $path === '/api/admin/manual-points-settings') {

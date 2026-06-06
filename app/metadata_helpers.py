@@ -331,6 +331,16 @@ class MetadataHelpersMixin:
     def update_description_counter(self, widget: tk.Text, label_var: tk.StringVar) -> None:
         label_var.set(self.description_char_count_text(widget))
 
+    def normalize_description_text(self, text: str | None) -> str:
+        """Speichert Beschreibungen mit einheitlichem Einstieg."""
+        value = str(text or "").strip()
+        if not value:
+            return ""
+        prefix = "enthält u.a."
+        if value.casefold().startswith(prefix.casefold()):
+            return value
+        return f"{prefix} {value}"
+
     def make_scrolled_text(self, parent, height: int = 4, wrap: str = "word") -> tuple[tk.Text, ttk.Frame]:
         frame = ttk.Frame(parent)
         frame.columnconfigure(0, weight=1)
@@ -356,15 +366,22 @@ class MetadataHelpersMixin:
             parent.columnconfigure(c, weight=1, uniform=f"{target}_meta")
 
         row_offset = 1 if target == "upload" else 0
-        sections = [
-            (row_offset + 0, 0, "Technische Daten", [
+        technical_fields = [
                 ("Upload-ID", "upload_id"),
                 ("Dokumenttyp", "document_type"),
                 ("Status", "status"),
                 ("Geplanter Dateiname", "current_filename") if target == "upload" else ("Aktueller Dateiname", "current_filename"),
                 ("Erfasst von", "uploaded_by"),
                 ("Hochgeladen am", "uploaded_at"),
-            ]),
+        ]
+        if target in {"admin", "file_view"}:
+            technical_fields.extend([
+                ("Bearbeitet von", "edited_by"),
+                ("Bearbeitet am", "edited_at"),
+            ])
+        lower_sections_row = row_offset + (10 if target in {"admin", "file_view"} else 8)
+        sections = [
+            (row_offset + 0, 0, "Technische Daten", technical_fields),
             (row_offset + 0, 2, "Quelle / Herkunft", [
                 ("Primärquelle", "primary_source"),
                 ("Sekundärquelle", "secondary_source"),
@@ -374,14 +391,14 @@ class MetadataHelpersMixin:
                 ("Abruf am", "archive_accessed_at"),
                 ("Transkription", "_transcription_combined"),
             ]),
-            (row_offset + 8, 0, "Zeit / Ort / Inhalt", [
+            (lower_sections_row, 0, "Zeit / Ort / Inhalt", [
                 ("Datum / Zeitraum", "document_date"),
                 ("Ort", "place"),
                 ("GPS-Koordinaten", "gps_coordinates"),
                 ("Ereignis", "event"),
                 ("Stichwörter", "keywords"),
             ]),
-            (row_offset + 8, 2, "Rechte", [
+            (lower_sections_row, 2, "Rechte", [
                 ("Urheber/in", "copyright_author"),
                 ("Rechteinhaber", "rights_holder"),
                 ("Nutzungsfreigabe", "usage_permission"),
@@ -430,6 +447,11 @@ class MetadataHelpersMixin:
                         advanced_widgets.append(trans_frame)
                     row += 1
                     continue
+                elif key == "upload_id":
+                    var = tk.StringVar()
+                    all_vars[key] = var
+                    widget = tk.Label(parent, textvariable=var, anchor="w", bg="#e6e6e6", padx=4, pady=2)
+                    widget.grid(row=row, column=col0 + 1, sticky="ew", padx=6, pady=2)
                 elif key == "uploaded_by" and target in {"admin", "file_view", "upload"}:
                     var = tk.StringVar()
                     all_vars[key] = var
@@ -437,11 +459,15 @@ class MetadataHelpersMixin:
                         widget = ttk.Combobox(parent, textvariable=var, values=[], width=32, state="readonly")
                         self.admin_uploaded_by_combo = widget
                         self.admin_uploaded_by_user_map = {}
+                        widget.bind("<Button-1>", lambda _e: setattr(self, "_admin_uploaded_by_user_interaction", True), add="+")
+                        widget.bind("<KeyPress>", lambda _e: setattr(self, "_admin_uploaded_by_user_interaction", True), add="+")
                         widget.bind("<<ComboboxSelected>>", self.admin_uploaded_by_changed)
                     elif target == "file_view":
                         widget = ttk.Combobox(parent, textvariable=var, values=[], width=32, state="readonly")
                         self.file_view_uploaded_by_combo = widget
                         self.file_view_uploaded_by_user_map = {}
+                        widget.bind("<Button-1>", lambda _e: setattr(self, "_file_view_uploaded_by_user_interaction", True), add="+")
+                        widget.bind("<KeyPress>", lambda _e: setattr(self, "_file_view_uploaded_by_user_interaction", True), add="+")
                         widget.bind("<<ComboboxSelected>>", self.file_view_uploaded_by_changed)
                     else:
                         widget = ttk.Entry(parent, textvariable=var, state="disabled")
@@ -473,7 +499,7 @@ class MetadataHelpersMixin:
                 else:
                     var = tk.StringVar()
                     all_vars[key] = var
-                    state = "disabled" if key in {"gps_coordinates", "gps_place"} or (target == "upload" and key in {"upload_id", "status", "current_filename", "uploaded_at"}) else "normal"
+                    state = "disabled" if key in {"gps_coordinates", "gps_place", "edited_by", "edited_at"} or (target == "upload" and key in {"status", "current_filename", "uploaded_at"}) else "normal"
                     if target == "upload" and key in METADATA_OPTION_KEYS:
                         widget = ttk.Combobox(parent, textvariable=var, values=self.metadata_value_options(key), state="normal")
                         self.upload_option_comboboxes = getattr(self, "upload_option_comboboxes", {})
@@ -485,7 +511,8 @@ class MetadataHelpersMixin:
                         widget.bind("<FocusOut>", lambda _e: self.save_file_view_metadata(auto=True))
                     elif target == "admin":
                         widget.bind("<FocusOut>", lambda _e: self.admin_save_metadata_fields(auto=True))
-                widgets.append(widget)
+                if key not in {"edited_by", "edited_at"}:
+                    widgets.append(widget)
                 if target == "upload" and key not in UPLOAD_SIMPLE_FIELDS:
                     advanced_widgets.append(widget)
                 row += 1

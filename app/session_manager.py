@@ -454,13 +454,7 @@ class SessionManagerMixin:
                 self.role_label_var.set(self.role_var.get())
         self.refresh_window_title()
         if hasattr(self, "notebook") and hasattr(self, "admin_tab"):
-            # Seit v54 dürfen auch normale Bearbeiter eigene, noch nicht übernommene
-            # Dokumente im Reiter „Dateien bearbeiten“ ergänzen. Admin-/Superadmin-
-            # Funktionen werden in der Oberfläche separat ein-/ausgeblendet.
             try:
-                if not getattr(self, "admin_tab_visible", True):
-                    self.notebook.add(self.admin_tab, text="Dateien bearbeiten")
-                    self.admin_tab_visible = True
                 self.configure_admin_actions_for_role()
             except tk.TclError:
                 pass

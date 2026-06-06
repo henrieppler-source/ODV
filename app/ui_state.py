@@ -57,6 +57,7 @@ class UiStateMixin:
             self.tab_font_bold = default_font.copy()
             self.tab_font_bold.configure(weight="bold")
             style.map("TNotebook.Tab", font=[("selected", self.tab_font_bold), ("!selected", self.tab_font_normal)])
+            style.configure("Treeview.Heading", font=self.tab_font_bold)
         except Exception:
             pass
 
@@ -66,8 +67,7 @@ class UiStateMixin:
         names = {
             str(self.history_tab): "Dashboard",
             str(self.upload_tab_container): "Dateien hochladen",
-            str(self.viewer_tab): "Dateien anzeigen",
-            str(self.admin_tab): "Dateien bearbeiten",
+            str(self.viewer_tab): "Dateien anzeigen/bearbeiten",
         }
         try:
             selected = self.notebook.select()
@@ -88,9 +88,6 @@ class UiStateMixin:
                 self.refresh_file_view_folder_choices()
                 self.refresh_file_view_tree()
                 self.clear_file_view_selection()
-            if selected == str(self.admin_tab) and self.is_current_admin():
-                self.refresh_admin_uploads(show_message=False)
-                self.clear_admin_selection()
         except Exception as exc:
             app_log_exception("Reiterwechsel konnte nicht vollständig verarbeitet werden", exc)
 

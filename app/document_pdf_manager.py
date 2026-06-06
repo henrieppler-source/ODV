@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from pathlib import Path
+import tkinter as tk
 from tkinter import filedialog, messagebox
 
 from PIL import Image, ImageDraw, ImageFont
 
 from .app_logging import app_log, app_log_exception
 from .database import add_history
-from .file_service import is_image_file, make_upload_id, save_metadata_file, unique_path_with_counter, append_metadata_history
+from .file_service import is_image_file, make_normalized_archive_filename, make_upload_id, save_metadata_file, unique_path_with_counter, append_metadata_history
 from .models import HistoryEntry
 
 
@@ -125,14 +126,30 @@ class DocumentPdfManagerMixin:
         path = Path(values[0])
         if not path.exists() or path.is_dir():
             return
+        item = self.file_view_metadata_by_path.get(str(path)) or self.item_for_local_path(path) or {}
+        self.file_view_current_path = path
+        self.file_view_current_metadata = item if item else None
         menu = tk.Menu(self, tearoff=False)
         menu.add_command(label="Datei öffnen", command=lambda: self.open_file_with_default_app(path))
         menu.add_command(label="Download / Kopie speichern unter...", command=lambda: self.download_file_to_local_folder(path))
-        item = self.file_view_metadata_by_path.get(str(path)) or self.file_view_current_metadata or {}
+        if path.suffix.lower() == ".pdf":
+            linked = self.linked_pdf_paths_for_item(item, path)
+            if linked.get("ocr"):
+                menu.add_command(label="OCR anzeigen", command=lambda p=linked["ocr"]: self.open_file_with_default_app(p))
+            if linked.get("pdfa"):
+                menu.add_command(label="Original / PDF-A anzeigen", command=lambda p=linked["pdfa"]: self.open_file_with_default_app(p))
+            if self.is_current_admin():
+                if self.pdf_size_mb(path) >= self.pdf_optimize_recommend_mb():
+                    menu.add_command(label="PDF optimieren...", command=lambda: self.pdf_action_stub("PDF optimieren", path))
+                if not linked.get("pdfa"):
+                    menu.add_command(label="PDF/A erzeugen...", command=lambda: self.pdf_action_stub("PDF/A erzeugen", path))
         if is_image_file(path) and (item.get("persons") or []):
             menu.add_command(label="Stammdatenblatt als PDF speichern...", command=lambda: self.create_person_master_sheet_pdf(path, item))
         if is_image_file(path) and self.is_current_admin():
             menu.add_command(label="In PDF umwandeln...", command=lambda: self.convert_file_view_image_to_pdf(path))
+        if self.is_current_admin():
+            menu.add_separator()
+            menu.add_command(label="Sonderpunkte zum Dokument...", command=lambda: self.open_manual_points_dialog(item=item if item.get("upload_id") else None))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -157,6 +174,17 @@ class DocumentPdfManagerMixin:
         if path and path.exists() and path.is_file():
             menu.add_command(label="Datei öffnen", command=lambda: self.open_file_with_default_app(path))
             menu.add_command(label="Download / Kopie speichern unter...", command=lambda: self.download_file_to_local_folder(path, item))
+            if path.suffix.lower() == ".pdf":
+                linked = self.linked_pdf_paths_for_item(item, path)
+                if linked.get("ocr"):
+                    menu.add_command(label="OCR anzeigen", command=lambda p=linked["ocr"]: self.open_file_with_default_app(p))
+                if linked.get("pdfa"):
+                    menu.add_command(label="Original / PDF-A anzeigen", command=lambda p=linked["pdfa"]: self.open_file_with_default_app(p))
+                if self.is_current_admin():
+                    if self.pdf_size_mb(path) >= self.pdf_optimize_recommend_mb():
+                        menu.add_command(label="PDF optimieren...", command=lambda: self.pdf_action_stub("PDF optimieren", path))
+                    if not linked.get("pdfa"):
+                        menu.add_command(label="PDF/A erzeugen...", command=lambda: self.pdf_action_stub("PDF/A erzeugen", path))
             if is_image_file(path) and (item.get("persons") or []):
                 menu.add_command(label="Stammdatenblatt als PDF speichern...", command=lambda: self.create_person_master_sheet_pdf(path, item))
             if is_image_file(path):
@@ -185,31 +213,56 @@ class DocumentPdfManagerMixin:
     def merge_selected_admin_pdfs(self) -> None:
         if not self.require_admin():
             return
-        selected_ids = list(self.admin_tree.selection())
-        if len(selected_ids) < 2:
-            messagebox.showwarning("PDF zusammenfassen", "Bitte mindestens zwei PDF-Dateien auswählen.")
-            return
-        # Reihenfolge: so wie die Dateien aktuell in der Liste angezeigt werden.
-        ordered_ids = [iid for iid in self.admin_tree.get_children() if iid in selected_ids]
-        selected_items = []
-        for uid in ordered_ids:
-            for item in self.admin_uploads:
-                if str(item.get("upload_id")) == str(uid):
-                    self.normalize_admin_item_path_for_current_pc(item)
+        if self.is_unified_file_view_active():
+            selected_items = []
+            selected_paths = []
+            for iid in self.file_tree.selection():
+                values = self.file_tree.item(iid, "values")
+                if not values:
+                    continue
+                path = Path(values[0])
+                if path.exists() and path.is_file() and path.suffix.lower() == ".pdf":
+                    selected_paths.append(path)
+                    item = self.file_view_metadata_by_path.get(str(path)) or self.item_for_local_path(path) or {
+                        "current_filename": path.name,
+                        "current_path": str(path),
+                        "target_folder": str(path.parent),
+                        "document_type": "PDF-Dokument",
+                    }
                     selected_items.append(item)
-                    break
-        pdf_paths: list[Path] = []
-        for item in selected_items:
-            p = self.resolve_document_local_path(item)
-            if p and p.exists() and p.suffix.lower() == ".pdf":
-                pdf_paths.append(p)
-        if len(pdf_paths) < 2:
-            messagebox.showwarning("PDF zusammenfassen", "Unter der Auswahl wurden weniger als zwei lokal vorhandene PDF-Dateien gefunden.")
-            return
-        default_name = make_normalized_archive_filename(selected_items[0], "zusammenfassung.pdf")
+            if len(selected_paths) < 2:
+                messagebox.showwarning("PDF zusammenfassen", "Bitte mindestens zwei PDF-Dateien im Baum auswählen.")
+                return
+            pdf_paths = selected_paths
+            default_name = make_normalized_archive_filename(selected_items[0], "zusammenfassung.pdf")
+            initial_dir = str(pdf_paths[0].parent)
+        else:
+            selected_ids = list(self.admin_tree.selection())
+            if len(selected_ids) < 2:
+                messagebox.showwarning("PDF zusammenfassen", "Bitte mindestens zwei PDF-Dateien auswählen.")
+                return
+            # Reihenfolge: so wie die Dateien aktuell in der Liste angezeigt werden.
+            ordered_ids = [iid for iid in self.admin_tree.get_children() if iid in selected_ids]
+            selected_items = []
+            for uid in ordered_ids:
+                for item in self.admin_uploads:
+                    if str(item.get("upload_id")) == str(uid):
+                        self.normalize_admin_item_path_for_current_pc(item)
+                        selected_items.append(item)
+                        break
+            pdf_paths: list[Path] = []
+            for item in selected_items:
+                p = self.resolve_document_local_path(item)
+                if p and p.exists() and p.suffix.lower() == ".pdf":
+                    pdf_paths.append(p)
+            if len(pdf_paths) < 2:
+                messagebox.showwarning("PDF zusammenfassen", "Unter der Auswahl wurden weniger als zwei lokal vorhandene PDF-Dateien gefunden.")
+                return
+            default_name = make_normalized_archive_filename(selected_items[0], "zusammenfassung.pdf")
+            initial_dir = str(pdf_paths[0].parent)
         target = filedialog.asksaveasfilename(
             title="PDF zusammenfassen",
-            initialdir=str(pdf_paths[0].parent),
+            initialdir=initial_dir,
             initialfile=default_name,
             defaultextension=".pdf",
             filetypes=[("PDF-Datei", "*.pdf")],

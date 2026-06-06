@@ -50,6 +50,138 @@ if ($method === 'POST' && $path === '/api/admin/maintenance') {
     json_response(['success' => true, 'maintenance' => maintenance_state($pdo)]);
 }
 
+if ($method === 'GET' && $path === '/api/admin/nextcloud-settings') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    $baseUrl = trim((string)(setting_get($pdo, 'nextcloud_base_url', '') ?? ''));
+    if ($baseUrl === '') {
+        $baseUrl = server_env_value('NEXTCLOUD_BASE_URL', 'https://nx94165.your-storageshare.de');
+    }
+    $webFilesUrl = trim((string)(setting_get($pdo, 'nextcloud_web_files_url', '') ?? ''));
+    if ($webFilesUrl === '') {
+        $webFilesUrl = rtrim($baseUrl, '/') . '/apps/files/files';
+    }
+    $username = trim((string)(setting_get($pdo, 'nextcloud_technical_username', '') ?? ''));
+    if ($username === '') {
+        $username = server_env_value('NEXTCLOUD_USERNAME');
+    }
+    $remoteBase = trim((string)(setting_get($pdo, 'nextcloud_remote_base', '') ?? ''));
+    if ($remoteBase === '') {
+        $remoteBase = server_env_value('NEXTCLOUD_REMOTE_BASE');
+    }
+    $passwordSaved = trim((string)(setting_get($pdo, 'nextcloud_technical_password_enc', '') ?? '')) !== ''
+        || server_env_value('NEXTCLOUD_APP_PASSWORD') !== '';
+    json_response([
+        'success' => true,
+        'settings' => [
+            'base_url' => $baseUrl,
+            'web_files_url' => $webFilesUrl,
+            'username' => $username,
+            'remote_base' => $remoteBase,
+            'password_saved' => $passwordSaved,
+            'source' => trim((string)(setting_get($pdo, 'nextcloud_technical_username', '') ?? '')) !== '' ? 'database' : 'env',
+        ],
+    ]);
+}
+
+if ($method === 'PUT' && $path === '/api/admin/nextcloud-settings') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    $input = get_json_input();
+    $baseUrl = trim((string)($input['base_url'] ?? ''));
+    $webFilesUrl = trim((string)($input['web_files_url'] ?? ''));
+    $username = trim((string)($input['username'] ?? ''));
+    $remoteBase = trim(str_replace('\\', '/', (string)($input['remote_base'] ?? '')), '/');
+    $password = (string)($input['password'] ?? '');
+    if ($baseUrl === '' || !filter_var($baseUrl, FILTER_VALIDATE_URL)) {
+        json_response(['success' => false, 'error' => 'Nextcloud-Basis-URL ist ungültig.'], 400);
+    }
+    if ($webFilesUrl !== '' && !filter_var($webFilesUrl, FILTER_VALIDATE_URL)) {
+        json_response(['success' => false, 'error' => 'Nextcloud Web-Dateiansicht ist ungültig.'], 400);
+    }
+    if ($username === '') {
+        json_response(['success' => false, 'error' => 'Technischer Nextcloud-Benutzer fehlt.'], 400);
+    }
+    setting_set($pdo, 'nextcloud_base_url', $baseUrl);
+    setting_set($pdo, 'nextcloud_web_files_url', $webFilesUrl);
+    setting_set($pdo, 'nextcloud_technical_username', $username);
+    setting_set($pdo, 'nextcloud_remote_base', $remoteBase);
+    if ($password !== '') {
+        setting_set($pdo, 'nextcloud_technical_password_enc', encrypt_nextcloud_credential($pdo, $password));
+    }
+    api_log('warning', 'Technische Nextcloud-Einstellungen gespeichert', [
+        'by_user_id' => $currentUser['id'],
+        'base_url' => $baseUrl,
+        'web_files_url' => $webFilesUrl,
+        'username' => $username,
+        'remote_base' => $remoteBase,
+        'password_changed' => $password !== '',
+    ]);
+    json_response([
+        'success' => true,
+        'settings' => [
+            'base_url' => $baseUrl,
+            'web_files_url' => $webFilesUrl,
+            'username' => $username,
+            'remote_base' => $remoteBase,
+            'password_saved' => $password !== ''
+                || trim((string)(setting_get($pdo, 'nextcloud_technical_password_enc', '') ?? '')) !== ''
+                || server_env_value('NEXTCLOUD_APP_PASSWORD') !== '',
+            'source' => 'database',
+        ],
+    ]);
+}
+
+if ($method === 'POST' && $path === '/api/admin/nextcloud-settings/test') {
+    $currentUser = require_role(['superadmin']);
+    $pdo = db();
+    $input = get_json_input();
+    $baseUrl = trim((string)($input['base_url'] ?? ''));
+    $webFilesUrl = trim((string)($input['web_files_url'] ?? ''));
+    $username = trim((string)($input['username'] ?? ''));
+    $password = (string)($input['password'] ?? '');
+    if ($baseUrl === '' || !filter_var($baseUrl, FILTER_VALIDATE_URL)) {
+        json_response(['success' => false, 'error' => 'Nextcloud-Basis-URL ist ungültig.'], 400);
+    }
+    if ($username === '') {
+        json_response(['success' => false, 'error' => 'Technischer Nextcloud-Benutzer fehlt.'], 400);
+    }
+    if ($password === '') {
+        $passwordEnc = trim((string)(setting_get($pdo, 'nextcloud_technical_password_enc', '') ?? ''));
+        if ($passwordEnc !== '') {
+            $password = decrypt_nextcloud_credential($pdo, $passwordEnc);
+        } else {
+            $password = server_env_value('NEXTCLOUD_APP_PASSWORD');
+        }
+    }
+    if ($password === '') {
+        json_response(['success' => false, 'error' => 'Kein Nextcloud-App-Passwort gespeichert oder eingegeben.'], 400);
+    }
+
+    try {
+        $parts = parse_url($baseUrl);
+        if (!is_array($parts) || empty($parts['scheme']) || empty($parts['host'])) {
+            throw new RuntimeException('Nextcloud-Basis-URL ist ungültig.');
+        }
+        $root = $parts['scheme'] . '://' . $parts['host'];
+        if (!empty($parts['port'])) {
+            $root .= ':' . $parts['port'];
+        }
+        $url = rtrim($root, '/') . '/remote.php/dav/files/' . rawurlencode($username) . '/';
+        nextcloud_webdav_request('PROPFIND', $url, $username, $password, '', ['Depth: 0']);
+        api_log('info', 'Technischer Nextcloud-Zugang geprüft', ['by_user_id' => $currentUser['id'], 'username' => $username, 'base_url' => $baseUrl]);
+        json_response(['success' => true, 'message' => 'Nextcloud-Verbindung OK.']);
+    } catch (Throwable $e) {
+        api_log('warning', 'Technischer Nextcloud-Zugang fehlgeschlagen', [
+            'by_user_id' => $currentUser['id'],
+            'username' => $username,
+            'base_url' => $baseUrl,
+            'error' => $e->getMessage(),
+        ]);
+        json_response(['success' => false, 'error' => 'Nextcloud-Test fehlgeschlagen: ' . $e->getMessage()], 500);
+    }
+}
+
 if ($method === 'POST' && $path === '/api/admin/backup') {
     $currentUser = require_role(['superadmin']);
     $pdo = db();

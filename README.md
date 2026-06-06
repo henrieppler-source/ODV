@@ -1,8 +1,8 @@
-# Ortschronisten-Datei-Verwaltung (ODV) v120
+# Ortschronisten-Datei-Verwaltung (ODV) v121
 
 ## Aktueller Projektstand
 
-- Aktuelle App-Version laut `app/main.py`: `v120`
+- Aktuelle App-Version laut `app/app_constants.py`: `v121`
 - Git-Repository ist initialisiert.
 - Aktueller Hauptbranch: `main`
 - Arbeitsweise: Vor Änderungen `git status --short` prüfen, relevante Dateien lesen, Änderungen gezielt umsetzen, danach sinnvoll testen.
@@ -26,7 +26,7 @@ Wir machen im ODV-Projekt weiter:
 C:\ODV\Entwicklung
 
 Bitte zuerst `git status --short` prüfen, dann die relevanten Dateien lesen.
-Aktuelle App-Version laut README/Code: v120.
+Aktuelle App-Version laut README/Code: v121.
 Alle künftigen Anpassungen bitte in README.md unter Versionshistorie dokumentieren.
 Bearbeiterrelevante Änderungen bitte zusätzlich in Handbuch.md, Admin-/Betriebsthemen zusätzlich in Admin-Handbuch.md dokumentieren.
 Bei neuer App-Version alle Versionsbezeichnungen anpassen; bei Korrekturen in einer bestehenden Version direkt dort ergänzen.
@@ -100,14 +100,79 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 
 ## Versionshistorie
 
+### v121 - Projektanalyse, Testplan und PDF-Fehlerbehandlung
+
+- Aktuelle App-Version laut `app/app_constants.py`: `v121`.
+- API-Version in `server/routes.php` auf `v121` angehoben.
+- Projektanalyse als PDF-Arbeitsliste ergänzt: `ODV_Arbeitsliste_Projektanalyse_v121.pdf`.
+- Ausführlichen Prüf-Testplan mit Ergebnis-/Notizspalte ergänzt: `ODV_Pruef_Testplan_v121.pdf`.
+- Beide PDF-Generatoren verwenden Arial 10 pt.
+- PDF-Optimierung robuster gemacht: Wenn Windows die Arbeits-PDF beim Ersetzen sperrt, versucht ODV den Austausch mehrfach kurz erneut und zeigt danach einen verständlichen Hinweis statt eines rohen `WinError 5`.
+- Handbuch, Admin-Handbuch und Stand-Datei auf `v121` fortgeschrieben.
+
 ### v120 - Mailrechte und Versionsstand angehoben
 
 - Aktuelle App-Version laut `app/main.py`: `v120`.
 - API-Version in `server/routes.php` auf `v120` angehoben.
 - `Antwort an` wird im Rundmail-Dialog aus dem angemeldeten Benutzer vorbelegt.
 - Die Mail-UI zeigt `Versandart Anlagen`; Nextcloud-Dateien werden bei Link-Versand automatisch als Downloadlink erzeugt, andere Dateien werden normal angehängt.
+- Technischer Nextcloud-Zugang für echte öffentliche Downloadlinks ergänzt: Superadmins pflegen Basis-URL, technischen Benutzer, App-Passwort und optionalen Remote-Basisordner unter `Admin-Einstellungen > Links / Hinweise`.
+- Das technische Nextcloud-App-Passwort wird serverseitig verschlüsselt gespeichert; die App zeigt nur an, ob ein Passwort vorhanden ist.
+- Passwortfelder mit gespeichertem, aber nicht angezeigtem Passwort zeigen `***` als Platzhalter; nur bei Passwortänderung wird ein neues Passwort eingegeben. Beim Speichern wird `***` nicht als neues Passwort übernommen. Das gilt auch für normale Benutzerpasswörter in der Benutzerverwaltung.
+- `OpenAI-Schlüssel prüfen` zeigt den erfolgreichen Schlüsseltest wieder zuverlässig an; die von OpenAI blockierte Guthabenabfrage wird nur noch als `nicht per API abrufbar` ausgewiesen.
+- Der technische Nextcloud-Zugang kann im Admin-Dialog per Testbutton geprüft werden.
+- Falsche Nextcloud-Ordnerlinks werden nicht mehr als Downloadlinks verwendet. Wenn keine echte Freigabe erzeugt werden kann, wird der Versand gestoppt und eine klare Fehlermeldung angezeigt.
 - Die Standard-Text-Vorbelegung startet jetzt minimal mit Leerzeile, `Viele Grüße` und dem Namen des angemeldeten Benutzers.
 - Mailrechte sind gestaffelt: Admin/Superadmin darf an alle Benutzer und externe Empfänger senden, Bearbeiter nur an Benutzer und orts-/eigene Verteiler; Standardtexte stehen nur Admin/Superadmin zur Verfügung.
+- In der Verwaltung der Standard-Mail-Texte wurden die Sortieraktionen `Hoch`/`Runter` als kleine Pfeilbuttons direkt an die Vorlagenliste verschoben.
+- `Punkte > Sonderpunkte zum ausgewählten Dokument...` ist für Admin/Superadmin nur im Reiter `Dateien anzeigen` verfügbar; zusätzlich kann die Funktion per Rechtsklick auf eine Datei in `Dateien anzeigen` geöffnet werden.
+- Dokumentbezogene manuelle Sonderpunkte können im Dialog jetzt vorhandene Einträge laden, ändern, speichern oder löschen; ist die ausgewählte Datei noch nicht in ODV aufgenommen, wird dafür automatisch ein ODV-Datensatz angelegt.
+- Der zuvor geplante Reiter `Dateien nachbearbeiten` wurde wieder aus der Oberfläche entfernt; die Nachbearbeitung wird künftig in `Dateien bearbeiten` integriert.
+- `Dateien bearbeiten` bietet unter der Liste eine OpenAI-Prüfung für lokal lesbare Textdokumente/PDFs; bei nicht lesbaren PDFs wird stattdessen `PDF OCR erstellen` angeboten und die OCR-Fassung danach für OpenAI genutzt.
+- Die OpenAI-Nachprüfung in `Dateien bearbeiten` zeigt das bereits verwendete Modell, sperrt erneute Aufrufe mit demselben Modell und lässt je Feld gezielt `übernehmen`, `überschreiben` oder `anfügen` auswählen; leere Felder sind mit `übernehmen` vorbelegt, keine Auswahl ignoriert den Vorschlag. Der Dokumenttyp bleibt von der OpenAI-Nachübernahme ausgenommen.
+- `Dateien bearbeiten` bietet zusätzlich `Orte prüfen`: ODV scannt lokal den gesamten lesbaren Text nach Orten aus der Ortsverwaltung, sendet aber nur passende Textausschnitte an OpenAI und erzeugt daraus eine ortsbezogene Inhaltszusammenfassung mit Stichwörtern. Die Ortssuche ist umlauttolerant. Wird kein Ort gefunden, nutzt ODV eine begrenzte Textprobe gemäß OpenAI-Seiten-/Textumfang-Einstellungen. Vor dem OpenAI-Start wird das Modell ausgewählt; derselbe Ortsanalyse-Aufruf mit demselben Modell wird je Dokument gesperrt. Die Übernahme erfolgt feldweise für Datum, Ereignis, Primärquelle, Beschreibung, Stichwörter und Ort mit `übernehmen`, `überschreiben` oder `anhängen`.
+- Das Metadatenfeld `Beschreibung` wird beim Speichern und bei OpenAI-Übernahmen immer mit `enthält u.a.` begonnen, auch bei manueller Eingabe.
+- Die bei `Orte prüfen` verwendeten lokalen Fundstellen werden ressourcenschonend als kompakte Textausschnitte in den Metadaten gespeichert und können später für gezielte Ereignissuchen genutzt werden.
+- Gespeicherte Ortsanalyse-Fundstellen können in `Dateien bearbeiten` über `Fundstellen anzeigen` lesbar nach Ort gruppiert angezeigt werden.
+- `Orte prüfen` arbeitet zweistufig: Zuerst werden lokal gefundene Orte/Fundstellen angezeigt; OpenAI startet erst nach bewusster Bestätigung und Modellwahl.
+- Die Ortsanalyse-Parameter `Kontext vor/nach Ort` und `max. Fundstellen` sind in den Admin-Einstellungen unter `API / OpenAI` konfigurierbar.
+- Fehler beim Speichern von OpenAI-übernommenen Metadaten in `Dateien bearbeiten` behoben; Modell, Zeitpunkt und Feldübernahmen werden direkt dauerhaft gespeichert.
+- Fehler bei `Orte prüfen` behoben: übernommene Metadaten werden sofort am konkreten Dokument gespeichert und bleiben nach Dokumentwechsel erhalten; die OpenAI-/Orte-Buttons bleiben nach der Übernahme sichtbar.
+- Bei `neu`-Dateien ohne ODV-Eintrag legt die OpenAI-Ortsanalyse beim Übernehmen automatisch einen echten ODV-Datensatz an; technische Kennungen wie die Upload-ID werden dabei nicht mehr aus der Anzeige zurückgeschrieben.
+- Der alte Dokumentstatus `uebernommen` wurde aus App, API, Punkteberechnung und Dokumentation entfernt. Der abgeschlossene fachliche Erfassungsstand heißt `erfasst`; der neue Zwischenstatus `geaendert` markiert nachträgliche Änderungen mit Nachprüfbedarf.
+- Lokal extrahierte Ortsanalyse-Fundstellen werden vor Anzeige, Speicherung und OpenAI-Übergabe geglättet: Zeilenumbrüche, Silbentrennungen und typische OCR-Wortbrüche werden lesbarer normalisiert.
+- Fehlende Imports im Speicherpfad für neu angelegte ODV-Datensätze aus `Orte prüfen` korrigiert (`datetime`, `ApiError`).
+- Unbeabsichtigtes Speichern des Felds `Erfasst von` beim Laden/Scrollen der Metadatenmaske verhindert.
+- In `Dateien anzeigen` werden Dateien ohne ODV-Eintrag wieder schwarz dargestellt und mit `* ` vor dem Dateinamen markiert; sortiert wird weiterhin nach dem echten Dateinamen.
+- Im Reiter `Dateien bearbeiten` gibt es jetzt zusätzlich einen Ordnerfilter mit `alle` als Standard sowie einer Liste der konfigurierten Admin-Arbeitsordner.
+- Konkrete Ordnerfilter in `Dateien bearbeiten` zeigen vorhandene ODV-Dokumente und zusätzlich physisch vorhandene Dateien ohne ODV-Eintrag; diese Platzhalter erhalten den sichtbaren Status `ohne`.
+- Verknüpfte `_ocr.pdf`-Dateien bleiben technische Begleitdateien zum Original, werden in `Dateien bearbeiten` nicht als eigener Bearbeitungsfall angezeigt und sollen beim Umbenennen/Verschieben des Originals mitgeführt werden.
+- Die Upload-ID wird in Metadatenformularen nicht mehr als Eingabefeld dargestellt, sondern als unveränderbarer Text auf grauem Hintergrund.
+- In bestehenden Metadatenformularen zeigen die technischen Daten zusätzlich `Bearbeitet von` und `Bearbeitet am`; diese Werte werden bei nachträglichen Änderungen automatisch gesetzt.
+- Der Ordnerfilter `00_ORTSCHRONIK` bleibt ein Sonderfall und zeigt nur Dateien ohne ODV-Eintrag.
+- Im Sonderfilter `00_ORTSCHRONIK` nutzt die Bearbeitungsliste statt `Erfasst von` die Spalte `Ordner`; Listenüberschriften sind fett, klickbar und sortieren die aktuelle Liste.
+- Im Reiter `Dateien anzeigen` gibt es für Admin/Superadmin unter dem Baum einen eigenen Block zum Umbenennen oder Verschieben der aktuell ausgewählten Datei; vorhandene ODV-Metadaten werden dabei aktualisiert.
+- Superadmins können unter `Admin > Normalisierung...` Dateinamenregeln pflegen: Die Standardnormalisierung bleibt voreingestellt, Sonderregeln können ordnerbezogen mit Platzhaltern wie `{datum}`, `{ort}`, `{dateiname}`, `{dateiname_mmdd}` und `{ordner1}` bis `{ordner9}` definiert und per Vorschau geprüft werden.
+- Der Reiter `Dateien anzeigen/bearbeiten` ist jetzt der führende Dokument-Arbeitsbereich. Die frühere Tabellenlogik aus `Dateien bearbeiten` wird nicht mehr aktiv aktualisiert, sondern bleibt nur noch als interner Kompatibilitäts-Fallback für alte Routinen bestehen.
+- Im rechten Bereich von `Dateien anzeigen/bearbeiten` stehen die Metadaten jetzt auf einem eigenen Hauptreiter. Der Reiter `Vorschau / Personen` wird nur bei Bilddateien eingeblendet, damit Metadaten bei Dokumenten mehr Platz haben.
+- In der Bildvorschau kann die Bildgröße per Mausrad verändert werden; beim Wechsel auf ein anderes Bild startet die Vorschau wieder mit Normalgröße.
+- Im Dialog `Personen markieren` wird die aktuell angeklickte oder in der Liste ausgewählte Markierung sofort im Bild hervorgehoben.
+- PDF-Verwaltung erweitert: Superadmins pflegen unter `Admin-Einstellungen > Allgemein` Schwellwerte für PDF-Warnung, Optimierungsempfehlung und Upload-Blockade.
+- Große PDFs werden im Dateibaum mit `!! ` markiert; PDF/A-Begleitdateien werden hellgrün, OCR-Ersatzdateien hellgelb dargestellt, falls keine Arbeits-PDF vorhanden ist.
+- Im Kontextmenü von PDFs werden vorhandene OCR- und PDF/A-Begleitfassungen direkt geöffnet; Admin/Superadmin können `PDF optimieren...` und `PDF/A erzeugen...` starten.
+- Unter `Übersichten > PDF-Dateien...` gibt es eine Tabelle der aktuell lokal verfügbaren Nextcloud-PDFs mit Nextcloud-Pfad, lokaler Verfügbarkeit, Größe der Arbeitsfassung, Originalgröße, ODV-Optimierungsnachweis, PDF/A-Fassung und OCR-Fassung; Ordner und Mindestgröße können gefiltert werden. Zusätzlich wird `pdf_sizes.csv` im lokalen ODV-Logordner geschrieben.
+- Zielbild bleibt: ODV soll grundsätzlich die in Nextcloud verfügbaren Dateien als gemeinsame Wahrheit anzeigen. Rechenintensive Aktionen wie PDF-Optimierung, PDF/A oder OCR laufen lokal und werden danach über den Nextcloud-Sync hochgeladen.
+- Die PDF-Übersicht kann per Klick auf die Spaltenüberschriften sortiert werden. Per Rechtsklick auf eine PDF-Zeile sind Öffnen, Kopie speichern, vorhandene OCR-/PDF-A-Fassungen sowie `PDF optimieren...` und `PDF/A erzeugen...` erreichbar.
+- Bei Aktionen aus der PDF-Übersicht bleibt der Übersichts-Dialog als Arbeitsfenster im Vordergrund bzw. wird nach Meldungen wieder nach vorne geholt.
+- Während `PDF optimieren...` oder `PDF/A erzeugen...` läuft, zeigt ODV einen modalen Fortschrittsdialog mit laufendem Balken und `Datei wird verarbeitet`; die eigentliche Verarbeitung läuft im Hintergrund, damit die Oberfläche sichtbar bleibt.
+- `Datei öffnen` öffnet bei PDFs bevorzugt die vorhandene `_pdfa.pdf`-Archivfassung, wenn sie existiert. Dadurch kann die Arbeits-PDF stärker für die PC-Nutzung komprimiert werden.
+- `PDF optimieren...` ersetzt die Arbeits-PDF nur, wenn die optimierte Datei kleiner ist; die Änderung wird anschließend über Nextcloud synchronisiert. Superadmins können in den Admin-Einstellungen das Profil `verlustfrei`, `standard` oder `maximal` wählen. `standard` nutzt Ghostscript mit ca. 144 dpi, `maximal` ca. 120 dpi; ohne Ghostscript nutzt ODV PyMuPDF als Fallback.
+- Ist die PDF während der Optimierung durch Adobe Reader, Explorer-Vorschau, Windows-Suche oder Nextcloud-Sync gesperrt, versucht ODV das Ersetzen mehrfach kurz erneut und zeigt danach einen verständlichen Hinweis statt eines rohen Windows-Fehlers.
+- Ghostscript kann mit der Anwendung ausgeliefert werden: ODV sucht zuerst unter `tools\ghostscript` neben der EXE bzw. im installierten Anwendungsordner. `build_windows.ps1` kopiert einen vorhandenen Projektordner `tools\ghostscript` automatisch nach `dist\ODV\tools\ghostscript`; der Inno-Installer nimmt ihn anschließend rekursiv mit.
+- Falls Ghostscript beim Start nicht gefunden wird, sucht ODV nach einem mitgelieferten Installer unter `tools\ghostscript_installer` und startet diesen automatisch. Wenn Windows erhöhte Rechte verlangt, erscheint eine UAC-Bestätigung. Ohne mitgelieferte Dateien erfolgt kein Internetdownload; ODV arbeitet dann mit PyMuPDF-Fallback weiter.
+- Ergibt eine Optimierung keine kleinere Datei, bleibt die Arbeitsdatei unverändert; der Versuch wird in den Metadaten protokolliert und in der PDF-Übersicht bei `Optimiert durch ODV` mit `X` angezeigt.
+- `PDF/A erzeugen...` erzeugt eine separate `_pdfa.pdf`-Archivfassung über Ghostscript. Wenn Ghostscript nicht installiert oder nicht im PATH auffindbar ist, zeigt ODV einen klaren Hinweis und erzeugt keine Schein-PDF/A-Datei.
+- PDF-Optimierung wird künftig in den Metadaten nachvollziehbar gespeichert. Wurde ein PDF bereits durch ODV optimiert, dürfen Admin/Superadmin eine erneute Optimierung nur nach ausdrücklicher Qualitätswarnung starten; Bearbeiter erhalten in diesem Fall nur den Hinweis, dass keine weitere Optimierung möglich ist.
 - Mailhistorie ist benutzerbezogen und zeigt immer nur die eigenen Versandvorgänge.
 - Verteiler speichern den Ersteller mit; normale Nutzer sehen ihre eigenen und ortsbezogenen Verteiler, Admin/Superadmin nur Verteiler, die von Admin/Superadmin angelegt wurden.
 - Die technische Aufteilung und die bisherigen Doku-/Reset-/Server-Änderungen aus v119 bleiben erhalten.
@@ -162,7 +227,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 
 - Aktuelle App-Version laut `app/main.py`: `v116`.
 - API-Version in `server/routes.php` auf `v116` angehoben.
-- Die sichtbare Statusauswahl ist auf den fachlichen Kern reduziert: `hochgeladen`, `rueckfrage`, `geprueft`, `uebernommen`, `archiviert`.
+- Die sichtbare Statusauswahl ist auf den fachlichen Kern reduziert. Stand v120: `hochgeladen`, `erfasst`, `geaendert`, `rueckfrage`, `geprueft`, `archiviert`.
 - Legacy-Statuswerte werden serverseitig für bestehende Datensätze noch auf die neue Kanonliste normalisiert.
 - Der Rückfragen-Workflow verlangt jetzt einen Hinweis, und `geprueft` ist als eigener Arbeitsschritt sichtbar.
 - Im Upload-Reiter ist der geplante Nextcloud-Dateiname jetzt als eigenes, editierbares Feld sichtbar und wird im Wizard mit angezeigt.
@@ -317,7 +382,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Aktuelle App-Version laut `app/main.py`: `v104`.
 - In den Superadmin-Einstellungen gibt es FTP-Deployment-Felder fuer Server, Port, Benutzer, Zielpfad und Passwort.
 - Das FTP-Passwort wird lokal per Windows-DPAPI verschluesselt in der ODV-Konfiguration gespeichert; es muss danach nicht erneut eingegeben werden.
-- Ein vorhandenes gespeichertes FTP-Passwort bleibt erhalten, wenn das Passwortfeld beim Speichern leer bleibt.
+- Ein vorhandenes gespeichertes FTP-Passwort bleibt erhalten; gespeicherte Passwortfelder zeigen heute `***` und werden nur bei Eingabe eines neuen Passworts geändert.
 - API-Token und OpenAI-API-Schlüssel werden lokal ebenfalls per Windows-DPAPI verschlüsselt gespeichert.
 - Die Server-API wird schrittweise modularisiert; Admin-/Backup-/Wartungsendpunkte liegen bereits in einer eigenen `routes_admin_endpoints.php`.
 - Das FTP-Deployment nimmt künftig automatisch alle lokalen `routes*.php`-Dateien mit.
@@ -379,7 +444,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Beim automatischen Umbenennen/Verschieben wird die OCR-PDF parallel mitgeführt.
 - OCR-Dateiname folgt dem Original mit Zusatz `_ocr.pdf`.
 - In `Dateien anzeigen` und `Dateien bearbeiten` werden verknüpfte OCR-PDFs nicht als eigene Dokumente angezeigt.
-- OCR-PDF bleibt über `OCR anzeigen` am Original erreichbar.
+- OCR-PDF bleibt als technische Begleitdatei am Original erhalten; die Anzeige wird künftig über die Datei-/Kontextaktionen geführt.
 - Geänderte Datei: `app/main.py`
 
 ### v89 - OCR-PDF als verknüpfte Analysefassung
@@ -390,7 +455,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Beim Upload wird die OCR-PDF als verknüpfte Kopie neben dem Original gespeichert.
 - OCR-Verknüpfung wird in den Metadaten gespeichert.
 - Beim Umbenennen/Verschieben des Originals wird die OCR-PDF mitgeführt.
-- In `Dateien anzeigen` gibt es `OCR anzeigen`, wenn eine OCR-PDF verknüpft ist.
+- Verknüpfte OCR-PDFs sollen am Original über Datei-/Kontextaktionen erreichbar bleiben.
 - Geänderte Dateien: `app/upload_tab.py`, `app/main.py`, `app/models.py`, `requirements.txt`
 
 ### v88 - OCR-Fallback ohne Ghostscript
@@ -619,7 +684,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 ### v64 - Physisch vorhandene Dateien rekursiv anzeigen
 
 - `Dateien anzeigen` durchsucht den ausgewählten Ordner ohne künstliche Tiefenbegrenzung rekursiv.
-- Dateien ohne ODV-Metadaten werden mit normalem Dateinamen angezeigt.
+- Dateien ohne ODV-Metadaten werden im Baum markiert; seit v120 erfolgt dies mit `* ` vor dem Dateinamen.
 - Doppelklick öffnet auch solche Dateien mit dem Standardprogramm.
 - Beim Speichern von Metadaten zu physisch vorhandener Datei wird diese als ODV-Dokument in MySQL angelegt, ohne erneut kopiert zu werden.
 - Punkte nur für Dateien in `00_ORTSCHRONIK`, `01_ABLAGE_ORTSCHRONIK` oder `06_ARBEIT_DER_ORTSCHRONISTEN`.
@@ -647,7 +712,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Admin-Korrekturen löschen Punkte des ursprünglichen Bearbeiters nicht.
 - Korrektur-/Ergänzungspunkt ab mehr als 10 Zeichen Änderung.
 - `Mein Punktestand` zeigt für Admins Auswahlfeld zur Einsicht fremder Punktekonten.
-- Vorläufige Punkte für noch nicht übernommene Dokumente werden angezeigt.
+- Vorläufige Punkte für noch nicht final erfasste Dokumente werden angezeigt.
 - Doppelklick im Punktekonto öffnet Dokument in `Dateien bearbeiten`.
 - Admin kann `Hochgeladen von` per Auswahlfeld ändern.
 - Bei Änderung des Hochladers werden automatische Punkte des bisherigen Hochladers auf den neuen übertragen.
@@ -705,14 +770,14 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 
 ### v54 - Bearbeiter-Bearbeitung und UI-Aufräumung
 
-- Normale Bearbeiter sehen `Dateien bearbeiten` und können eigene, noch nicht übernommene Dokumente ergänzen.
+- Normale Bearbeiter sehen `Dateien bearbeiten` und können eigene bzw. berechtigte Dokumente ergänzen.
 - Aktionsbereich heißt für normale Bearbeiter `Aktionen`; Admin-/Superadmin-Funktionen bleiben ausgeblendet.
-- Bearbeiter dürfen Metadaten und Dateinamen eigener, noch nicht übernommener Dokumente ändern, aber nicht Status oder Zielordner.
+- Bearbeiter dürfen Metadaten und Dateinamen eigener bzw. berechtigter Dokumente ändern; Status- und Zielordnerlogik wird durch den aktuellen Workflow gesteuert.
 - Sonderpunkte bleiben Admin/Superadmin vorbehalten.
 - `Ausgewählte PDFs zusammenfassen...` oberhalb der Liste in Status-Zeile.
 - `Punkte für Bearbeitungsliste nachtragen...` nur noch im Admin-Menü für Superadmins.
 - Dokumenttyp in Upload und Bearbeitung als Auswahlfeld; neue erkannte Typen werden automatisch ergänzt.
-- Server schützt zusätzlich gegen Bearbeitung übernommener Dokumente und Verschieben durch normale Bearbeiter.
+- Server schützt zusätzlich gegen unberechtigte Bearbeitung und Verschieben durch normale Bearbeiter.
 - Server: `server/routes_v54.php`
 - Keine zusätzliche SQL-Migration, wenn v48/v49/v51 eingespielt sind.
 

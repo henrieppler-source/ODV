@@ -264,7 +264,7 @@ class PathPolicyManagerMixin:
             return True
         if not path:
             return False
-        if item and self.is_selected_document_owner(item) and str(item.get("status") or "") != "uebernommen":
+        if item and self.is_selected_document_owner(item):
             return True
         try:
             base_text = str(self.base_folder_var.get() or "").strip()

@@ -337,9 +337,6 @@ if ($method === 'PUT' && preg_match('#^/api/documents/([^/]+)$#', $path, $matche
         }
     }
     if (!$isAdmin) {
-        if ((string)$existing['status'] === 'uebernommen') {
-            json_response(['success' => false, 'error' => 'Übernommene Dokumente dürfen nur durch Admins geändert werden'], 403);
-        }
         if ($newValues['status'] !== $existing['status']) {
             json_response(['success' => false, 'error' => 'Status darf nur durch Admins geändert werden'], 403);
         }
@@ -426,8 +423,8 @@ if ($method === 'PUT' && preg_match('#^/api/documents/([^/]+)$#', $path, $matche
             }
         }
         add_auto_points_for_metadata($pdo, (int)$existing['id'], $uploadId, $currentUser, $newValues, $existing, is_array($metadata['openai_metadata_fields'] ?? null) ? $metadata['openai_metadata_fields'] : []);
-        if (($newValues['status'] ?? '') === 'uebernommen' && ($existing['status'] ?? '') !== 'uebernommen') {
-            add_contribution_point($pdo, (int)$existing['id'], $uploadId, $currentUser, $currentUser, 'admin_review', 'admin_review_accepted', 'Dokument geprüft und übernommen', 'status', point_rule_points($pdo, current_points_year(), 'admin_review_accepted', 1), false);
+        if (($newValues['status'] ?? '') === 'erfasst' && ($existing['status'] ?? '') !== 'erfasst') {
+            add_contribution_point($pdo, (int)$existing['id'], $uploadId, $currentUser, $currentUser, 'admin_review', 'admin_review_accepted', 'Dokument erfasst', 'status', point_rule_points($pdo, current_points_year(), 'admin_review_accepted', 1), false);
         }
         if ((string)($newValues['current_path'] ?? '') !== (string)($existing['current_path'] ?? '') || (string)($newValues['current_filename'] ?? '') !== (string)($existing['current_filename'] ?? '')) {
             add_contribution_point($pdo, (int)$existing['id'], $uploadId, $currentUser, $currentUser, 'admin_review', 'admin_file_organization', 'Datei umbenannt oder verschoben', 'current_path', point_rule_points($pdo, current_points_year(), 'admin_file_organization', 1), false);
@@ -492,7 +489,7 @@ if ($method === 'PUT' && preg_match('#^/api/documents/([^/]+)/persons$#', $path,
             ]);
             $count++;
         }
-        if ((string)($document['status'] ?? '') === 'uebernommen') {
+        if (in_array((string)($document['status'] ?? ''), ['erfasst', 'geprueft', 'archiviert'], true)) {
             $events = document_person_events_from_payload($document, $persons);
             add_person_points_for_document($pdo, (int)$document['id'], $uploadId, $currentUser, $document, $events);
         }

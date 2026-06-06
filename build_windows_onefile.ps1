@@ -43,4 +43,17 @@ Invoke-Checked { .\.venv\Scripts\python.exe -m PyInstaller `
     --name "ODV_Updater" `
     launcher_updater.py }
 
+if (Test-Path "tools\ghostscript") {
+    New-Item -ItemType Directory -Path "dist\tools" -Force | Out-Null
+    Copy-Item "tools\ghostscript" "dist\tools\ghostscript" -Recurse -Force
+    Write-Host "Ghostscript wurde als Begleitordner mitgeliefert: dist\tools\ghostscript"
+} else {
+    Write-Host "Hinweis: tools\ghostscript nicht gefunden. PDF/A und starke PDF-Komprimierung funktionieren nur mit systemweit installiertem Ghostscript."
+}
+if (Test-Path "tools\ghostscript_installer") {
+    New-Item -ItemType Directory -Path "dist\tools" -Force | Out-Null
+    Copy-Item "tools\ghostscript_installer" "dist\tools\ghostscript_installer" -Recurse -Force
+    Write-Host "Ghostscript-Installer wurde als Begleitordner mitgeliefert: dist\tools\ghostscript_installer"
+}
+
 Write-Host "Updater liegt unter: dist\ODV_Updater.exe"

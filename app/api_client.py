@@ -180,6 +180,15 @@ class APIClient:
     def clear_maintenance(self, token: str) -> dict:
         return self.request("POST", "/admin/maintenance", {"action": "clear"}, token=token)
 
+    def nextcloud_settings(self, token: str) -> dict:
+        return self.request("GET", "/admin/nextcloud-settings", token=token)
+
+    def update_nextcloud_settings(self, token: str, payload: dict) -> dict:
+        return self.request("PUT", "/admin/nextcloud-settings", payload, token=token)
+
+    def test_nextcloud_settings(self, token: str, payload: dict) -> dict:
+        return self.request("POST", "/admin/nextcloud-settings/test", payload, token=token)
+
     def create_database_backup(self, token: str) -> dict:
         return self.request("POST", "/admin/backup", {}, token=token)
 
@@ -268,6 +277,19 @@ class APIClient:
         if source_field:
             payload["source_field"] = source_field
         return self.request("POST", f"/documents/{urllib.parse.quote(upload_id, safe='')}/manual-points", payload, token=token)
+
+    def update_manual_document_points(self, token: str, point_id: int, user_id: int, points: int, reason: str, category: str = "manual_bonus", rule_key: str = "", source_field: str = "") -> dict:
+        payload = {
+            "user_id": int(user_id), "points": int(points), "reason": reason, "category": category
+        }
+        if rule_key:
+            payload["rule_key"] = rule_key
+        if source_field:
+            payload["source_field"] = source_field
+        return self.request("PUT", f"/document-manual-points/{int(point_id)}", payload, token=token)
+
+    def delete_manual_document_points(self, token: str, point_id: int) -> dict:
+        return self.request("DELETE", f"/document-manual-points/{int(point_id)}", token=token)
 
     def list_manual_special_points(self, token: str, year: int | None = None) -> dict:
         params = {}

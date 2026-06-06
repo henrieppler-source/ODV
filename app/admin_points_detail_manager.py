@@ -41,5 +41,5 @@ class AdminPointsDetailManagerMixin:
         buttons = ttk.Frame(dialog, padding=8)
         buttons.grid(row=2, column=0, columnspan=2, sticky="ew")
         if self.is_current_admin():
-            ttk.Button(buttons, text="Sonderpunkte erfassen...", command=self.open_manual_points_dialog).pack(side="left")
+            ttk.Button(buttons, text="Sonderpunkte erfassen...", command=lambda: self.open_manual_points_dialog(item=self.selected_admin_upload())).pack(side="left")
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right")

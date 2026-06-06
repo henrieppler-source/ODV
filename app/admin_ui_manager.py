@@ -11,6 +11,7 @@ from .app_logging import app_log_exception
 from .config import save_config
 from .database import add_history
 from .models import HistoryEntry
+from .openai_client import OpenAIClient, OpenAIError
 from .secure_store import SecureStoreError, protect_text, unprotect_text
 
 
@@ -30,9 +31,14 @@ class AdminUiManagerMixin:
         filter_frame.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 6))
         ttk.Label(filter_frame, text="Status:").pack(side="left")
         self.admin_status_var = tk.StringVar(value="alle")
-        self.admin_status_combo = ttk.Combobox(filter_frame, textvariable=self.admin_status_var, values=["alle", "hochgeladen", "rueckfrage", "geprueft", "uebernommen", "archiviert"], width=18, state="readonly")
+        self.admin_status_combo = ttk.Combobox(filter_frame, textvariable=self.admin_status_var, values=["alle", "ohne", "hochgeladen", "erfasst", "geaendert", "rueckfrage", "geprueft", "archiviert"], width=18, state="readonly")
         self.admin_status_combo.pack(side="left", padx=4)
         self.admin_status_combo.bind("<<ComboboxSelected>>", lambda _e: self.refresh_admin_uploads(show_message=False))
+        ttk.Label(filter_frame, text="Ordner:").pack(side="left", padx=(14, 0))
+        self.admin_folder_var = tk.StringVar(value="alle")
+        self.admin_folder_combo = ttk.Combobox(filter_frame, textvariable=self.admin_folder_var, width=28, state="readonly")
+        self.admin_folder_combo.pack(side="left", padx=4)
+        self.admin_folder_combo.bind("<<ComboboxSelected>>", lambda _e: self.refresh_admin_uploads(show_message=False))
         self.merge_pdfs_top_button = ttk.Button(filter_frame, text="Ausgewählte PDFs zusammenfassen...", command=self.merge_selected_admin_pdfs)
         self.merge_pdfs_top_button.pack(side="left", padx=(16, 0))
 
@@ -42,6 +48,14 @@ class AdminUiManagerMixin:
             show="headings",
             selectmode="extended",
         )
+        self.admin_tree_heading_labels = {
+            "upload_id": "Upload-ID",
+            "status": "Status",
+            "filename": "Datei",
+            "by": "Erfasst von",
+            "date": "Datum",
+            "type": "Typ",
+        }
         for col, label, width in [
             ("upload_id", "Upload-ID", 155),
             ("status", "Status", 100),
@@ -50,7 +64,7 @@ class AdminUiManagerMixin:
             ("date", "Datum", 150),
             ("type", "Typ", 130),
         ]:
-            self.admin_tree.heading(col, text=label, anchor="w")
+            self.admin_tree.heading(col, text=label, anchor="w", command=lambda c=col: self.sort_admin_tree_by_column(c))
             self.admin_tree.column(col, width=width, anchor="w")
         self.admin_tree.grid(row=1, column=0, sticky="nsew")
         self.admin_tree.bind("<<TreeviewSelect>>", lambda _e: self.show_selected_admin_details())
@@ -62,14 +76,29 @@ class AdminUiManagerMixin:
         admin_vsb.grid(row=1, column=1, sticky="ns")
         admin_hsb.grid(row=2, column=0, sticky="ew")
 
+        ai_frame = ttk.Frame(list_frame)
+        self.admin_openai_frame = ai_frame
+        ai_frame.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        ai_frame.columnconfigure(4, weight=1)
+        self.admin_openai_button = ttk.Button(ai_frame, text="OpenAI prüfen", command=self.admin_openai_selected_document)
+        self.admin_openai_button.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self.admin_openai_places_button = ttk.Button(ai_frame, text="Orte prüfen", command=self.admin_openai_place_scan_selected_document)
+        self.admin_openai_places_button.grid(row=0, column=1, sticky="w", padx=(0, 8))
+        self.admin_place_contexts_button = ttk.Button(ai_frame, text="Fundstellen anzeigen", command=self.show_admin_place_contexts_dialog)
+        self.admin_place_contexts_button.grid(row=0, column=2, sticky="w", padx=(0, 8))
+        self.admin_ocr_pdf_button = ttk.Button(ai_frame, text="PDF OCR erstellen", command=self.admin_create_ocr_for_selected_document)
+        self.admin_ocr_pdf_button.grid(row=0, column=3, sticky="w", padx=(0, 8))
+        self.admin_openai_status_var = tk.StringVar(value="OpenAI: keine Datei ausgewählt")
+        ttk.Label(ai_frame, textvariable=self.admin_openai_status_var, foreground="#555555").grid(row=0, column=4, sticky="w")
+
         actions = ttk.LabelFrame(list_frame, text="Admin-Aktionen", padding=8)
         self.admin_actions_frame = actions
-        actions.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         actions.columnconfigure(1, weight=1)
         self.new_status_label = ttk.Label(actions, text="Dokumentstatus:")
         self.new_status_label.grid(row=0, column=0, sticky="w")
         self.new_status_var = tk.StringVar(value="")
-        self.new_status_combo = ttk.Combobox(actions, textvariable=self.new_status_var, values=["hochgeladen", "rueckfrage", "geprueft", "uebernommen", "archiviert"], width=18, state="readonly")
+        self.new_status_combo = ttk.Combobox(actions, textvariable=self.new_status_var, values=["hochgeladen", "erfasst", "geaendert", "rueckfrage", "geprueft", "archiviert"], width=18, state="readonly")
         self.new_status_combo.grid(row=0, column=1, sticky="w", padx=6)
         self.new_status_combo.bind("<<ComboboxSelected>>", lambda _e: self.admin_set_status(silent=True))
 
@@ -91,7 +120,7 @@ class AdminUiManagerMixin:
         ttk.Label(points_frame, text="Punkte Dokument:").pack(side="left")
         self.admin_document_points_var = tk.StringVar(value="keine Datei ausgewählt")
         ttk.Label(points_frame, textvariable=self.admin_document_points_var).pack(side="left", padx=(6, 18))
-        self.manual_points_button = ttk.Button(points_frame, text="Sonderpunkte erfassen...", command=self.open_manual_points_dialog)
+        self.manual_points_button = ttk.Button(points_frame, text="Sonderpunkte erfassen...", command=lambda: self.open_manual_points_dialog(item=self.selected_admin_upload()))
         self.manual_points_button.pack(side="left", padx=(0, 8))
         self.point_details_button = ttk.Button(points_frame, text="Punktdetails...", command=self.open_document_points_detail_dialog)
         self.point_details_button.pack(side="left")
@@ -145,6 +174,7 @@ class AdminUiManagerMixin:
         self.admin_right_pane.add(admin_preview_frame, weight=1)
         self.admin_right_pane.add(detail_outer, weight=3)
         self.refresh_admin_destination_choices()
+        self.refresh_admin_folder_choices()
         self.after(200, self.restore_pane_positions)
 
     def open_admin_settings_dialog(self) -> None:
@@ -201,13 +231,82 @@ class AdminUiManagerMixin:
         ttk.Label(general_tab, textvariable=meta_preview_var).grid(row=2, column=1, columnspan=2, sticky="w", padx=6, pady=6)
 
         ttk.Label(general_tab, text="Ordner, die Admins bearbeiten dürfen:").grid(row=3, column=0, sticky="nw", pady=(10, 6))
-        work_text = tk.Text(general_tab, height=8, width=55)
-        work_text.grid(row=3, column=1, columnspan=2, sticky="nsew", padx=6, pady=(10, 6))
-        work_text.insert("1.0", "\n".join(sorted(self.admin_work_folder_names)))
-        work_text.edit_modified(False)
-        work_text.bind("<<Modified>>", lambda _event: (work_text.edit_modified(False), mark_dirty()))
+        work_frame = ttk.Frame(general_tab)
+        work_frame.grid(row=3, column=1, columnspan=2, sticky="nsew", padx=6, pady=(10, 6))
+        work_frame.columnconfigure(0, weight=1)
+        work_frame.rowconfigure(0, weight=1)
+        work_listbox = tk.Listbox(work_frame, height=8, selectmode="extended", exportselection=False)
+        work_scroll = ttk.Scrollbar(work_frame, orient="vertical", command=work_listbox.yview)
+        work_listbox.configure(yscrollcommand=work_scroll.set)
+        work_listbox.grid(row=0, column=0, sticky="nsew")
+        work_scroll.grid(row=0, column=1, sticky="ns")
+        work_buttons = ttk.Frame(work_frame)
+        work_buttons.grid(row=0, column=2, sticky="ns", padx=(8, 0))
+
+        def refresh_work_folder_listbox() -> None:
+            current = {str(folder).strip() for folder in self.config_data.get("admin_work_folder_names", sorted(self.admin_work_folder_names)) if str(folder).strip()}
+            work_listbox.delete(0, "end")
+            for folder in sorted(current, key=str.lower):
+                work_listbox.insert("end", folder)
+
+        def selected_work_folders() -> list[str]:
+            return [str(work_listbox.get(i)).strip() for i in range(work_listbox.size()) if str(work_listbox.get(i)).strip()]
+
+        def add_work_folder() -> None:
+            base = self.nextcloud_base_path(show_message=True)
+            if base is None:
+                return
+            if not getattr(self, "writable_folders", []):
+                self.load_writable_folders(show_message=False)
+            selected = self.open_folder_tree_dialog("Admin-Bearbeitungsordner auswählen", self.writable_folders, "")
+            if not selected:
+                return
+            folder_name = str(selected.name or "").strip()
+            if not folder_name:
+                return
+            existing = selected_work_folders()
+            if folder_name not in existing:
+                existing.append(folder_name)
+                work_listbox.delete(0, "end")
+                for folder in sorted(existing, key=str.lower):
+                    work_listbox.insert("end", folder)
+                mark_dirty()
+
+        def remove_work_folder() -> None:
+            selected = list(work_listbox.curselection())
+            if not selected:
+                return
+            for index in reversed(selected):
+                work_listbox.delete(index)
+            mark_dirty()
+
+        refresh_work_folder_listbox()
+        ttk.Button(work_buttons, text="Hinzufügen...", command=add_work_folder).pack(fill="x", pady=(0, 6))
+        ttk.Button(work_buttons, text="Entfernen", command=remove_work_folder).pack(fill="x", pady=(0, 6))
+        ttk.Button(work_buttons, text="Gespeicherte Liste laden", command=refresh_work_folder_listbox).pack(fill="x")
         general_tab.rowconfigure(3, weight=1)
-        ttk.Label(general_tab, text="Ein Ordnername pro Zeile. Es reicht der Ordnername, z. B. 01_ABLAGE_ORTSCHRONIK.", wraplength=620).grid(row=4, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
+        ttk.Label(general_tab, text="Wähle beschreibbare Ordner per Auswahl aus. Gespeichert wird der Ordnername; weitere Ordner können jederzeit ergänzt oder entfernt werden.", wraplength=620).grid(row=4, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
+
+        ttk.Separator(general_tab).grid(row=5, column=0, columnspan=3, sticky="ew", pady=(8, 10))
+        ttk.Label(general_tab, text="PDF-Optimierung", font=("", 10, "bold")).grid(row=6, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        pdf_warning_mb_var = tk.StringVar(value=str(self.config_data.get("pdf_warning_mb", 100) or 100))
+        pdf_optimize_mb_var = tk.StringVar(value=str(self.config_data.get("pdf_optimize_recommend_mb", 250) or 250))
+        pdf_block_mb_var = tk.StringVar(value=str(self.config_data.get("pdf_upload_block_mb", 1000) or 1000))
+        pdf_optimization_profile_var = tk.StringVar(value=str(self.config_data.get("pdf_optimization_profile", "verlustfrei") or "verlustfrei"))
+        pdf_limits_frame = ttk.Frame(general_tab)
+        pdf_limits_frame.grid(row=7, column=1, columnspan=2, sticky="w", padx=6, pady=4)
+        ttk.Label(general_tab, text="Schwellwerte:").grid(row=7, column=0, sticky="w", pady=4)
+        ttk.Label(pdf_limits_frame, text="Warnung ab MB").pack(side="left")
+        ttk.Spinbox(pdf_limits_frame, from_=0, to=100000, increment=50, textvariable=pdf_warning_mb_var, width=8).pack(side="left", padx=(6, 16))
+        ttk.Label(pdf_limits_frame, text="Optimierung empfehlen ab MB").pack(side="left")
+        ttk.Spinbox(pdf_limits_frame, from_=0, to=100000, increment=50, textvariable=pdf_optimize_mb_var, width=8).pack(side="left", padx=(6, 16))
+        ttk.Label(pdf_limits_frame, text="Upload blockieren ab MB").pack(side="left")
+        ttk.Spinbox(pdf_limits_frame, from_=0, to=100000, increment=100, textvariable=pdf_block_mb_var, width=8).pack(side="left", padx=(6, 0))
+        ttk.Label(general_tab, text="Optimierungsprofil:").grid(row=8, column=0, sticky="w", pady=4)
+        pdf_profile_combo = ttk.Combobox(general_tab, textvariable=pdf_optimization_profile_var, values=["verlustfrei", "standard", "maximal"], state="readonly", width=18)
+        pdf_profile_combo.grid(row=8, column=1, sticky="w", padx=6, pady=4)
+        ttk.Label(general_tab, text="verlustfrei = PyMuPDF-Strukturoptimierung; standard = Ghostscript ca. 144 dpi; maximal = Ghostscript ca. 120 dpi. Ohne Ghostscript fällt ODV auf PyMuPDF zurück.", wraplength=620).grid(row=8, column=2, sticky="w", padx=6, pady=4)
+        ttk.Label(general_tab, text="0 bedeutet: Schwellwert deaktiviert. Große PDFs werden im Baum mit !! markiert und in der PDF-Übersicht protokolliert. Ergibt ein Optimierungsversuch keine kleinere Datei, zeigt die Übersicht bei Optimiert durch ODV ein X.", wraplength=720).grid(row=9, column=1, columnspan=2, sticky="w", padx=6, pady=(0, 10))
 
         ttk.Label(api_tab, text="Server / API", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
         ttk.Label(api_tab, text="API-URL:").grid(row=1, column=0, sticky="w", pady=4)
@@ -240,6 +339,8 @@ class AdminUiManagerMixin:
         ttk.Combobox(api_tab, textvariable=openai_model_var, values=openai_model_values, state="readonly").grid(row=8, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         openai_pdf_pages_var = tk.StringVar(value=str(self.config_data.get("openai_pdf_sample_pages", 10) or 10))
         openai_text_chars_var = tk.StringVar(value=str(self.config_data.get("openai_text_sample_chars", 4000) or 4000))
+        openai_place_context_chars_var = tk.StringVar(value=str(self.config_data.get("openai_place_context_chars", 650) or 650))
+        openai_place_max_contexts_var = tk.StringVar(value=str(self.config_data.get("openai_place_max_contexts", 30) or 30))
         openai_points_var = tk.StringVar(value=str(self.config_data.get("openai_metadata_points", 1) or 1))
         ttk.Label(api_tab, text="OpenAI-Auszug:").grid(row=9, column=0, sticky="w", pady=4)
         openai_limits_frame = ttk.Frame(api_tab)
@@ -252,12 +353,21 @@ class AdminUiManagerMixin:
         def reset_openai_limits() -> None:
             openai_pdf_pages_var.set("10")
             openai_text_chars_var.set("4000")
+            openai_place_context_chars_var.set("650")
+            openai_place_max_contexts_var.set("30")
             openai_points_var.set("1")
 
         ttk.Button(openai_limits_frame, text="Standard", command=reset_openai_limits).pack(side="left")
         ttk.Label(openai_limits_frame, text="OpenAI-Punkte je Feld").pack(side="left", padx=(16, 0))
         ttk.Spinbox(openai_limits_frame, from_=0, to=50, textvariable=openai_points_var, width=6).pack(side="left", padx=(6, 0))
-        ttk.Label(api_tab, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. OpenAI-Punkte werden je Metadatenfeld in der Punkteverwaltung gepflegt.", wraplength=760).grid(row=10, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(api_tab, text="Ortsanalyse:").grid(row=10, column=0, sticky="w", pady=4)
+        openai_place_frame = ttk.Frame(api_tab)
+        openai_place_frame.grid(row=10, column=1, columnspan=3, sticky="w", padx=6, pady=4)
+        ttk.Label(openai_place_frame, text="Kontext vor/nach Ort").pack(side="left")
+        ttk.Spinbox(openai_place_frame, from_=100, to=6000, increment=100, textvariable=openai_place_context_chars_var, width=8).pack(side="left", padx=(6, 16))
+        ttk.Label(openai_place_frame, text="max. Fundstellen").pack(side="left")
+        ttk.Spinbox(openai_place_frame, from_=1, to=200, textvariable=openai_place_max_contexts_var, width=6).pack(side="left", padx=(6, 0))
+        ttk.Label(api_tab, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. Bei `Orte prüfen` wird lokal unbegrenzt gesucht; an OpenAI gehen nur die eingestellte Anzahl Fundstellen mit eingestelltem Kontext. OpenAI-Punkte werden je Metadatenfeld in der Punkteverwaltung gepflegt.", wraplength=760).grid(row=11, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         openai_test_status_var = tk.StringVar(value="OpenAI-Schlüssel nicht geprüft")
         openai_balance_var = tk.StringVar(value="Guthaben: n.v.")
@@ -285,27 +395,31 @@ class AdminUiManagerMixin:
                 try:
                     client = OpenAIClient(openai_key_var.get().strip(), openai_model_var.get().strip() or "gpt-3.5-turbo")
                     client.verify_key()
-                    balance = client.get_balance()
-                    available = balance.get("available")
-                    if isinstance(available, (int, float)):
-                        balance_text = f"Guthaben: {available:.2f} USD"
-                    else:
-                        balance_text = "Guthaben: k.A."
+                    balance_text = "Guthaben: nicht per API abrufbar"
+                    try:
+                        balance = client.get_balance()
+                        available = balance.get("available")
+                        if isinstance(available, (int, float)):
+                            balance_text = f"Guthaben: {available:.2f} USD"
+                    except OpenAIError as exc:
+                        # OpenAI blockiert den alten Billing-Endpunkt fuer Secret Keys.
+                        app_log_exception("OpenAI-Guthaben konnte nicht abgefragt werden", exc)
                     self.after(0, lambda: openai_test_status_var.set("OpenAI: Schlüssel OK"))
                     self.after(0, lambda: openai_balance_var.set(balance_text))
                 except OpenAIError as exc:
                     self.after(0, lambda: openai_test_status_var.set(f"OpenAI: {exc.user_message()}"))
                     self.after(0, lambda: openai_balance_var.set("Guthaben: k.A."))
                 except Exception:
+                    app_log_exception("OpenAI-Prüfung fehlgeschlagen")
                     self.after(0, lambda: openai_test_status_var.set("OpenAI-Prüfung fehlgeschlagen"))
                     self.after(0, lambda: openai_balance_var.set("Guthaben: k.A."))
             threading.Thread(target=run_check, daemon=True).start()
 
         openai_actions = ttk.Frame(api_tab)
-        openai_actions.grid(row=11, column=0, columnspan=4, sticky="ew", pady=4)
+        openai_actions.grid(row=12, column=0, columnspan=4, sticky="ew", pady=4)
         ttk.Button(openai_actions, text="OpenAI-Schlüssel prüfen", command=check_openai_key).pack(side="left")
         ttk.Label(openai_actions, textvariable=openai_test_status_var, wraplength=520, foreground="#555555").pack(side="left", padx=(12, 0))
-        ttk.Label(api_tab, textvariable=openai_balance_var, wraplength=520, foreground="#555555").grid(row=12, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
+        ttk.Label(api_tab, textvariable=openai_balance_var, wraplength=520, foreground="#555555").grid(row=13, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
 
         ttk.Label(ftp_tab, text="FTP-Deployment", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
         ttk.Label(ftp_tab, text="FTP-Server:").grid(row=1, column=0, sticky="w", pady=4)
@@ -318,11 +432,11 @@ class AdminUiManagerMixin:
         ftp_user_var = tk.StringVar(value=self.config_data.get("ftp_user", "f0185adc"))
         ttk.Entry(ftp_tab, textvariable=ftp_user_var).grid(row=2, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         ttk.Label(ftp_tab, text="FTP-Passwort:").grid(row=3, column=0, sticky="w", pady=4)
-        ftp_password_var = tk.StringVar(value="")
-        ttk.Entry(ftp_tab, textvariable=ftp_password_var, show="*").grid(row=3, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         ftp_saved = bool(str(self.config_data.get("ftp_password_dpapi", "") or "").strip())
+        ftp_password_var = tk.StringVar(value="***" if ftp_saved else "")
+        ttk.Entry(ftp_tab, textvariable=ftp_password_var, show="*").grid(row=3, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         ftp_status_var = tk.StringVar(value="FTP-Passwort ist verschlüsselt gespeichert." if ftp_saved else "FTP-Passwort noch nicht gespeichert.")
-        ttk.Label(ftp_tab, text="Leer lassen, um ein bereits gespeichertes Passwort zu behalten.", wraplength=720).grid(row=4, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
+        ttk.Label(ftp_tab, text="*** bedeutet: FTP-Passwort ist gespeichert. Nur bei Passwortänderung ein neues Passwort eingeben.", wraplength=720).grid(row=4, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
         ttk.Label(ftp_tab, text="Lokale routes.php:").grid(row=5, column=0, sticky="w", pady=4)
         ftp_local_routes_path_var = tk.StringVar(value=self.config_data.get("ftp_local_routes_path", "server/routes.php"))
         ttk.Entry(ftp_tab, textvariable=ftp_local_routes_path_var).grid(row=5, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
@@ -332,7 +446,7 @@ class AdminUiManagerMixin:
 
         def current_ftp_password() -> str:
             password = ftp_password_var.get()
-            if password:
+            if password and password != "***":
                 return password
             encrypted = str(self.config_data.get("ftp_password_dpapi", "") or "")
             if not encrypted:
@@ -372,14 +486,92 @@ class AdminUiManagerMixin:
         nc_web_var = tk.StringVar(value=self.config_data.get("nextcloud_web_files_url", "https://nx94165.your-storageshare.de/apps/files/files"))
         ttk.Entry(links_tab, textvariable=nc_web_var).grid(row=1, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         ttk.Label(links_tab, text="Beispiel: https://nx94165.your-storageshare.de/apps/files/files  ·  Links zeigen auf den betreffenden Nextcloud-Ordner.", wraplength=760).grid(row=2, column=0, columnspan=4, sticky="w", pady=(4, 10))
-        ttk.Label(links_tab, text="Das Datenbankpasswort und SMTP-Passwort liegen nur auf dem Server/API. Das FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt. Die OpenAI-Punkte je Metadatenfeld ändern Sie unter Admin > Punkteregeln verwalten.", wraplength=760).grid(row=3, column=0, columnspan=4, sticky="w", pady=(4, 10))
+        ttk.Separator(links_tab).grid(row=3, column=0, columnspan=4, sticky="ew", pady=(8, 10))
+        ttk.Label(links_tab, text="Technischer Nextcloud-Zugang", font=("", 10, "bold")).grid(row=4, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(links_tab, text="Nextcloud Basis-URL:").grid(row=5, column=0, sticky="w", pady=4)
+        nc_base_var = tk.StringVar(value="https://nx94165.your-storageshare.de")
+        ttk.Entry(links_tab, textvariable=nc_base_var).grid(row=5, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(links_tab, text="Technischer Benutzer:").grid(row=6, column=0, sticky="w", pady=4)
+        nc_user_var = tk.StringVar(value="oc_app")
+        ttk.Entry(links_tab, textvariable=nc_user_var).grid(row=6, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(links_tab, text="App-Passwort:").grid(row=7, column=0, sticky="w", pady=4)
+        nc_password_var = tk.StringVar(value="")
+        ttk.Entry(links_tab, textvariable=nc_password_var, show="*").grid(row=7, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        ttk.Label(links_tab, text="Remote-Basisordner:").grid(row=8, column=0, sticky="w", pady=4)
+        nc_remote_base_var = tk.StringVar(value="")
+        ttk.Entry(links_tab, textvariable=nc_remote_base_var).grid(row=8, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
+        nc_status_var = tk.StringVar(value="Technischer Nextcloud-Zugang wird geladen ...")
+        ttk.Label(links_tab, textvariable=nc_status_var, foreground="#555555", wraplength=760).grid(row=9, column=0, columnspan=4, sticky="w", pady=(4, 10))
+        nc_test_buttons = ttk.Frame(links_tab)
+        nc_test_buttons.grid(row=10, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 8))
+        ttk.Label(links_tab, text="Das technische Nextcloud-App-Passwort wird serverseitig verschlüsselt gespeichert und nicht wieder angezeigt. *** bedeutet: Passwort ist gespeichert. Nur bei Passwortänderung ein neues Passwort eingeben.", wraplength=760).grid(row=11, column=0, columnspan=4, sticky="w", pady=(4, 10))
+        ttk.Label(links_tab, text="Das Datenbankpasswort und SMTP-Passwort liegen nur auf dem Server/API. Das FTP-Passwort wird lokal per Windows-DPAPI verschlüsselt. Die OpenAI-Punkte je Metadatenfeld ändern Sie unter Admin > Punkteregeln verwalten.", wraplength=760).grid(row=12, column=0, columnspan=4, sticky="w", pady=(4, 10))
+
+        def load_nextcloud_settings() -> None:
+            if not self.api_token:
+                nc_status_var.set("Technischer Nextcloud-Zugang: keine API-Anmeldung.")
+                return
+
+            def run_load() -> None:
+                try:
+                    response = self.api.nextcloud_settings(self.api_token)
+                    settings = response.get("settings", {})
+
+                    def apply_values() -> None:
+                        saving_var.set(True)
+                        nc_base_var.set(str(settings.get("base_url", "") or "https://nx94165.your-storageshare.de"))
+                        nc_web_var.set(str(settings.get("web_files_url", "") or nc_web_var.get().strip()))
+                        nc_user_var.set(str(settings.get("username", "") or "oc_app"))
+                        nc_remote_base_var.set(str(settings.get("remote_base", "") or ""))
+                        saved = bool(settings.get("password_saved"))
+                        nc_password_var.set("***" if saved else "")
+                        source = str(settings.get("source", "") or "")
+                        if saved:
+                            nc_status_var.set(f"Technisches Nextcloud-Passwort ist gespeichert ({source}).")
+                        else:
+                            nc_status_var.set("Technisches Nextcloud-Passwort ist noch nicht gespeichert.")
+                        saving_var.set(False)
+
+                    self.after(0, apply_values)
+                except Exception as exc:
+                    self.after(0, lambda: nc_status_var.set(f"Technischer Nextcloud-Zugang: {exc}"))
+
+            threading.Thread(target=run_load, daemon=True).start()
+
+        def test_nextcloud_settings() -> None:
+            if not self.api_token:
+                nc_status_var.set("Nextcloud-Test: keine API-Anmeldung.")
+                return
+            nc_status_var.set("Nextcloud-Test läuft ...")
+
+            def run_test() -> None:
+                try:
+                    payload = {
+                        "base_url": nc_base_var.get().strip(),
+                        "web_files_url": nc_web_var.get().strip(),
+                        "username": nc_user_var.get().strip(),
+                    }
+                    if nc_password_var.get() and nc_password_var.get() != "***":
+                        payload["password"] = nc_password_var.get()
+                    response = self.api.test_nextcloud_settings(self.api_token, payload)
+                    message = str(response.get("message", "") or "Nextcloud-Verbindung OK.")
+                    self.after(0, lambda: nc_status_var.set(message))
+                except Exception as exc:
+                    self.after(0, lambda: nc_status_var.set(f"Nextcloud-Test: {exc}"))
+
+            threading.Thread(target=run_test, daemon=True).start()
+
+        ttk.Button(nc_test_buttons, text="Nextcloud-Zugang prüfen", command=test_nextcloud_settings).pack(side="left")
+        load_nextcloud_settings()
 
         tracked_vars = [
             folder_name_var, api_url_var, openai_key_var, openai_model_var,
-            openai_pdf_pages_var, openai_text_chars_var, openai_points_var,
+            openai_pdf_pages_var, openai_text_chars_var, openai_place_context_chars_var, openai_place_max_contexts_var, openai_points_var,
+            pdf_warning_mb_var, pdf_optimize_mb_var, pdf_block_mb_var, pdf_optimization_profile_var,
             mysql_host_var, mysql_port_var, mysql_database_var, mysql_user_var,
             ftp_host_var, ftp_port_var, ftp_user_var, ftp_password_var,
             ftp_local_routes_path_var, ftp_routes_path_var, nc_web_var,
+            nc_base_var, nc_user_var, nc_password_var, nc_remote_base_var,
         ]
         for var in tracked_vars:
             var.trace_add("write", mark_dirty)
@@ -398,7 +590,7 @@ class AdminUiManagerMixin:
             name = folder_name_var.get().strip() or ".ortschronik_metadaten"
             if not name.startswith("."):
                 name = "." + name
-            folders = [line.strip() for line in work_text.get("1.0", "end").splitlines() if line.strip()]
+            folders = [str(work_listbox.get(i)).strip() for i in range(work_listbox.size()) if str(work_listbox.get(i)).strip()]
             if not folders:
                 messagebox.showwarning("Admin-Ordner", "Bitte mindestens einen Admin-Bearbeitungsordner erfassen.", parent=dialog)
                 saving_var.set(False)
@@ -406,20 +598,32 @@ class AdminUiManagerMixin:
             try:
                 openai_pdf_pages = max(1, min(100, int(openai_pdf_pages_var.get())))
                 openai_text_chars = max(500, min(100000, int(openai_text_chars_var.get())))
+                openai_place_context_chars = max(100, min(6000, int(openai_place_context_chars_var.get())))
+                openai_place_max_contexts = max(1, min(200, int(openai_place_max_contexts_var.get())))
                 openai_points = max(0, min(50, int(openai_points_var.get())))
+                pdf_warning_mb = max(0, min(100000, int(pdf_warning_mb_var.get())))
+                pdf_optimize_mb = max(0, min(100000, int(pdf_optimize_mb_var.get())))
+                pdf_block_mb = max(0, min(100000, int(pdf_block_mb_var.get())))
             except ValueError:
-                messagebox.showwarning("OpenAI-Auszug", "Bitte gültige Zahlen für Seiten, Zeichen und OpenAI-Punkte erfassen.", parent=dialog)
+                messagebox.showwarning("Admin-Einstellungen", "Bitte gültige Zahlen für OpenAI- und PDF-Schwellwerte erfassen.", parent=dialog)
                 saving_var.set(False)
                 return False
             self.config_data["metadata_folder_name"] = name
             self.admin_work_folder_names = set(folders)
             self.config_data["admin_work_folder_names"] = sorted(self.admin_work_folder_names)
+            self.refresh_admin_folder_choices()
             self.config_data["api_url"] = api_url_var.get().strip()
             self.config_data["openai_api_key"] = openai_key_var.get().strip()
             self.config_data["openai_model"] = openai_model_var.get().strip() or "gpt-3.5-turbo"
             self.config_data["openai_pdf_sample_pages"] = openai_pdf_pages
             self.config_data["openai_text_sample_chars"] = openai_text_chars
+            self.config_data["openai_place_context_chars"] = openai_place_context_chars
+            self.config_data["openai_place_max_contexts"] = openai_place_max_contexts
             self.config_data["openai_metadata_points"] = openai_points
+            self.config_data["pdf_warning_mb"] = pdf_warning_mb
+            self.config_data["pdf_optimize_recommend_mb"] = pdf_optimize_mb
+            self.config_data["pdf_upload_block_mb"] = pdf_block_mb
+            self.config_data["pdf_optimization_profile"] = pdf_optimization_profile_var.get().strip() or "verlustfrei"
             self.config_data["mysql_host"] = mysql_host_var.get().strip()
             self.config_data["mysql_port"] = mysql_port_var.get().strip() or "3306"
             self.config_data["mysql_database"] = mysql_database_var.get().strip()
@@ -429,7 +633,7 @@ class AdminUiManagerMixin:
             self.config_data["ftp_user"] = ftp_user_var.get().strip()
             self.config_data["ftp_local_routes_path"] = ftp_local_routes_path_var.get().strip() or "server/routes.php"
             self.config_data["ftp_remote_routes_path"] = ftp_routes_path_var.get().strip()
-            if ftp_password_var.get():
+            if ftp_password_var.get() and ftp_password_var.get() != "***":
                 try:
                     self.config_data["ftp_password_dpapi"] = protect_text(ftp_password_var.get())
                 except SecureStoreError as exc:
@@ -437,6 +641,28 @@ class AdminUiManagerMixin:
                     saving_var.set(False)
                     return False
             self.config_data["nextcloud_web_files_url"] = nc_web_var.get().strip()
+            if self.api_token:
+                try:
+                    payload = {
+                        "base_url": nc_base_var.get().strip(),
+                        "web_files_url": nc_web_var.get().strip(),
+                        "username": nc_user_var.get().strip(),
+                        "remote_base": nc_remote_base_var.get().strip(),
+                    }
+                    if nc_password_var.get() and nc_password_var.get() != "***":
+                        payload["password"] = nc_password_var.get()
+                    response = self.api.update_nextcloud_settings(self.api_token, payload)
+                    settings = response.get("settings", {})
+                    nc_password_var.set("***" if settings.get("password_saved") else "")
+                    nc_status_var.set(
+                        "Technisches Nextcloud-Passwort ist gespeichert."
+                        if settings.get("password_saved")
+                        else "Technisches Nextcloud-Passwort ist noch nicht gespeichert."
+                    )
+                except Exception as exc:
+                    messagebox.showwarning("Nextcloud-Zugang", f"Technische Nextcloud-Einstellungen konnten nicht gespeichert werden:\n{exc}", parent=dialog)
+                    saving_var.set(False)
+                    return False
             self.ensure_standard_metadata_folder()
             save_config(self.config_data)
             # OpenAI-Punkte werden feldbezogen in der Punkteverwaltung gepflegt.
@@ -472,6 +698,6 @@ class AdminUiManagerMixin:
         ttk.Button(buttons, text="Schließen", command=close_dialog).pack(side="left", padx=6)
         dialog.protocol("WM_DELETE_WINDOW", close_dialog)
         dirty_var.set(False)
-        dialog.after_idle(lambda: (work_text.edit_modified(False), dirty_var.set(False), initialized_var.set(True)))
+        dialog.after_idle(lambda: (dirty_var.set(False), initialized_var.set(True)))
 
     # Upload

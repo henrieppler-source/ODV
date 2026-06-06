@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import tkinter as tk
@@ -38,6 +39,13 @@ class UploadManagerMixin:
                         "openai_metadata_fields",
                         "openai_metadata_model",
                         "openai_metadata_applied_at",
+                        "openai_model_results",
+                        "edited_by",
+                        "edited_at",
+                        "openai_place_contexts",
+                        "openai_place_contexts_updated_at",
+                        "openai_place_contexts_model",
+                        "openai_place_model_results",
                         "status_note",
                         "gps_coordinates",
                         "gps_place",
@@ -45,10 +53,53 @@ class UploadManagerMixin:
                         if extra_key in parsed_json_metadata and extra_key not in item:
                             item[extra_key] = parsed_json_metadata.get(extra_key)
                     metadata = parsed_json_metadata.get("metadata") if isinstance(parsed_json_metadata.get("metadata"), dict) else {}
+                    for meta_key in (
+                        "primary_source",
+                        "secondary_source",
+                        "source",
+                        "original_location",
+                        "document_date",
+                        "event",
+                        "place",
+                        "gps_coordinates",
+                        "gps_place",
+                        "description",
+                        "note",
+                        "copyright_author",
+                        "rights_holder",
+                        "usage_permission",
+                        "license_note",
+                        "rights_note",
+                        "archive_name",
+                        "archive_signature",
+                        "archive_accessed_at",
+                        "keywords",
+                        "transcription_done",
+                        "transcription_type",
+                        "transcription_note",
+                    ):
+                        if meta_key in metadata and not item.get(meta_key):
+                            item[meta_key] = metadata.get(meta_key)
                     if "gps_coordinates" in metadata and "gps_coordinates" not in item:
                         item["gps_coordinates"] = metadata.get("gps_coordinates")
                     if "gps_place" in metadata and "gps_place" not in item:
                         item["gps_place"] = metadata.get("gps_place")
+                    if "edited_by" in metadata and "edited_by" not in item:
+                        item["edited_by"] = metadata.get("edited_by")
+                    if "edited_at" in metadata and "edited_at" not in item:
+                        item["edited_at"] = metadata.get("edited_at")
+                    for extra_key in (
+                        "openai_metadata_fields",
+                        "openai_metadata_model",
+                        "openai_metadata_applied_at",
+                        "openai_model_results",
+                        "openai_place_contexts",
+                        "openai_place_contexts_updated_at",
+                        "openai_place_contexts_model",
+                        "openai_place_model_results",
+                    ):
+                        if extra_key in metadata and not item.get(extra_key):
+                            item[extra_key] = metadata.get(extra_key)
             except Exception:
                 pass
         # Kompatibilitätsfelder für ältere JSON-Ansichten
@@ -104,6 +155,13 @@ class UploadManagerMixin:
             "openai_metadata_fields": item.get("openai_metadata_fields", []) or [],
             "openai_metadata_model": item.get("openai_metadata_model", ""),
             "openai_metadata_applied_at": item.get("openai_metadata_applied_at", ""),
+            "openai_model_results": item.get("openai_model_results", {}) or {},
+            "edited_by": item.get("edited_by", ""),
+            "edited_at": item.get("edited_at", ""),
+            "openai_place_contexts": item.get("openai_place_contexts", []) or [],
+            "openai_place_contexts_updated_at": item.get("openai_place_contexts_updated_at", ""),
+            "openai_place_contexts_model": item.get("openai_place_contexts_model", ""),
+            "openai_place_model_results": item.get("openai_place_model_results", {}) or {},
             "status_note": item.get("status_note", ""),
             "metadata": {
                 "document_type": item.get("document_type", ""),
@@ -157,6 +215,13 @@ class UploadManagerMixin:
                 "openai_metadata_fields": item.get("openai_metadata_fields", []) or [],
                 "openai_metadata_model": item.get("openai_metadata_model", ""),
                 "openai_metadata_applied_at": item.get("openai_metadata_applied_at", ""),
+                "openai_model_results": item.get("openai_model_results", {}) or {},
+                "edited_by": item.get("edited_by", ""),
+                "edited_at": item.get("edited_at", ""),
+                "openai_place_contexts": item.get("openai_place_contexts", []) or [],
+                "openai_place_contexts_updated_at": item.get("openai_place_contexts_updated_at", ""),
+                "openai_place_contexts_model": item.get("openai_place_contexts_model", ""),
+                "openai_place_model_results": item.get("openai_place_model_results", {}) or {},
                 "status_note": item.get("status_note", ""),
             },
         }
@@ -347,7 +412,7 @@ class UploadManagerMixin:
             openai_metadata_fields=openai_fields,
             openai_metadata_model=str(self.config_data.get("openai_model", "") or "") if openai_fields else "",
             openai_metadata_applied_at=datetime.now().isoformat(timespec="seconds") if openai_fields else "",
-            description=self.description_text.get("1.0", "end").strip(),
+            description=self.normalize_description_text(self.description_text.get("1.0", "end").strip()),
             note=self.note_text.get("1.0", "end").strip(),
             person_status=self.person_status_var.get() if self.selected_file else "none",
             persons=self.persons if self.selected_file else [],
@@ -456,6 +521,7 @@ class UploadManagerMixin:
         try:
             api_ok, target_file = self.upload_single_source_file(source, target_folder, display_name)
         except Exception as exc:
+            app_log_exception("Datei konnte beim Hochladen nicht kopiert werden", exc, path=str(source), target_folder=str(target_folder))
             messagebox.showerror("Fehler beim Kopieren", str(exc))
             return
         self.refresh_history()

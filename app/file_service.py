@@ -219,6 +219,22 @@ def make_normalized_archive_filename(metadata: dict, requested_filename: str) ->
             continue
         break
 
+    try:
+        from .normalization_rules import (
+            DEFAULT_FILENAME_TEMPLATE,
+            configured_filename_template,
+            filename_template_is_safe,
+            matching_filename_rule,
+            render_filename_template,
+        )
+
+        rule = matching_filename_rule(metadata)
+        template = str(rule.get("template") or "") if rule else configured_filename_template()
+        if template and template != DEFAULT_FILENAME_TEMPLATE and filename_template_is_safe(template):
+            return render_filename_template(template, metadata, requested) + suffix
+    except Exception:
+        pass
+
     stem = strip_existing_date_prefix(stem)
     stem = normalize_filename_component(stem)
     date_text = metadata.get("document_date") or metadata.get("date") or ""

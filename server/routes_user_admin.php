@@ -162,10 +162,10 @@ if ($method === 'PUT' && $path === '/api/place-folders') {
 }
 
 if ($method === 'GET' && $path === '/api/users') {
-    require_role(['superadmin']);
+    current_user();
     $pdo = db();
     ensure_user_nextcloud_columns($pdo);
-    $stmt = $pdo->query("\n        SELECT id, username, display_name, email, nextcloud_username,\n               CASE WHEN COALESCE(nextcloud_password_enc, '') <> '' THEN 1 ELSE 0 END AS nextcloud_password_saved,\n               role, place, is_active, last_login_at, created_at, updated_at\n        FROM users\n        ORDER BY display_name ASC, username ASC\n    ");
+    $stmt = $pdo->query("\n        SELECT id, username, display_name, email, nextcloud_username,\n               CASE WHEN COALESCE(password_hash, '') <> '' THEN 1 ELSE 0 END AS password_saved,\n               CASE WHEN COALESCE(nextcloud_password_enc, '') <> '' THEN 1 ELSE 0 END AS nextcloud_password_saved,\n               role, place, is_active, last_login_at, created_at, updated_at\n        FROM users\n        ORDER BY display_name ASC, username ASC\n    ");
     json_response(['success' => true, 'users' => $stmt->fetchAll()]);
 }
 

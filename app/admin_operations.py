@@ -736,11 +736,25 @@ class AdminOperationsMixin:
         ttk.Label(dialog, textvariable=result_var, wraplength=720).grid(row=5, column=0, sticky="ew", padx=12, pady=(4, 8))
         buttons = ttk.Frame(dialog)
         buttons.grid(row=6, column=0, sticky="e", padx=12, pady=12)
+
+        def confirmation_matches() -> bool:
+            return confirm_var.get().strip() == "DATENBANK ZURUECKSETZEN"
+
+        def update_reset_button_state(*_args) -> None:
+            state = "normal" if mode_allows_reset["value"] and confirmation_matches() else "disabled"
+            reset_button.configure(state=state)
+            if not mode_allows_reset["value"]:
+                result_var.set("Zurücksetzen ist nur im Testbetrieb möglich.")
+            elif not confirmation_matches():
+                result_var.set("Bitte den Bestätigungstext exakt eingeben, um den Button zu aktivieren.")
+            elif result_var.get().startswith(("Zurücksetzen ist", "Bitte den Bestätigungstext")):
+                result_var.set("")
+
         def run_reset() -> None:
             if not mode_allows_reset["value"]:
                 messagebox.showwarning("Produktivbetrieb", "Der Datenbank-Reset ist nur im Testbetrieb erlaubt.", parent=dialog)
                 return
-            if confirm_var.get().strip() != "DATENBANK ZURUECKSETZEN":
+            if not confirmation_matches():
                 messagebox.showwarning("Sicherheitsabfrage", "Der Bestätigungstext stimmt nicht.", parent=dialog)
                 return
             if not messagebox.askyesno("Endgültig zurücksetzen", "Datenbank-Bewegungsdaten jetzt endgültig zurücksetzen?", parent=dialog):
@@ -758,14 +772,20 @@ class AdminOperationsMixin:
                 if isinstance(errors, list) and errors:
                     lines.append(f"Fehler bei JSON-Bereinigung: {len(errors)}")
                 result_var.set("\n".join(lines))
-                self.refresh_dashboard()
-                self.refresh_admin_uploads(show_message=False)
+                if hasattr(self, "refresh_history"):
+                    self.refresh_history()
+                if hasattr(self, "refresh_admin_uploads"):
+                    self.refresh_admin_uploads(show_message=False)
+                if hasattr(self, "refresh_file_view_tree"):
+                    self.refresh_file_view_tree()
                 messagebox.showinfo("Datenbank zurücksetzen", "Zurücksetzen abgeschlossen. Verwaiste lokale JSON-Sicherungen wurden bereinigt.", parent=dialog)
             except ApiError as exc:
                 messagebox.showerror("Datenbank zurücksetzen", f"Zurücksetzen fehlgeschlagen:\n{exc}", parent=dialog)
         reset_button = ttk.Button(buttons, text="Datenbank zurücksetzen", command=run_reset)
         reset_button.pack(side="left", padx=4)
+        reset_button.configure(state="disabled")
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
+        confirm_var.trace_add("write", update_reset_button_state)
 
         def refresh_mode() -> None:
             try:
@@ -774,9 +794,9 @@ class AdminOperationsMixin:
                 label = str(resp.get("label") or mode)
                 mode_allows_reset["value"] = mode == "test"
                 mode_var.set(f"Aktueller Betriebsmodus: {label}")
-                reset_button.configure(state="normal" if mode == "test" else "disabled")
+                update_reset_button_state()
             except Exception as exc:
                 mode_allows_reset["value"] = False
                 mode_var.set(f"Betriebsmodus konnte nicht geprüft werden: {exc}")
-                reset_button.configure(state="disabled")
+                update_reset_button_state()
         refresh_mode()

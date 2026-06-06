@@ -46,6 +46,6 @@ Mindestens drei Testbenutzer anlegen:
   - `hochgeladen`
   - `rueckfrage`
   - `geprueft`
-  - `uebernommen`
+  - `geaendert`
   - `archiviert`
 - Alte Tokens regelmäßig löschen, siehe `server/sql/token_cleanup.sql`.

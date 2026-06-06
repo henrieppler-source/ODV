@@ -47,7 +47,7 @@ CREATE TABLE documents (
     uploaded_by_user_id BIGINT UNSIGNED NULL,
     uploaded_by_display_name VARCHAR(200) NOT NULL,
     uploaded_at DATETIME NOT NULL,
-    status ENUM('hochgeladen', 'in_pruefung', 'rueckfrage', 'uebernommen', 'abgelehnt', 'archiviert') NOT NULL DEFAULT 'hochgeladen',
+    status ENUM('hochgeladen', 'erfasst', 'geaendert', 'rueckfrage', 'geprueft', 'archiviert') NOT NULL DEFAULT 'hochgeladen',
     source VARCHAR(500) NULL,
     original_location VARCHAR(500) NULL,
     document_date VARCHAR(100) NULL,

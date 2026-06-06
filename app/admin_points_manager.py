@@ -34,9 +34,26 @@ class AdminPointsManagerMixin:
         if not self.api_token:
             messagebox.showwarning("Nicht angemeldet", "Für die Punkteberechnung ist eine API-Anmeldung erforderlich.")
             return
-        if not hasattr(self, "admin_tree"):
-            return
-        upload_ids = list(self.admin_tree.get_children(""))
+        upload_ids: list[str] = []
+        if hasattr(self, "file_tree"):
+            def collect(node: str) -> None:
+                try:
+                    values = self.file_tree.item(node, "values")
+                    path_text = values[0] if values else ""
+                    item = self.item_for_local_path(path_text) if path_text else None
+                    upload_id = str((item or {}).get("upload_id") or "").strip()
+                    if upload_id and not upload_id.startswith("__missing_odv__"):
+                        upload_ids.append(upload_id)
+                    for child in self.file_tree.get_children(node):
+                        collect(child)
+                except Exception:
+                    return
+
+            for root in self.file_tree.get_children(""):
+                collect(root)
+        elif hasattr(self, "admin_tree"):
+            upload_ids = list(self.admin_tree.get_children(""))
+        upload_ids = list(dict.fromkeys(upload_ids))
         if not upload_ids:
             messagebox.showinfo("Punkte", "In der aktuellen Liste sind keine Dateien vorhanden.")
             return
@@ -57,7 +74,7 @@ class AdminPointsManagerMixin:
                 "Punkte",
                 f"Verarbeitet: {processed}\nPunkteberechtigt: {eligible}\nNeu angelegt: {created}\nSchon vorhanden: {skipped_existing}\nNicht berechtigt: {skipped_ineligible}",
             )
-            self.refresh_admin_uploads(show_message=False)
+            self.refresh_document_work_area(show_message=False)
         except Exception as exc:
             messagebox.showerror("Punkte", str(exc))
             app_log_exception("Punkte-Nachberechnung für angezeigte Liste fehlgeschlagen", exc)

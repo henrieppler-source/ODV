@@ -34,6 +34,9 @@ def app_log(level: str, message: str, **context) -> None:
             line += " | " + "; ".join(f"{k}={v}" for k, v in safe_context.items())
         with (log_dir / "app.log").open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
+        if level.lower() == "error":
+            with (log_dir / "error.log").open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
     except Exception:
         pass
 

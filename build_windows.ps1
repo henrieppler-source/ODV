@@ -43,6 +43,19 @@ if (Test-Path "dist\ODV_Updater\ODV_Updater.exe") {
     Copy-Item "dist\ODV_Updater\ODV_Updater.exe" "dist\ODV\ODV_Updater.exe" -Force
 }
 
+if (Test-Path "tools\ghostscript") {
+    New-Item -ItemType Directory -Path "dist\ODV\tools" -Force | Out-Null
+    Copy-Item "tools\ghostscript" "dist\ODV\tools\ghostscript" -Recurse -Force
+    Write-Host "Ghostscript wurde mitgeliefert: dist\ODV\tools\ghostscript"
+} else {
+    Write-Host "Hinweis: tools\ghostscript nicht gefunden. PDF/A und starke PDF-Komprimierung funktionieren nur mit systemweit installiertem Ghostscript."
+}
+if (Test-Path "tools\ghostscript_installer") {
+    New-Item -ItemType Directory -Path "dist\ODV\tools" -Force | Out-Null
+    Copy-Item "tools\ghostscript_installer" "dist\ODV\tools\ghostscript_installer" -Recurse -Force
+    Write-Host "Ghostscript-Installer wurde mitgeliefert: dist\ODV\tools\ghostscript_installer"
+}
+
 Write-Host ""
 Write-Host "Fertig. EXE liegt unter: dist\ODV\ODV.exe"
 Write-Host "Updater liegt unter: dist\ODV\ODV_Updater.exe"

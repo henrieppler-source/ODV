@@ -212,7 +212,7 @@ class UserAdminMixin:
             form,
             text=(
                 "Die Benutzerverwaltung arbeitet jetzt direkt mit der zentralen MySQL-Datenbank über die API.\n"
-                "Passwort leer lassen = bestehendes Passwort beibehalten. Bei neuen Benutzern ist ein Passwort Pflicht."
+                "*** bedeutet: Passwort ist gespeichert. Nur bei Passwortänderung ein neues Passwort eingeben. Bei neuen Benutzern ist ein Passwort Pflicht."
             ),
             wraplength=360,
         )
@@ -362,9 +362,14 @@ class UserAdminMixin:
             name_var.set(user.get("display_name", ""))
             username_var.set(user.get("username", ""))
             email_var.set(user.get("email", "") or "")
-            password_var.set("")
+            password_saved_raw = user.get("password_saved", 1)
+            try:
+                password_saved = int(password_saved_raw or 0) == 1
+            except (TypeError, ValueError):
+                password_saved = bool(password_saved_raw)
+            password_var.set("***" if password_saved else "")
             nextcloud_username_var.set(user.get("nextcloud_username", "") or "")
-            nextcloud_password_var.set("")
+            nextcloud_password_var.set("***" if int(user.get("nextcloud_password_saved", 0) or 0) == 1 else "")
             role_var.set(api_role_label(str(user.get("role", "ortschronist"))))
             place_var.set(user.get("place", "") or "")
             active_var.set(int(user.get("is_active", 0) or 0) == 1)
@@ -391,13 +396,13 @@ class UserAdminMixin:
                 "is_active": bool(active_var.get()),
             }
             nextcloud_password = nextcloud_password_var.get().strip()
-            if nextcloud_password:
+            if nextcloud_password and nextcloud_password != "***":
                 payload["nextcloud_password"] = nextcloud_password
             if include_password:
-                if not password:
+                if not password or password == "***":
                     raise ValueError("Bitte für neue Benutzer ein Passwort erfassen.")
                 payload["password"] = password
-            elif password:
+            elif password and password != "***":
                 payload["password"] = password
             return payload
 

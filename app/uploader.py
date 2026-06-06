@@ -32,14 +32,17 @@ from .session_manager import SessionManagerMixin
 from .help_docs import HelpDocsMixin
 from .history_manager import HistoryManagerMixin
 from .document_pdf_manager import DocumentPdfManagerMixin
+from .pdf_management_manager import PdfManagementManagerMixin
 from .mail_manager import MailManagerMixin
 from .metadata_form_manager import MetadataFormManagerMixin
 from .metadata_helpers import MetadataHelpersMixin
+from .normalization_ui_manager import NormalizationUiManagerMixin
 from .upload_manager import UploadManagerMixin
 from .masterdata_manager import MasterdataManagerMixin
 from .points_year_manager import PointsYearManagerMixin
 from .points_special_manager import PointsSpecialManagerMixin
 from .points_rules_manager import PointsRulesManagerMixin
+from .postprocess_manager import PostprocessManagerMixin
 from .single_instance import acquire_single_instance_lock, release_single_instance_lock
 from .system_status import SystemStatusMixin
 from .ui_state import UiStateMixin
@@ -66,16 +69,19 @@ class OrtschronikUploader(
     PointsYearManagerMixin,
     PointsSpecialManagerMixin,
     PointsRulesManagerMixin,
+    PostprocessManagerMixin,
     MailManagerMixin,
     UserAdminMixin,
     SessionManagerMixin,
     MasterdataManagerMixin,
     ConfigFoldersMixin,
     MetadataHelpersMixin,
+    NormalizationUiManagerMixin,
     UploadTabMixin,
     FileViewManagerMixin,
     FileAccessManagerMixin,
     DocumentPdfManagerMixin,
+    PdfManagementManagerMixin,
     DisplayManagerMixin,
     MetadataFormManagerMixin,
     UploadManagerMixin,

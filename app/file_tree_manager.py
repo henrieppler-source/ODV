@@ -135,13 +135,33 @@ class FileTreeManagerMixin:
             pass
         return any(term in self.normalize_search_text(x) for x in hay)
 
+    def file_matches_current_status_filter(self, path: Path) -> bool:
+        status_var = getattr(self, "file_view_status_var", None)
+        wanted = str(status_var.get() if status_var is not None else "alle").strip()
+        if not wanted or wanted == "alle":
+            return True
+        item = getattr(self, "file_view_metadata_by_path", {}).get(str(path)) or {}
+        status = str(item.get("status") or "ohne").strip()
+        return status == wanted
+
+    def file_is_visible_in_current_tree(self, path: Path) -> bool:
+        return (
+            path.is_file()
+            and not self.is_linked_ocr_file_path(path)
+            and self.visible_pdf_work_file(path)
+            and self.file_matches_current_filter(path)
+            and self.file_matches_current_status_filter(path)
+        )
+
     def is_linked_ocr_file_path(self, path: Path) -> bool:
         """OCR-Arbeitskopien werden über das Original geöffnet, nicht als eigenes Dokument."""
         try:
             if path.suffix.lower() != ".pdf":
                 return False
             if path.stem.lower().endswith("_ocr"):
-                return True
+                base = path.with_name(f"{path.stem[:-4]}.pdf")
+                pdfa = path.with_name(f"{path.stem[:-4]}_pdfa.pdf")
+                return base.exists() or pdfa.exists()
             path_text = str(path)
             for item in getattr(self, "file_view_metadata_items", []) or []:
                 ocr_text = str(item.get("ocr_pdf_path") or item.get("ocr_current_path") or "").strip()
@@ -164,7 +184,7 @@ class FileTreeManagerMixin:
                 readable_target = child if child.is_dir() else folder
                 if not self.is_file_view_path_in_readable_branch(readable_target, base):
                     continue
-                if child.is_file() and not self.is_linked_ocr_file_path(child) and self.file_matches_current_filter(child):
+                if self.file_is_visible_in_current_tree(child):
                     return True
                 if child.is_dir() and self.folder_contains_files(child):
                     return True
@@ -179,6 +199,7 @@ class FileTreeManagerMixin:
             return
         base = Path(self.base_folder_var.get().strip()).expanduser()
         filter_active = bool(self.current_file_view_filter_norm())
+        status_filter_active = bool(str(getattr(getattr(self, "file_view_status_var", None), "get", lambda: "alle")() or "alle").strip() != "alle")
         for child in children:
             if self.is_hidden_system_path(child):
                 continue
@@ -189,7 +210,7 @@ class FileTreeManagerMixin:
 
             if child.is_dir():
                 has_matching_files = self.folder_contains_files(child)
-                if filter_active and not has_matching_files:
+                if (filter_active or status_filter_active) and not has_matching_files:
                     continue
                 tags = ("folder_has_files",) if has_matching_files else ()
                 node = self.file_tree.insert(parent_id, "end", text=child.name, values=(str(child),), open=False, tags=tags)
@@ -198,14 +219,13 @@ class FileTreeManagerMixin:
                 # Systemdatei-Filter und kleinere Root-Auswahl abgefangen.
                 self._add_file_tree_children(node, child, depth + 1)
             else:
-                if self.is_linked_ocr_file_path(child):
+                if not self.file_is_visible_in_current_tree(child):
                     continue
-                if not self.file_matches_current_filter(child):
-                    continue
-                tags = ()
+                display_name = child.name
+                display_name = f"{self.pdf_display_prefix(child)}{display_name}"
                 if str(child) not in self.file_view_metadata_by_path:
-                    tags = ("without_odv_metadata",)
-                self.file_tree.insert(parent_id, "end", text=child.name, values=(str(child),), open=False, tags=tags)
+                    display_name = f"* {display_name}"
+                self.file_tree.insert(parent_id, "end", text=display_name, values=(str(child),), open=False, tags=self.pdf_tree_tags(child))
 
     def on_file_tree_select(self) -> None:
         sel = self.file_tree.selection()
@@ -215,11 +235,19 @@ class FileTreeManagerMixin:
         if not values:
             return
         path = Path(values[0])
+        if path != getattr(self, "file_view_current_path", None):
+            self.file_preview_zoom = 1.0
         self.file_view_current_path = path
         self.file_view_current_metadata = self.file_view_metadata_by_path.get(str(path))
+        if hasattr(self, "update_file_view_preview_tab_visibility"):
+            self.update_file_view_preview_tab_visibility()
         self.show_file_preview()
         self.load_file_view_metadata_form()
         self.update_file_view_ocr_button()
+        if hasattr(self, "update_file_view_admin_actions_for_selection"):
+            self.update_file_view_admin_actions_for_selection()
+        if hasattr(self, "update_admin_openai_controls"):
+            self.update_admin_openai_controls()
 
     def open_selected_file_from_tree(self) -> None:
         """Öffnet die aktuell ausgewählte Datei mit der Standardanwendung des Betriebssystems.
