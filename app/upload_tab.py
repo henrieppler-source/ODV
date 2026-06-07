@@ -342,7 +342,7 @@ class UploadTabMixin:
         ]
         for widget in widgets:
             widget.grid() if show_ai else widget.grid_remove()
-        self.upload_openai_metadata_button.grid() if show_ai else self.upload_openai_metadata_button.grid_remove()
+        self.upload_openai_metadata_button.grid_remove()
 
         show_ocr_create = self.is_upload_image_pdf() and not self.current_upload_ocr_pdf_path()
         show_ocr_open = self.is_upload_image_pdf() and bool(self.current_upload_ocr_pdf_path())
@@ -978,6 +978,7 @@ class UploadTabMixin:
         self.upload_openai_usage_var.set("Verbrauch: 0 Tokens (Cache)")
         if self.openai_metadata_suggestions:
             self.upload_openai_text_var.set("OpenAI: Metadatenvorschläge aus lokalem Cache verfügbar")
+            self.after(0, self.show_upload_openai_apply_dialog_if_available)
             return True
         return False
 
@@ -1066,8 +1067,7 @@ class UploadTabMixin:
             self.after(0, lambda: self.upload_openai_text_var.set(label))
             self.after(0, lambda: self.upload_openai_usage_var.set(usage_text))
             self.after(0, lambda: self.upload_openai_metadata_button.configure(state=metadata_button_state))
-            if auto_apply and useful_metadata:
-                self.after(0, lambda: self.upload_openai_text_var.set(f"{label} – Datensatz prüfen"))
+            self.after(0, self.show_upload_openai_apply_dialog_if_available)
             self.after(0, self.update_upload_status_indicator)
         except OpenAIError as exc:
             self.openai_metadata_suggestions = {}
@@ -1203,6 +1203,25 @@ class UploadTabMixin:
         ttk.Button(buttons, text="Abbrechen", command=dialog.destroy).pack(side="left", padx=4)
         self.wait_window(dialog)
         return result["changed"]
+
+    def show_upload_openai_apply_dialog_if_available(self) -> None:
+        if not self.openai_metadata_suggestions:
+            self.upload_openai_text_var.set("OpenAI: keine Metadatenvorschläge verfügbar")
+            return
+        changed = self.show_upload_openai_apply_dialog(self.openai_metadata_suggestions)
+        if changed is None:
+            self.upload_openai_text_var.set("OpenAI: Übernahme abgebrochen")
+            return
+        if changed:
+            current_fields = list(self.openai_metadata_applied_fields or [])
+            for field in changed:
+                if field not in current_fields:
+                    current_fields.append(field)
+            self.openai_metadata_applied_fields = current_fields
+            self.upload_openai_text_var.set(f"OpenAI: Metadaten übernommen ({', '.join(changed)})")
+            self.update_upload_status_indicator()
+        else:
+            self.upload_openai_text_var.set("OpenAI: Keine neuen Metadaten übernommen")
 
     def _fetch_openai_metadata_suggestions(self) -> None:
         if not self.openai_available() or not self.selected_file:
