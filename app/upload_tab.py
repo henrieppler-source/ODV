@@ -977,8 +977,7 @@ class UploadTabMixin:
         self.upload_openai_metadata_button.configure(state="normal" if self.openai_metadata_suggestions else "disabled")
         self.upload_openai_usage_var.set("Verbrauch: 0 Tokens (Cache)")
         if self.openai_metadata_suggestions:
-            self.apply_openai_metadata_suggestions()
-            self.upload_openai_text_var.set("OpenAI: Metadaten aus lokalem Cache übernommen")
+            self.upload_openai_text_var.set("OpenAI: Metadatenvorschläge aus lokalem Cache verfügbar")
             return True
         return False
 
@@ -1068,7 +1067,7 @@ class UploadTabMixin:
             self.after(0, lambda: self.upload_openai_usage_var.set(usage_text))
             self.after(0, lambda: self.upload_openai_metadata_button.configure(state=metadata_button_state))
             if auto_apply and useful_metadata:
-                self.after(0, self.apply_openai_metadata_suggestions)
+                self.after(0, lambda: self.upload_openai_text_var.set(f"{label} – Datensatz prüfen"))
             self.after(0, self.update_upload_status_indicator)
         except OpenAIError as exc:
             self.openai_metadata_suggestions = {}
@@ -1086,7 +1085,124 @@ class UploadTabMixin:
             self.upload_openai_text_var.set("OpenAI: keine Metadatenvorschläge verfügbar – zuerst „OpenAI prüfen“ drücken")
             self.upload_openai_metadata_button.configure(state="disabled")
             return
-        self.apply_openai_metadata_suggestions()
+        changed = self.show_upload_openai_apply_dialog(self.openai_metadata_suggestions)
+        if changed is None:
+            self.upload_openai_text_var.set("OpenAI: Übernahme abgebrochen")
+            return
+        if changed:
+            current_fields = list(self.openai_metadata_applied_fields or [])
+            for field in changed:
+                if field not in current_fields:
+                    current_fields.append(field)
+            self.openai_metadata_applied_fields = current_fields
+            self.upload_openai_text_var.set(f"OpenAI: Metadaten übernommen ({', '.join(changed)})")
+            self.update_upload_status_indicator()
+        else:
+            self.upload_openai_text_var.set("OpenAI: Keine neuen Metadaten übernommen")
+
+    def current_upload_openai_field_value(self, key: str) -> str:
+        if key == "description":
+            return self.description_text.get("1.0", "end").strip()
+        var = self.meta_vars.get(key)
+        return str(var.get() or "").strip() if var is not None else ""
+
+    def set_upload_openai_field_value(self, key: str, value: str) -> None:
+        value = self.normalize_description_text(value) if key == "description" else str(value or "").strip()
+        if key == "description":
+            self.description_text.delete("1.0", "end")
+            self.description_text.insert("1.0", value)
+            return
+        var = self.meta_vars.get(key)
+        if var is not None:
+            var.set(value)
+
+    def show_upload_openai_apply_dialog(self, suggestions: dict[str, Any]) -> list[str] | None:
+        excluded_fields = {"file_type", "confidence", "advice", "usage"}
+        rows: list[tuple[str, str, str]] = []
+        for key, raw_value in suggestions.items():
+            if key in excluded_fields:
+                continue
+            suggestion = str(raw_value or "").strip()
+            if not suggestion:
+                continue
+            if key == "description":
+                current = self.current_upload_openai_field_value("description")
+            elif key in self.meta_vars:
+                current = self.current_upload_openai_field_value(key)
+            else:
+                continue
+            rows.append((key, current, suggestion))
+
+        if not rows:
+            return []
+
+        dialog = tk.Toplevel(self)
+        dialog.title("OpenAI-Metadaten übernehmen")
+        dialog.transient(self)
+        dialog.geometry("1180x680")
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+        ttk.Label(
+            dialog,
+            text="Wählen Sie je Feld eine Aktion. Keine Auswahl bedeutet: Vorschlag ignorieren.",
+            wraplength=920,
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 8))
+
+        canvas = tk.Canvas(dialog, highlightthickness=0)
+        scroll = ttk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(window, width=e.width))
+        canvas.configure(yscrollcommand=scroll.set)
+        canvas.grid(row=1, column=0, sticky="nsew", padx=(12, 0), pady=4)
+        scroll.grid(row=1, column=1, sticky="ns", pady=4)
+
+        headers = ["Feld", "Aktueller Wert", "OpenAI-Vorschlag", "übernehmen", "überschreiben", "anfügen"]
+        widths = [18, 30, 34, 12, 14, 10]
+        for col, (header, width) in enumerate(zip(headers, widths)):
+            ttk.Label(inner, text=header, font=("", 9, "bold"), width=width).grid(row=0, column=col, sticky="w", padx=4, pady=(0, 6))
+
+        action_vars: dict[str, dict[str, tk.BooleanVar]] = {}
+        for row_index, (key, current, suggestion) in enumerate(rows, start=1):
+            row_vars = {
+                "take": tk.BooleanVar(value=not bool(str(current or "").strip())),
+                "replace": tk.BooleanVar(value=False),
+                "append": tk.BooleanVar(value=False),
+            }
+            action_vars[key] = row_vars
+            row_height = max(self._openai_display_height(current), self._openai_display_height(suggestion))
+            ttk.Label(inner, text=self.admin_openai_field_label(key), width=18).grid(row=row_index, column=0, sticky="nw", padx=4, pady=3)
+            self._readonly_text_widget(inner, current or "-", width=34, height=row_height, background_source=dialog).grid(row=row_index, column=1, sticky="nw", padx=4, pady=3)
+            self._readonly_text_widget(inner, suggestion, width=56, height=row_height, background_source=dialog).grid(row=row_index, column=2, sticky="nw", padx=4, pady=3)
+            ttk.Checkbutton(inner, variable=row_vars["take"], command=lambda vars=row_vars: self._choose_openai_action(vars, "take")).grid(row=row_index, column=3, sticky="n", padx=4, pady=3)
+            ttk.Checkbutton(inner, variable=row_vars["replace"], command=lambda vars=row_vars: self._choose_openai_action(vars, "replace")).grid(row=row_index, column=4, sticky="n", padx=4, pady=3)
+            ttk.Checkbutton(inner, variable=row_vars["append"], command=lambda vars=row_vars: self._choose_openai_action(vars, "append")).grid(row=row_index, column=5, sticky="n", padx=4, pady=3)
+
+        result = {"changed": None}
+
+        def apply_selection() -> None:
+            changed_fields: list[str] = []
+            for key, _current, suggestion in rows:
+                action_items = [action_name for action_name, var in action_vars[key].items() if var.get()]
+                action = action_items[0] if action_items else ""
+                if not action:
+                    continue
+                current = self.current_upload_openai_field_value(key)
+                new_value = self.admin_openai_value_for_action(key, current, suggestion, action)
+                new_value = self.normalize_description_text(new_value) if key == "description" else str(new_value or "").strip()
+                if new_value != current:
+                    self.set_upload_openai_field_value(key, new_value)
+                    changed_fields.append(key)
+            result["changed"] = changed_fields
+            dialog.destroy()
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=2, column=0, columnspan=2, sticky="e", padx=12, pady=(8, 12))
+        ttk.Button(buttons, text="Auswahl übernehmen", command=apply_selection).pack(side="left", padx=4)
+        ttk.Button(buttons, text="Abbrechen", command=dialog.destroy).pack(side="left", padx=4)
+        self.wait_window(dialog)
+        return result["changed"]
 
     def _fetch_openai_metadata_suggestions(self) -> None:
         if not self.openai_available() or not self.selected_file:
@@ -1121,58 +1237,6 @@ class UploadTabMixin:
             self.after(0, lambda: self.upload_openai_text_var.set("OpenAI-Fehler"))
             self.after(0, lambda: self.upload_openai_metadata_button.configure(state="disabled"))
             self.after(0, lambda: self.upload_openai_usage_var.set("Verbrauch: k.A."))
-
-    def apply_openai_metadata_suggestions(self) -> None:
-        suggestions = self.openai_metadata_suggestions or {}
-        if not suggestions:
-            self.upload_openai_text_var.set("OpenAI: Keine Metadatenvorschläge verfügbar")
-            return
-        applied = False
-        applied_fields: list[str] = []
-        for key, value in suggestions.items():
-            if key == "usage":
-                continue
-            if not value:
-                continue
-            if key == "place":
-                current = str(self.meta_vars["place"].get() or "").strip()
-                merged = self.merge_place_values(current, str(value).strip())
-                if merged and merged != current:
-                    self.meta_vars["place"].set(merged)
-                    applied = True
-                    applied_fields.append("place")
-            elif key in self.meta_vars:
-                current = str(self.meta_vars[key].get() or "").strip()
-                merged = self.merge_metadata_values(current, str(value).strip(), separator=", " if key == "keywords" else "; ")
-                if merged != current:
-                    self.meta_vars[key].set(merged)
-                    applied = True
-                    applied_fields.append(key)
-            elif key == "description":
-                current = self.description_text.get("1.0", "end-1c").strip()
-                merged = self.normalize_description_text(self.append_openai_description(current, str(value).strip()))
-                if merged != current:
-                    self.description_text.delete("1.0", "end")
-                    self.description_text.insert("1.0", merged)
-                    applied = True
-                    applied_fields.append("description")
-            elif key == "keywords":
-                current = str(self.meta_vars["keywords"].get() or "").strip()
-                merged = self.merge_metadata_values(current, str(value).strip(), separator=", ")
-                if merged != current:
-                    self.meta_vars["keywords"].set(merged)
-                    applied = True
-                    applied_fields.append("keywords")
-        if applied:
-            current_fields = list(self.openai_metadata_applied_fields or [])
-            for field in applied_fields:
-                if field not in current_fields:
-                    current_fields.append(field)
-            self.openai_metadata_applied_fields = current_fields
-            self.upload_openai_text_var.set("OpenAI: Metadaten übernommen")
-            self.update_upload_status_indicator()
-        else:
-            self.upload_openai_text_var.set("OpenAI: Keine neuen Metadaten übernommen")
 
     def set_upload_status(self, color: str, text: str) -> None:
         self.upload_status_canvas.delete("all")
