@@ -22,7 +22,6 @@ class UserAdminMixin:
         except Exception: pass
         dialog.geometry("1100x620")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(0, weight=1)
 
@@ -223,7 +222,6 @@ class UserAdminMixin:
         try: self.track_window_geometry(dialog, "Benutzerverwaltung")
         except Exception: pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.geometry("1180x620")
         dialog.columnconfigure(0, weight=0)
         dialog.columnconfigure(1, weight=1)
@@ -249,6 +247,12 @@ class UserAdminMixin:
         active_var = tk.BooleanVar(value=True)
         selected_user_id = {"id": None}
         api_users: list[dict] = []
+        refresh_state = {"id": 0}
+        users_status_var = tk.StringVar(value="")
+        users_refresh_button: tk.Button | None = None
+        new_user_button: tk.Button | None = None
+        save_user_button: tk.Button | None = None
+        deactivate_user_button: tk.Button | None = None
 
         labels = [
             ("Name:", name_var),
@@ -324,6 +328,8 @@ class UserAdminMixin:
         vsb = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         vsb.grid(row=0, column=1, sticky="ns")
+        users_status_label = ttk.Label(list_frame, textvariable=users_status_var, foreground="#666666")
+        users_status_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
 
         def api_role_label(role: str) -> str:
             return self.api_role_to_local(role)
@@ -392,32 +398,72 @@ class UserAdminMixin:
             except tk.TclError:
                 pass
 
+        def _set_users_busy_controls(disabled: bool) -> None:
+            target_state = "disabled" if disabled else "normal"
+            for btn in (users_refresh_button, new_user_button, save_user_button, deactivate_user_button):
+                if btn is not None:
+                    try:
+                        btn.configure(state=target_state)
+                    except Exception:
+                        pass
+
         def refresh_tree(select_id: int | None = None):
             nonlocal api_users
-            try:
-                response = self.api.list_users(self.api_token)
-                api_users = list(response.get("users", []))
-            except ApiError as exc:
-                messagebox.showerror("Benutzerverwaltung", f"Benutzer konnten nicht geladen werden:\n{exc}", parent=dialog)
+            if not dialog.winfo_exists():
                 return
-
+            refresh_state["id"] += 1
+            request_id = refresh_state["id"]
+            users_status_var.set("Lade Benutzerdaten …")
+            _set_users_busy_controls(True)
             for item in tree.get_children():
                 tree.delete(item)
-            for user in api_users:
-                uid = str(user.get("id"))
-                tree.insert("", "end", iid=uid, values=(
-                    user.get("display_name", ""),
-                    user.get("username", ""),
-                    user.get("email", "") or "",
-                    api_role_label(str(user.get("role", ""))),
-                    user.get("place", "") or "",
-                    "ja" if int(user.get("is_active", 0) or 0) == 1 else "nein",
-                    user.get("last_login_at", "") or "",
-                ))
-            if select_id is not None and tree.exists(str(select_id)):
-                tree.selection_set(str(select_id))
-                tree.see(str(select_id))
-                load_selected()
+
+            def apply_error(exc: Exception) -> None:
+                if not dialog.winfo_exists():
+                    return
+                if request_id != refresh_state["id"]:
+                    return
+                _set_users_busy_controls(False)
+                users_status_var.set("Benutzer konnten nicht geladen werden.")
+                messagebox.showerror("Benutzerverwaltung", f"Benutzer konnten nicht geladen werden:\n{exc}", parent=dialog)
+
+            def apply_data(users: list[dict]) -> None:
+                if not dialog.winfo_exists():
+                    return
+                if request_id != refresh_state["id"]:
+                    return
+                api_users = users
+                for item in tree.get_children():
+                    tree.delete(item)
+                for user in api_users:
+                    uid = str(user.get("id"))
+                    tree.insert("", "end", iid=uid, values=(
+                        user.get("display_name", ""),
+                        user.get("username", ""),
+                        user.get("email", "") or "",
+                        api_role_label(str(user.get("role", ""))),
+                        user.get("place", "") or "",
+                        "ja" if int(user.get("is_active", 0) or 0) == 1 else "nein",
+                        user.get("last_login_at", "") or "",
+                    ))
+                if select_id is not None and tree.exists(str(select_id)):
+                    tree.selection_set(str(select_id))
+                    tree.see(str(select_id))
+                    load_selected()
+                users_status_var.set(f"{len(api_users)} Benutzer geladen")
+                _set_users_busy_controls(False)
+
+            def worker() -> None:
+                try:
+                    response = self.api.list_users(self.api_token)
+                    users = list(response.get("users", []))
+                except Exception as exc:
+                    app_log_exception("Benutzerliste konnte nicht geladen werden", exc)
+                    self.after(0, lambda exc=exc: apply_error(exc))
+                    return
+                self.after(0, lambda users=users: apply_data(users))
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def find_loaded_user(user_id: int) -> dict | None:
             for user in api_users:
@@ -543,10 +589,14 @@ class UserAdminMixin:
 
         btns = ttk.Frame(form)
         btns.grid(row=11, column=0, columnspan=2, sticky="ew", pady=8)
-        ttk.Button(btns, text="Neu", command=clear_form).pack(side="left", padx=4)
-        ttk.Button(btns, text="Benutzer speichern", command=save_user).pack(side="left", padx=4)
-        ttk.Button(btns, text="Benutzer deaktivieren", command=deactivate_user).pack(side="left", padx=4)
-        ttk.Button(btns, text="Liste aktualisieren", command=lambda: refresh_tree()).pack(side="left", padx=4)
+        new_user_button = ttk.Button(btns, text="Neu", command=clear_form)
+        new_user_button.pack(side="left", padx=4)
+        save_user_button = ttk.Button(btns, text="Benutzer speichern", command=save_user)
+        save_user_button.pack(side="left", padx=4)
+        deactivate_user_button = ttk.Button(btns, text="Benutzer deaktivieren", command=deactivate_user)
+        deactivate_user_button.pack(side="left", padx=4)
+        users_refresh_button = ttk.Button(btns, text="Liste aktualisieren", command=lambda: refresh_tree())
+        users_refresh_button.pack(side="left", padx=4)
 
         tree.bind("<<TreeviewSelect>>", load_selected)
         refresh_tree()
