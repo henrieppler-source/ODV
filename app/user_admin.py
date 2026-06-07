@@ -366,6 +366,8 @@ class UserAdminMixin:
 
         def load_user_permissions(user_id: int, role_label: str) -> None:
             set_permission_widgets(default_permission_values(role_label))
+            if user_id <= 0:
+                return
             try:
                 response = self.api.get_folder_permissions(self.api_token, user_id)
                 perms = {}
@@ -465,36 +467,68 @@ class UserAdminMixin:
 
             threading.Thread(target=worker, daemon=True).start()
 
-        def find_loaded_user(user_id: int) -> dict | None:
+        def _to_int_user_id(user_id: object) -> int:
+            text = str(user_id or "").strip()
+            if not text:
+                return 0
+            try:
+                return int(text)
+            except (TypeError, ValueError):
+                return 0
+
+        def find_loaded_user(user_id: str) -> dict | None:
+            user_id_text = str(user_id or "").strip()
             for user in api_users:
-                if int(user.get("id", 0)) == int(user_id):
+                if str(user.get("id") or "").strip() == user_id_text:
                     return user
             return None
+
+        def to_bool_value(value: object, default: bool = False) -> bool:
+            if isinstance(value, bool):
+                return value
+            if value is None:
+                return default
+            if isinstance(value, (int, float)):
+                return int(value) == 1
+            text = str(value).strip().lower()
+            if not text:
+                return default
+            if text in {"1", "true", "yes", "y", "on", "ja"}:
+                return True
+            if text in {"0", "false", "no", "n", "off", "nein"}:
+                return False
+            if text in {"true", "false"}:
+                return text == "true"
+            return default
+
+        def update_selected_user_fields(user: dict) -> None:
+            name_var.set(str(user.get("display_name", "") or ""))
+            username_var.set(str(user.get("username", "") or ""))
+            email_var.set(str(user.get("email", "") or ""))
+            password_saved = to_bool_value(user.get("password_saved"), default=True)
+            password_var.set("***" if password_saved else "")
+            nextcloud_username_var.set(str(user.get("nextcloud_username", "") or ""))
+            nextcloud_password_var.set("***" if to_bool_value(user.get("nextcloud_password_saved")) else "")
+            role_var.set(api_role_label(str(user.get("role", "ortschronist"))))
+            place_var.set(str(user.get("place", "") or ""))
+            active_var.set(to_bool_value(user.get("is_active", 1), default=False))
+            load_user_permissions(_to_int_user_id(user.get("id")), role_var.get())
 
         def load_selected(_event=None):
             sel = tree.selection()
             if not sel:
                 return
-            user_id = int(sel[0])
+            user_id = str(sel[0]).strip()
             selected_user_id["id"] = user_id
             user = find_loaded_user(user_id)
             if not user:
                 return
-            name_var.set(user.get("display_name", ""))
-            username_var.set(user.get("username", ""))
-            email_var.set(user.get("email", "") or "")
-            password_saved_raw = user.get("password_saved", 1)
             try:
-                password_saved = int(password_saved_raw or 0) == 1
-            except (TypeError, ValueError):
-                password_saved = bool(password_saved_raw)
-            password_var.set("***" if password_saved else "")
-            nextcloud_username_var.set(user.get("nextcloud_username", "") or "")
-            nextcloud_password_var.set("***" if int(user.get("nextcloud_password_saved", 0) or 0) == 1 else "")
-            role_var.set(api_role_label(str(user.get("role", "ortschronist"))))
-            place_var.set(user.get("place", "") or "")
-            active_var.set(int(user.get("is_active", 0) or 0) == 1)
-            load_user_permissions(user_id, role_var.get())
+                update_selected_user_fields(user)
+            except Exception as exc:
+                app_log_exception("Benutzerdaten konnten nicht geladen werden", exc)
+                messagebox.showerror("Benutzerverwaltung", f"Ausgewählten Benutzer können nicht geladen werden:\n{exc}", parent=dialog)
+                clear_form()
 
         def build_payload(include_password: bool) -> dict:
             name = name_var.get().strip()
@@ -555,10 +589,14 @@ class UserAdminMixin:
                             parent=dialog,
                         )
                         return
-                    self.api.update_user(self.api_token, int(user_id), payload)
-                    self.api.update_folder_permissions(self.api_token, int(user_id), current_permission_payload())
+                    user_id_int = _to_int_user_id(user_id)
+                    if user_id_int <= 0:
+                        messagebox.showerror("Benutzer speichern", "Ungültige Benutzerkennung.", parent=dialog)
+                        return
+                    self.api.update_user(self.api_token, user_id_int, payload)
+                    self.api.update_folder_permissions(self.api_token, user_id_int, current_permission_payload())
                     messagebox.showinfo("Benutzerverwaltung", "Benutzer wurde in der zentralen Datenbank gespeichert.", parent=dialog)
-                    refresh_tree(select_id=int(user_id))
+                    refresh_tree(select_id=user_id_int)
                 add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Benutzerverwaltung API", f"{name_var.get().strip()} / {username_var.get().strip()}"))
                 self.refresh_history()
             except ValueError as exc:
@@ -579,9 +617,13 @@ class UserAdminMixin:
             try:
                 payload = build_payload(include_password=False)
                 payload["is_active"] = False
-                self.api.update_user(self.api_token, int(user_id), payload)
+                user_id_int = _to_int_user_id(user_id)
+                if user_id_int <= 0:
+                    messagebox.showerror("Benutzer deaktivieren", "Ungültige Benutzerkennung.", parent=dialog)
+                    return
+                self.api.update_user(self.api_token, user_id_int, payload)
                 active_var.set(False)
-                refresh_tree(select_id=int(user_id))
+                refresh_tree(select_id=user_id_int)
                 add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Benutzer deaktiviert API", username_var.get().strip()))
                 self.refresh_history()
             except (ValueError, ApiError) as exc:
