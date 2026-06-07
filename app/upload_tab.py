@@ -32,6 +32,7 @@ from .app_logging import app_log, app_log_exception
 from .config import (
     APP_DIR,
     OPENAI_DEFAULT_MODEL,
+    OPENAI_MODEL_OPTIONS,
     OPENAI_PDF_SAMPLE_PAGES,
     OPENAI_TEXT_SAMPLE_CHARS,
     OPENAI_USAGE_MODELS,
@@ -273,15 +274,84 @@ class UploadTabMixin:
             value = min(max_value, value)
         return value
 
-    def openai_client(self) -> OpenAIClient | None:
+    def openai_client(self, model_name: str | None = None) -> OpenAIClient | None:
         api_key = self.config_data.get("openai_api_key", "").strip()
         if not api_key:
             return None
         if str(self.current_role()).strip().lower() in {"admin", "superadmin"}:
-            model = self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL)
+            model = str(model_name or self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL) or OPENAI_DEFAULT_MODEL).strip()
         else:
             model = OPENAI_DEFAULT_MODEL
         return OpenAIClient(api_key=api_key, model=model or OPENAI_DEFAULT_MODEL)
+
+    def upload_openai_model_choices(self, cached_model: str | None = None) -> list[str]:
+        models: list[str] = []
+        current = str(self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL) or OPENAI_DEFAULT_MODEL).strip() or OPENAI_DEFAULT_MODEL
+        for model in (current, *OPENAI_MODEL_OPTIONS, str(cached_model or "").strip()):
+            if not model:
+                continue
+            if model not in models:
+                models.append(model)
+        return models
+
+    def choose_upload_openai_model(self, cached_model: str | None = None) -> str:
+        current_model = str(self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL) or OPENAI_DEFAULT_MODEL).strip() or OPENAI_DEFAULT_MODEL
+        cached_model = str(cached_model or "").strip()
+        model_values = self.upload_openai_model_choices(cached_model)
+        if not model_values:
+            model_values = [current_model]
+
+        dialog = tk.Toplevel(self)
+        dialog.title("OpenAI-Modell wählen")
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.geometry("540x200")
+        dialog.columnconfigure(0, weight=1)
+
+        intro_parts = [f"Aktuelles Standardmodell: {current_model}"]
+        if cached_model:
+            intro_parts.append(f"Gespeichertes Ergebnis ist mit Modell: {cached_model}")
+        intro_parts.append("Wählen Sie das Modell für die Prüfung.")
+        ttk.Label(dialog, text=" | ".join(intro_parts), wraplength=500).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 8))
+
+        ttk.Label(dialog, text="OpenAI-Modell:").grid(row=1, column=0, sticky="w", padx=12)
+        model_var = tk.StringVar(value=current_model if current_model in model_values else model_values[0])
+        ttk.Combobox(dialog, textvariable=model_var, values=model_values, state="readonly").grid(row=2, column=0, sticky="ew", padx=12)
+        dialog.columnconfigure(0, weight=1)
+
+        info_var = tk.StringVar(value="")
+        info_label = ttk.Label(dialog, textvariable=info_var, foreground="#555555", wraplength=500)
+        info_label.grid(row=3, column=0, sticky="w", padx=12, pady=(8, 8))
+
+        result = {"model": ""}
+
+        def apply_choice() -> None:
+            result["model"] = model_var.get().strip()
+            dialog.destroy()
+
+        def update_info(*_args) -> None:
+            chosen = model_var.get().strip()
+            if cached_model and chosen == cached_model:
+                info_var.set("Gespeicherte Vorschläge werden verwendet (falls vorhanden).")
+                action_button.configure(text="Gespeicherte Vorschläge anzeigen")
+            else:
+                if chosen:
+                    info_var.set(f"Es wird ein neuer OpenAI-Lauf mit „{chosen}“ gestartet.")
+                    action_button.configure(text="Mit OpenAI prüfen")
+                else:
+                    info_var.set("Bitte wählen Sie ein Modell.")
+                    action_button.configure(text="Modell wählen")
+
+        buttons = ttk.Frame(dialog)
+        buttons.grid(row=4, column=0, sticky="e", padx=12, pady=(2, 12))
+        action_button = ttk.Button(buttons, text="Modell wählen", command=apply_choice)
+        action_button.pack(side="left", padx=4)
+        ttk.Button(buttons, text="Abbrechen", command=dialog.destroy).pack(side="left", padx=4)
+
+        model_var.trace_add("write", update_info)
+        update_info()
+        self.wait_window(dialog)
+        return result["model"]
 
     def is_upload_text_or_pdf_document(self, path: Path | None = None) -> bool:
         path = path or self.selected_file
@@ -967,9 +1037,12 @@ class UploadTabMixin:
         )
         self.save_openai_metadata_cache(data)
 
-    def apply_cached_openai_metadata_if_available(self) -> bool:
+    def apply_cached_openai_metadata_if_available(self, model_name: str | None = None) -> bool:
         cached = self.cached_openai_metadata_for_current_file()
         if not cached:
+            return False
+        cached_model = str(cached.get("model") or "").strip()
+        if model_name and cached_model and model_name != cached_model:
             return False
         metadata = cached.get("metadata") if isinstance(cached.get("metadata"), dict) else {}
         self.openai_metadata_suggestions = {k: v for k, v in metadata.items() if str(v or "").strip()}
@@ -1001,22 +1074,36 @@ class UploadTabMixin:
             self.upload_openai_text_var.set("OpenAI: keine Einzeldatei ausgewählt")
             self.upload_openai_usage_var.set("Verbrauch: k.A.")
             return
-        if self.apply_cached_openai_metadata_if_available():
+
+        cached = self.cached_openai_metadata_for_current_file()
+        cached_model = str(cached.get("model") or "").strip() if isinstance(cached, dict) else ""
+        selected_model = ""
+        if self.is_current_admin() and not auto_apply:
+            selected_model = self.choose_upload_openai_model(cached_model)
+            if not selected_model:
+                self.upload_openai_text_var.set("OpenAI: Prüfung durch Benutzer abgebrochen")
+                self.upload_openai_usage_var.set("Verbrauch: k.A.")
+                return
+            if cached_model and selected_model == cached_model and self.apply_cached_openai_metadata_if_available(selected_model):
+                self.update_upload_status_indicator()
+                return
+        elif cached_model and self.apply_cached_openai_metadata_if_available():
             self.update_upload_status_indicator()
             return
+
         if not self.openai_available():
             self.upload_openai_text_var.set("OpenAI: nicht konfiguriert")
             self.upload_openai_usage_var.set("Verbrauch: k.A.")
             return
         self.upload_openai_text_var.set("OpenAI prüft …")
         self.upload_openai_usage_var.set("Verbrauch: k.A.")
-        thread = threading.Thread(target=self._run_openai_check, args=(auto_apply,), daemon=True)
+        thread = threading.Thread(target=self._run_openai_check, args=(auto_apply, selected_model), daemon=True)
         thread.start()
 
-    def _run_openai_check(self, auto_apply: bool = False) -> None:
+    def _run_openai_check(self, auto_apply: bool = False, model: str | None = None) -> None:
         if not self.openai_available() or not self.selected_file:
             return
-        client = self.openai_client()
+        client = self.openai_client(model)
         if client is None:
             return
         self.openai_metadata_source_model = client.model
@@ -1061,7 +1148,7 @@ class UploadTabMixin:
             else:
                 label += " – keine übernehmbaren Metadaten gefunden"
 
-            usage_text = self.format_openai_usage(result.get("usage", {}))
+            usage_text = self.format_openai_usage(result.get("usage", {}), model_name=client.model)
             self.store_openai_metadata_cache(analysis_file, useful_metadata, result.get("usage", {}), client.model)
             metadata_button_state = "normal" if useful_metadata else "disabled"
             self.after(0, lambda: self.upload_openai_text_var.set(label))
