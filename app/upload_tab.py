@@ -278,10 +278,9 @@ class UploadTabMixin:
         api_key = self.config_data.get("openai_api_key", "").strip()
         if not api_key:
             return None
-        if str(self.current_role()).strip().lower() in {"admin", "superadmin"}:
-            model = str(model_name or self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL) or OPENAI_DEFAULT_MODEL).strip()
-        else:
-            model = OPENAI_DEFAULT_MODEL
+        model = str(self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL) or OPENAI_DEFAULT_MODEL).strip() or OPENAI_DEFAULT_MODEL
+        if str(self.current_role()).strip().lower() in {"admin", "superadmin"} and model_name:
+            model = str(model_name).strip() or model
         return OpenAIClient(api_key=api_key, model=model or OPENAI_DEFAULT_MODEL)
 
     def upload_openai_model_choices(self, cached_model: str | None = None) -> list[str]:
