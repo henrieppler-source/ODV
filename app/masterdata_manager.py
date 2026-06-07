@@ -29,7 +29,6 @@ class MasterdataManagerMixin:
         try: self.track_window_geometry(dialog, "Ortsordner-Stammdaten")
         except Exception: pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.geometry("760x520")
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(0, weight=1)
@@ -156,7 +155,6 @@ class MasterdataManagerMixin:
         try: self.track_window_geometry(dialog, "Archiv/Sammlung-Stammdaten")
         except Exception: pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.geometry("720x520")
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)
@@ -233,7 +231,6 @@ class MasterdataManagerMixin:
             merge_dialog = tk.Toplevel(dialog)
             merge_dialog.title("Verschmelzen")
             merge_dialog.transient(dialog)
-            merge_dialog.grab_set()
             merge_dialog.columnconfigure(0, weight=1)
             target_var = tk.StringVar(value=choices[0])
             info_var = tk.StringVar()
@@ -318,7 +315,6 @@ class MasterdataManagerMixin:
         except Exception: pass
         dialog.geometry("860x620")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(3, weight=1)
 
@@ -544,7 +540,6 @@ class MasterdataManagerMixin:
         try: self.track_window_geometry(dialog, "Lokale Sicherungsdateien prüfen/bereinigen")
         except Exception: pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.geometry("1150x620")
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)

@@ -26,7 +26,6 @@ class NormalizationUiManagerMixin:
         except Exception:
             pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(1, weight=1)
         dialog.rowconfigure(1, weight=1)
 

@@ -338,7 +338,6 @@ class AppUpdateMixin:
         except Exception:
             pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(1, weight=1)
         frame = ttk.Frame(dialog, padding=12)
         frame.grid(row=0, column=0, sticky="nsew")

@@ -194,7 +194,6 @@ class AdminUiManagerMixin:
         try: self.track_window_geometry(dialog, "Admin-Einstellungen")
         except Exception: pass
         dialog.transient(self)
-        dialog.grab_set()
         dialog.geometry("920x720")
         dialog.minsize(880, 640)
         dialog.resizable(True, True)

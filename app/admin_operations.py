@@ -255,7 +255,6 @@ class AdminOperationsMixin:
         except Exception: pass
         dialog.geometry("860x560")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(3, weight=1)
 
@@ -395,7 +394,6 @@ class AdminOperationsMixin:
         except Exception: pass
         dialog.geometry("560x260")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
 
         ttk.Label(dialog, text="Betriebsmodus", font=("", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 6))
@@ -453,7 +451,6 @@ class AdminOperationsMixin:
         except Exception: pass
         dialog.geometry("820x520")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)
 
@@ -543,7 +540,6 @@ class AdminOperationsMixin:
         except Exception: pass
         dialog.geometry("820x520")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(2, weight=1)
 
@@ -630,7 +626,6 @@ class AdminOperationsMixin:
         except Exception: pass
         dialog.geometry("620x360")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         frm = ttk.Frame(dialog, padding=14)
         frm.grid(row=0, column=0, sticky="nsew")
@@ -713,7 +708,6 @@ class AdminOperationsMixin:
         except Exception: pass
         dialog.geometry("760x460")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         warning = (
             "Diese Funktion löscht Bewegungs-/Testdaten aus der zentralen Datenbank.\n\n"

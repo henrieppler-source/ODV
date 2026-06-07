@@ -261,7 +261,6 @@ class MailManagerMixin:
         except Exception: pass
         dialog.geometry("1180x700")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
         dialog.rowconfigure(1, weight=1)
         ttk.Label(dialog, text="Welche Rundmail ging wann an wen? Die Historie wird serverseitig gespeichert.", wraplength=1100).grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
@@ -369,7 +368,6 @@ class MailManagerMixin:
         except Exception: pass
         dialog.geometry("1060x720")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=0)
         dialog.columnconfigure(1, weight=1)
         dialog.rowconfigure(0, weight=1)
@@ -554,7 +552,6 @@ class MailManagerMixin:
         except Exception: pass
         dialog.geometry("980x640")
         dialog.transient(self)
-        dialog.grab_set()
         dialog.columnconfigure(0, weight=0)
         dialog.columnconfigure(1, weight=1)
         dialog.rowconfigure(0, weight=1)
@@ -1044,7 +1041,6 @@ class MailManagerMixin:
             picker = tk.Toplevel(dialog)
             picker.title("Datum wählen")
             picker.transient(dialog)
-            picker.grab_set()
             picker.resizable(False, False)
             picker.columnconfigure(0, weight=1)
 
