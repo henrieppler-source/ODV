@@ -154,15 +154,18 @@ def _roemhild_place_tokens() -> set[str]:
 
 
 def _build_filename_cleanup_tokens(place_part: str, place_candidates: list[str] | None = None) -> set[str]:
+    place_part = normalize_filename_component(place_part)
     tokens = {normalize_filename_component(t) for t in (place_part or "").split("_") if t}
     cleaned_candidates = {token for token in (place_candidates or []) if token}
-    if place_part in {"andere_orte", "andere_Orte", "andere Orte", "other_places"}:
+    if place_part in {"andere_orte", "other_places"}:
         tokens.update({"andere", "orte"})
         tokens.update(cleaned_candidates)
         return tokens
 
-    if place_part in {"Gemeinden_Römhild", "Gemeinden_Roemhild", "gemeinden_roemhild", "roemhild"}:
+    if place_part in {"gemeinden_roemhild", "roemhild"}:
         tokens.update({"gemeinden", "roemhild"})
+        # Remove old "andere_orte"-Artefakte, falls vorhandene Dateinamen aus älteren Logiken übernommen wurden.
+        tokens.update({"andere", "orte"})
         roemhild_tokens = _roemhild_place_tokens()
         tokens.update(cleaned_candidates.intersection(roemhild_tokens))
         return tokens
