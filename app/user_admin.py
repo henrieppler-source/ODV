@@ -534,6 +534,22 @@ class UserAdminMixin:
             user = users_by_iid.get(user_id)
             if user is None and not user_id.startswith("row-"):
                 user = find_loaded_user(user_id)
+            if user is None:
+                try:
+                    index = tree.index(sel[0])
+                    if 0 <= index < len(api_users):
+                        user = api_users[index]
+                except Exception:
+                    user = None
+            if user is None:
+                item = tree.item(sel[0], "values")
+                if item:
+                    if api_users and item[1]:
+                        candidate = str(item[1]).strip()
+                        for candidate_user in api_users:
+                            if str(candidate_user.get("username", "")) == candidate:
+                                user = candidate_user
+                                break
             if not user:
                 return
             try:
