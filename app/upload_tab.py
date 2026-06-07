@@ -120,6 +120,14 @@ class UploadTabMixin:
             command=self.clear_selected_upload_file,
             width=file_select_button_width - 2,
         ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        self.open_selected_upload_file_button = ttk.Button(
+            file_button_frame,
+            text="Dokument öffnen",
+            command=self.open_selected_upload_file,
+            width=file_select_button_width,
+            state="disabled",
+        )
+        self.open_selected_upload_file_button.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(6, 0))
         file_button_frame.columnconfigure(0, weight=1)
 
         self.open_file_openai_button = ttk.Button(
@@ -417,6 +425,7 @@ class UploadTabMixin:
         show_ocr_open = self.is_upload_image_pdf() and bool(self.current_upload_ocr_pdf_path())
         self.upload_ocr_pdf_button.grid() if show_ocr_create else self.upload_ocr_pdf_button.grid_remove()
         self.upload_show_ocr_pdf_button.grid() if show_ocr_open else self.upload_show_ocr_pdf_button.grid_remove()
+        self.open_selected_upload_file_button.configure(state=("normal" if self.selected_file else "disabled"))
 
     def clear_upload_form(self, keep_target_folder: bool = True) -> None:
         selected_target = self.target_folder_var.get()
@@ -607,6 +616,18 @@ class UploadTabMixin:
             messagebox.showwarning("OCR anzeigen", "Zu dieser Datei ist noch kein OCR-PDF verknüpft.")
             return
         self.open_file_with_default_app(path)
+
+    def open_selected_upload_file(self) -> None:
+        if self.selected_folder is not None:
+            messagebox.showwarning("Dokument öffnen", "Es ist ein Ordner für den Upload ausgewählt.")
+            return
+        if not self.selected_file:
+            messagebox.showwarning("Dokument öffnen", "Bitte zuerst eine Datei auswählen.")
+            return
+        if not self.selected_file.exists():
+            messagebox.showwarning("Dokument öffnen", f"Die Datei ist nicht mehr vorhanden:\n{self.selected_file}")
+            return
+        self.open_file_with_default_app(self.selected_file)
 
     def extract_upload_text_sample(self, path: Path | None, max_chars: int = 4000, max_pdf_pages: int = OPENAI_PDF_SAMPLE_PAGES) -> str | None:
         """Liest einen kurzen Textauszug für OpenAI und lokale Metadatenableitung.
