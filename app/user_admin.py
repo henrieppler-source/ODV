@@ -526,6 +526,27 @@ class UserAdminMixin:
                 "is_active": 1 if str(fallback_values[5]).strip().lower() in {"ja", "true", "1", "yes"} else 0,
             }
 
+        def _resolve_user_record(iid: str) -> dict | None:
+            user = users_by_iid.get(iid)
+            if isinstance(user, dict):
+                return user
+            base_iid = str(iid).split("#", 1)[0]
+            for candidate in api_users:
+                if str(candidate.get("id") or "").strip() == str(iid).strip():
+                    return candidate
+                if str(candidate.get("id") or "").strip() == base_iid:
+                    return candidate
+            try:
+                selected_item = tree.item(iid, "values")
+                selected_username = str(selected_item[1] or "").strip()
+                if selected_username:
+                    for candidate in api_users:
+                        if str(candidate.get("username", "")).strip() == selected_username:
+                            return candidate
+            except Exception:
+                pass
+            return None
+
         def update_selected_user_fields(user: dict) -> None:
             name_var.set(str(user.get("display_name", "") or ""))
             username_var.set(str(user.get("username", "") or ""))
@@ -553,41 +574,17 @@ class UserAdminMixin:
                 return
             user_id = str(iid).strip()
             selected_user_id["id"] = user_id
-            user = users_by_iid.get(iid)
-            if user is None:
-                try:
-                    index = tree.get_children().index(iid)
-                    if 0 <= index < len(api_users):
-                        user = api_users[index]
-                except Exception:
-                    user = None
+            user = _resolve_user_record(user_id)
             if user is None:
                 item = tree.item(iid, "values")
-                if item:
-                    if api_users and item[1]:
-                        candidate = str(item[1]).strip()
-                        for candidate_user in api_users:
-                            if str(candidate_user.get("username", "")) == candidate:
-                                user = candidate_user
-                                break
-            if user is None:
-                item = tree.item(iid, "values")
-                if item:
-                    user = {
-                        "display_name": str(item[0] or ""),
-                        "username": str(item[1] or ""),
-                        "email": str(item[2] or ""),
-                        "role": str(item[3] or ""),
-                        "place": str(item[4] or ""),
-                        "is_active": 1 if str(item[5]).strip().lower() in {"ja", "true", "1", "yes"} else 0,
-                    }
+                user = _coerce_user_record(None, item if isinstance(item, tuple) else None)
             if not user:
                 users_status_var.set("Auswahl konnte nicht aufgelöst werden.")
                 return
             try:
                 item_values = tree.item(iid, "values")
                 users_status_var.set(f"Ausgewählt: {str(item_values[1] if item_values else '')}")
-                update_selected_user_fields(_coerce_user_record(user, item_values))
+                update_selected_user_fields(user)
             except Exception as exc:
                 app_log_exception("Benutzerdaten konnten nicht geladen werden", exc)
                 messagebox.showerror("Benutzerverwaltung", f"Ausgewählten Benutzer können nicht geladen werden:\n{exc}", parent=dialog)
