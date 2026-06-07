@@ -24,7 +24,7 @@ class FileTreeManagerMixin:
         self.file_view_filter_var.set("")
         self.refresh_file_view_tree()
 
-    def refresh_file_view_folder_choices(self) -> None:
+    def refresh_file_view_folder_choices(self, build_tree: bool = True) -> None:
         base = self.nextcloud_base_path(show_message=False)
         self.file_view_folder_map = {}
         if base is not None and base.exists():
@@ -58,7 +58,8 @@ class FileTreeManagerMixin:
                         selected = label
                         break
                 self.file_view_root_var.set(selected or values[0])
-            self.refresh_file_view_tree()
+            if build_tree:
+                self.refresh_file_view_tree()
 
     def on_file_view_root_selected(self) -> None:
         self.config_data["file_view_root"] = self.file_view_root_var.get().strip()

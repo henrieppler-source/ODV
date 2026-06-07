@@ -187,7 +187,7 @@ class FileViewManagerMixin:
 
     def _initialize_file_view_data(self) -> None:
         try:
-            self.refresh_file_view_folder_choices()
+            self.refresh_file_view_folder_choices(build_tree=False)
         except Exception as exc:
             app_log_exception("Dateiansicht Ordnerauswahl konnte nicht initialisiert werden", exc)
         try:
