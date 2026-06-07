@@ -78,6 +78,7 @@ class PathPolicyManagerMixin:
             "03_INFORMATION": {"read": True, "write": False},
             "05_ORGA_CHRONISTEN": {"read": False, "write": False},
             "06_UNSERE_ARBEITEN": {"read": True, "write": True},
+            "99_ARCHIV": {"read": False, "write": False},
             "OWN_PLACE_FOLDER": {"read": True, "write": True},
             "OTHER_PLACE_FOLDERS": {"read": False, "write": False},
         }
@@ -121,8 +122,8 @@ class PathPolicyManagerMixin:
 
     def folder_permission_group(self, folder: Path, base: Path) -> str | None:
         """Ermittelt die fachliche Ordnergruppe auch dann, wenn die ODV-Struktur
-        nicht direkt im Nextcloud-Stamm liegt, sondern z. B. unter
-        Ortschronisten_Gemeinsam\00_ORTSCHRONIK.
+        nicht direkt im Nextcloud-Stamm liegt, sondern unter fachlich definierten
+        Gruppenordnern (z. B. unter 00_ORTSCHRONIK).
         """
         try:
             rel_parts = folder.relative_to(base).parts
@@ -138,6 +139,7 @@ class PathPolicyManagerMixin:
             "03_INFORMATION",
             "05_ORGA_CHRONISTEN",
             "06_UNSERE_ARBEITEN",
+            "99_ARCHIV",
         ]
         normalized_parts = [self.normalize_folder_token(part) for part in rel_parts]
         for name in fixed:
@@ -190,16 +192,6 @@ class PathPolicyManagerMixin:
         Der lokale Nextcloud-Schreibtest bleibt technische Plausibilitätsprüfung.
         Die fachliche Freigabe erfolgt über Ordnergruppenrechte.
         """
-        try:
-            rel_parts = folder.relative_to(base).parts
-            if (
-                self.current_role() not in {"Admin", "Superadmin"}
-                and rel_parts
-                and self.normalize_folder_token(rel_parts[0]) == self.normalize_folder_token("Ortschronisten_Gemeinsam")
-            ):
-                return False
-        except Exception:
-            pass
         if self.is_odv_update_path(folder) or any(str(part).upper() == "_ARCHIV" for part in folder.parts):
             return False
         if self.current_role() == "Superadmin":

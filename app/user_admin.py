@@ -368,6 +368,7 @@ class UserAdminMixin:
                 "03_INFORMATION": {"read": True, "write": False},
                 "05_ORGA_CHRONISTEN": {"read": False, "write": False},
                 "06_UNSERE_ARBEITEN": {"read": True, "write": True},
+                "99_ARCHIV": {"read": False, "write": False},
                 "OWN_PLACE_FOLDER": {"read": True, "write": True},
                 "OTHER_PLACE_FOLDERS": {"read": False, "write": False},
             }

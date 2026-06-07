@@ -108,6 +108,7 @@ class OrtschronikUploader(
         ("03_INFORMATION", "03_INFORMATION"),
         ("05_ORGA_CHRONISTEN", "05_ORGA_CHRONISTEN"),
         ("06_UNSERE_ARBEITEN", "06_UNSERE_ARBEITEN"),
+        ("99_ARCHIV", "99_ARCHIV"),
         ("OWN_PLACE_FOLDER", "Eigener Ortsordner"),
         ("OTHER_PLACE_FOLDERS", "Andere Ortsordner"),
     ]
