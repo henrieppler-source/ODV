@@ -726,6 +726,7 @@ class PdfManagementManagerMixin:
         scroll.grid(row=3, column=1, sticky="ns", padx=(0, 12), pady=(0, 12))
         row_by_iid: dict[str, dict[str, str]] = {}
         sort_state = {"column": "work_size", "descending": True}
+        load_state = {"id": 0}
 
         def selected_root() -> Path | None:
             label = folder_var.get().strip()
@@ -770,22 +771,68 @@ class PdfManagementManagerMixin:
         def populate() -> None:
             for iid in tree.get_children():
                 tree.delete(iid)
-            row_by_iid.clear()
-            rows = self.pdf_report_rows(selected_root())
-            threshold = min_size_mb()
-            if threshold:
-                rows = [row for row in rows if float(row.get("work_size_mb") or 0) > threshold]
-            rows.sort(key=lambda row: sort_key(row, sort_state["column"]), reverse=bool(sort_state["descending"]))
+            load_state["id"] += 1
+            request_id = load_state["id"]
+            current_root = selected_root()
+            current_sort = sort_state["column"]
+            current_descending = bool(sort_state["descending"])
             try:
-                log_path = self.write_pdf_size_log(rows)
-            except Exception as exc:
-                app_log_exception("PDF-Größenlog konnte nicht geschrieben werden", exc)
-                log_path = None
-            status_var.set(f"{len(rows)} PDF-Arbeitsdatei(en) gefunden" + (f" | Log: {log_path}" if log_path else ""))
-            update_headings()
-            for row in rows:
-                iid = tree.insert("", "end", values=(row["name"], row["nextcloud_path"], row["local_available"], row["work_size"], row["original_size"], row["optimized_by_odv"], row["pdfa_size"], row["ocr_size"]))
-                row_by_iid[str(iid)] = row
+                threshold = min_size_mb()
+            except Exception:
+                threshold = 0.0
+            status_var.set("PDF-Übersicht wird geladen …")
+            row_by_iid.clear()
+
+            def worker() -> None:
+                try:
+                    rows = self.pdf_report_rows(current_root)
+                    if threshold:
+                        rows = [row for row in rows if float(row.get("work_size_mb") or 0) > threshold]
+                    rows.sort(key=lambda row: sort_key(row, current_sort), reverse=bool(current_descending))
+                    try:
+                        log_path = self.write_pdf_size_log(rows)
+                    except Exception as exc:
+                        app_log_exception("PDF-Größenlog konnte nicht geschrieben werden", exc)
+                        log_path = None
+                except Exception as exc:
+                    app_log_exception("PDF-Übersicht konnte nicht geladen werden", exc)
+                    rows = []
+                    log_path = None
+
+                    def apply_error() -> None:
+                        if request_id != load_state["id"]:
+                            return
+                        status_var.set(f"PDF-Übersicht konnte nicht geladen werden ({exc})")
+                    self.after(0, apply_error)
+                    return
+
+                def apply() -> None:
+                    if request_id != load_state["id"]:
+                        return
+                    for iid in tree.get_children():
+                        tree.delete(iid)
+                    status_var.set(f"{len(rows)} PDF-Arbeitsdatei(en) gefunden" + (f" | Log: {log_path}" if log_path else ""))
+                    update_headings()
+                    for row in rows:
+                        iid = tree.insert(
+                            "",
+                            "end",
+                            values=(
+                                row["name"],
+                                row["nextcloud_path"],
+                                row["local_available"],
+                                row["work_size"],
+                                row["original_size"],
+                                row["optimized_by_odv"],
+                                row["pdfa_size"],
+                                row["ocr_size"],
+                            ),
+                        )
+                        row_by_iid[str(iid)] = row
+
+                self.after(0, apply)
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def show_context_menu(event) -> None:
             iid = tree.identify_row(event.y)

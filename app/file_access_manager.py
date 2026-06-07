@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import os
 import platform
 import shutil
@@ -159,26 +160,59 @@ class FileAccessManagerMixin:
         tree.configure(yscrollcommand=vsb.set)
         tree.grid(row=1, column=0, sticky="nsew", padx=(8, 0), pady=(0, 8))
         vsb.grid(row=1, column=1, sticky="ns", pady=(0, 8))
+        status = ttk.Label(top, text="", foreground="#666666")
+        status.pack(side="left", padx=(8, 0))
+        load_state = {"id": 0}
 
         def load():
+            if not tree.winfo_exists():
+                return
+            load_state["id"] += 1
+            request_id = load_state["id"]
+            status.configure(text="Lade Zugriffsdaten …")
             for iid in tree.get_children():
                 tree.delete(iid)
-            try:
-                resp = self.api.document_access_log(self.api_token, limit=500)
-                rows = resp.get("entries") or resp.get("history") or []
-                for row in rows:
-                    action = str(row.get("action") or "")
-                    action_label = {"document_opened": "geöffnet", "document_downloaded": "Download"}.get(action, action)
-                    tree.insert("", "end", values=(
-                        row.get("created_at", ""),
-                        row.get("user_display_name", ""),
-                        action_label,
-                        row.get("current_filename") or row.get("filename") or "",
-                        row.get("upload_id", ""),
-                        row.get("details", ""),
-                    ))
-            except Exception as exc:
-                messagebox.showerror("Dokumentzugriffe", f"Zugriffsliste konnte nicht geladen werden:\n{exc}")
+
+            def worker() -> None:
+                try:
+                    resp = self.api.document_access_log(self.api_token, limit=500)
+                    rows = resp.get("entries") or resp.get("history") or []
+                except Exception as exc:
+                    app_log_exception("Zugriffsprotokoll konnte nicht geladen werden", exc)
+
+                    def apply_error() -> None:
+                        if not tree.winfo_exists():
+                            return
+                        if request_id != load_state["id"]:
+                            return
+                        status.configure(text=f"Zugriffsdaten konnten nicht geladen werden: {exc}")
+
+                    self.after(0, apply_error)
+                    return
+
+                def apply() -> None:
+                    if not tree.winfo_exists():
+                        return
+                    if request_id != load_state["id"]:
+                        return
+                    for iid in tree.get_children():
+                        tree.delete(iid)
+                    for row in rows:
+                        action = str(row.get("action") or "")
+                        action_label = {"document_opened": "geöffnet", "document_downloaded": "Download"}.get(action, action)
+                        tree.insert("", "end", values=(
+                            row.get("created_at", ""),
+                            row.get("user_display_name", ""),
+                            action_label,
+                            row.get("current_filename") or row.get("filename") or "",
+                            row.get("upload_id", ""),
+                            row.get("details", ""),
+                        ))
+                    status.configure(text=f"{len(rows)} Datensätze geladen")
+
+                self.after(0, apply)
+
+            threading.Thread(target=worker, daemon=True).start()
 
         btns = ttk.Frame(dialog, padding=(8, 0, 8, 8))
         btns.grid(row=2, column=0, columnspan=2, sticky="ew")

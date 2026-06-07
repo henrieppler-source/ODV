@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -60,34 +61,104 @@ class UserAdminMixin:
         ttk.Scrollbar(dev_frame, orient="vertical", command=dev_tree.yview).grid(row=0, column=1, sticky="ns")
 
         state = {"devices": [], "device_lookup": {}, "sessions": []}
+        load_state = {"id": 0}
+        status_var = tk.StringVar(value="")
+        status_label = ttk.Label(dialog, textvariable=status_var, foreground="#666666")
+        status_label.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 6))
+        refresh_button = None
+        end_selected_session_button = None
+        block_device_button = None
+        unblock_device_button = None
 
-        def refresh():
-            try:
-                data = self.api.list_sessions_and_devices(self.api_token)
-                state["devices"] = list(data.get("devices", []))
-                state["device_lookup"] = {}
-                state["sessions"] = list(data.get("sessions", []))
-            except ApiError as exc:
-                messagebox.showerror("Sitzungen und Geräte", f"Daten konnten nicht geladen werden:\n{exc}", parent=dialog)
+        def _set_busy_controls(disabled: bool) -> None:
+            target_state = "disabled" if disabled else "normal"
+            for btn in (refresh_button, end_selected_session_button, block_device_button, unblock_device_button):
+                if btn is not None:
+                    try:
+                        btn.configure(state=target_state)
+                    except Exception:
+                        pass
+
+        def refresh() -> None:
+            if not dialog.winfo_exists():
                 return
+            load_state["id"] += 1
+            request_id = load_state["id"]
+            status_var.set("Lade Sitzungs- und Gerätedaten …")
+            _set_busy_controls(True)
             for tree in (sess_tree, dev_tree):
                 for iid in tree.get_children():
                     tree.delete(iid)
-            for row in state["sessions"]:
-                sess_tree.insert("", "end", iid=str(row.get("session_id")), values=(
-                    row.get("session_id", ""), row.get("display_name", ""), row.get("device_name", ""),
-                    row.get("app_version", ""), row.get("ip_address", ""), row.get("started_at", ""),
-                    row.get("last_seen_at", ""), row.get("expires_at", ""),
-                ))
-            for idx, row in enumerate(state["devices"]):
-                iid = str(row.get("device_id") or idx)
-                state["device_lookup"][iid] = row
-                dev_tree.insert("", "end", iid=iid, values=(
-                    row.get("user_id", ""), row.get("display_name", ""), row.get("device_id", ""),
-                    row.get("device_name", ""), row.get("windows_user", ""), row.get("app_version", ""),
-                    row.get("last_ip", ""), row.get("first_seen_at", ""), row.get("last_login_at", ""),
-                    "ja" if int(row.get("is_blocked", 0) or 0) == 1 else "nein",
-                ))
+
+            def apply_error(exc: Exception) -> None:
+                if not dialog.winfo_exists():
+                    return
+                if request_id != load_state["id"]:
+                    return
+                _set_busy_controls(False)
+                status_var.set("Daten konnten nicht geladen werden.")
+                messagebox.showerror("Sitzungen und Geräte", f"Daten konnten nicht geladen werden:\n{exc}", parent=dialog)
+
+            def apply_data(data: dict) -> None:
+                if not dialog.winfo_exists():
+                    return
+                if request_id != load_state["id"]:
+                    return
+                state["devices"] = list(data.get("devices", []))
+                state["device_lookup"] = {}
+                state["sessions"] = list(data.get("sessions", []))
+                for tree in (sess_tree, dev_tree):
+                    for iid in tree.get_children():
+                        tree.delete(iid)
+                for row in state["sessions"]:
+                    sess_tree.insert(
+                        "",
+                        "end",
+                        iid=str(row.get("session_id")),
+                        values=(
+                            row.get("session_id", ""),
+                            row.get("display_name", ""),
+                            row.get("device_name", ""),
+                            row.get("app_version", ""),
+                            row.get("ip_address", ""),
+                            row.get("started_at", ""),
+                            row.get("last_seen_at", ""),
+                            row.get("expires_at", ""),
+                        ),
+                    )
+                for idx, row in enumerate(state["devices"]):
+                    iid = str(row.get("device_id") or idx)
+                    state["device_lookup"][iid] = row
+                    dev_tree.insert(
+                        "",
+                        "end",
+                        iid=iid,
+                        values=(
+                            row.get("user_id", ""),
+                            row.get("display_name", ""),
+                            row.get("device_id", ""),
+                            row.get("device_name", ""),
+                            row.get("windows_user", ""),
+                            row.get("app_version", ""),
+                            row.get("last_ip", ""),
+                            row.get("first_seen_at", ""),
+                            row.get("last_login_at", ""),
+                            "ja" if int(row.get("is_blocked", 0) or 0) == 1 else "nein",
+                        ),
+                    )
+                status_var.set(f"{len(state['sessions'])} Sitzung(en), {len(state['devices'])} Gerät(er)")
+                _set_busy_controls(False)
+
+            def worker() -> None:
+                try:
+                    data = self.api.list_sessions_and_devices(self.api_token)
+                except Exception as exc:
+                    app_log_exception("Sitzungsdaten konnten nicht geladen werden", exc)
+                    self.after(0, lambda exc=exc: apply_error(exc))
+                    return
+                self.after(0, lambda data=data: apply_data(data))
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def end_selected_session():
             sel = sess_tree.selection()
@@ -128,10 +199,14 @@ class UserAdminMixin:
 
         buttons = ttk.Frame(dialog)
         buttons.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
-        ttk.Button(buttons, text="Aktualisieren", command=refresh).pack(side="left")
-        ttk.Button(buttons, text="Ausgewählte Sitzung beenden", command=end_selected_session).pack(side="left", padx=8)
-        ttk.Button(buttons, text="Gerät sperren", command=lambda: set_blocked(True)).pack(side="left", padx=8)
-        ttk.Button(buttons, text="Gerät freigeben", command=lambda: set_blocked(False)).pack(side="left", padx=8)
+        refresh_button = ttk.Button(buttons, text="Aktualisieren", command=refresh)
+        refresh_button.pack(side="left")
+        end_selected_session_button = ttk.Button(buttons, text="Ausgewählte Sitzung beenden", command=end_selected_session)
+        end_selected_session_button.pack(side="left", padx=8)
+        block_device_button = ttk.Button(buttons, text="Gerät sperren", command=lambda: set_blocked(True))
+        block_device_button.pack(side="left", padx=8)
+        unblock_device_button = ttk.Button(buttons, text="Gerät freigeben", command=lambda: set_blocked(False))
+        unblock_device_button.pack(side="left", padx=8)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="right")
         refresh()
 

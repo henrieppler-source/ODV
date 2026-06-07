@@ -4,6 +4,7 @@ import getpass
 import os
 from pathlib import Path
 import tkinter as tk
+import threading
 from tkinter import messagebox, ttk
 
 from .config import APP_DIR
@@ -143,10 +144,57 @@ class SystemStatusMixin:
         except Exception as exc:
             app_log_exception("Start-Hinweise konnten nicht geprüft werden", exc)
 
+    def _refresh_system_status_lines(self, text: tk.Text, refresh_button: tk.Button | None) -> None:
+        if not self.winfo_exists() or not text.winfo_exists():
+            return
+        status_id = getattr(self, "_system_status_refresh_id", 0) + 1
+        self._system_status_refresh_id = status_id
+        if refresh_button is not None:
+            try:
+                refresh_button.configure(state="disabled")
+            except Exception:
+                pass
+        try:
+            text.configure(state="normal")
+            text.delete("1.0", "end")
+            text.insert("1.0", "Systemstatus wird geladen …")
+            text.configure(state="disabled")
+        except Exception:
+            pass
+
+        def worker() -> None:
+            lines: list[str]
+            try:
+                lines = self.startup_system_check_lines()
+            except Exception as exc:
+                lines = [f"Systemstatus konnte nicht geladen werden: {exc}"]
+                app_log_exception("Systemstatus konnte nicht geladen werden", exc)
+
+            def apply() -> None:
+                if not self.winfo_exists() or not text.winfo_exists():
+                    return
+                if status_id != getattr(self, "_system_status_refresh_id", status_id):
+                    return
+                try:
+                    text.configure(state="normal")
+                    text.delete("1.0", "end")
+                    text.insert("1.0", "\n".join(lines))
+                    text.configure(state="disabled")
+                except Exception:
+                    pass
+                if refresh_button is not None:
+                    try:
+                        refresh_button.configure(state="normal")
+                    except Exception:
+                        pass
+
+            self.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def open_system_status_dialog(self) -> None:
         """Zeigt den ausführlichen Betriebsstatus auf Wunsch über das Hilfe-Menü."""
         try:
-            lines = self.startup_system_check_lines()
             dialog = tk.Toplevel(self)
             dialog.title("ODV-Systemstatus")
             try:
@@ -162,13 +210,13 @@ class SystemStatusMixin:
             frame.columnconfigure(0, weight=1)
             frame.rowconfigure(1, weight=1)
             ttk.Label(frame, text="Systemstatus", font=("", 11, "bold")).grid(row=0, column=0, sticky="w", pady=(0, 8))
-            text = tk.Text(frame, width=92, height=min(18, max(8, len(lines) + 1)), wrap="word")
+            text = tk.Text(frame, width=92, height=18, wrap="word")
             text.grid(row=1, column=0, sticky="nsew")
-            text.insert("1.0", "\n".join(lines))
-            text.configure(state="disabled")
             buttons = ttk.Frame(frame)
             buttons.grid(row=2, column=0, sticky="e", pady=(8, 0))
-            ttk.Button(buttons, text="Aktualisieren", command=lambda: self.refresh_system_status_text(text)).pack(side="left", padx=4)
+            refresh_button = tk.Button(buttons, text="Aktualisieren")
+            refresh_button.pack(side="left", padx=4)
+            refresh_button.configure(command=lambda: self.refresh_system_status_text(text, refresh_button))
             if self.is_current_admin():
                 ttk.Button(buttons, text="Logs öffnen", command=self.open_log_folder).pack(side="left", padx=4)
             ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=4)
@@ -176,15 +224,12 @@ class SystemStatusMixin:
             x = self.winfo_rootx() + max(60, (self.winfo_width() - dialog.winfo_width()) // 2)
             y = self.winfo_rooty() + 80
             dialog.geometry(f"+{x}+{y}")
+            self._refresh_system_status_lines(text, refresh_button)
         except Exception as exc:
             app_log_exception("Systemstatus konnte nicht angezeigt werden", exc)
 
-    def refresh_system_status_text(self, text: tk.Text) -> None:
-        lines = self.startup_system_check_lines()
-        text.configure(state="normal")
-        text.delete("1.0", "end")
-        text.insert("1.0", "\n".join(lines))
-        text.configure(state="disabled")
+    def refresh_system_status_text(self, text: tk.Text, refresh_button: tk.Button | None = None) -> None:
+        self._refresh_system_status_lines(text, refresh_button)
 
     def open_log_folder(self) -> None:
         try:
