@@ -119,6 +119,8 @@ class FileViewManagerMixin:
         self.manual_points_button.pack(side="left", padx=(0, 8))
         self.point_details_button = ttk.Button(points_frame, text="Punktdetails...", command=self.open_document_points_detail_dialog)
         self.point_details_button.pack(side="left")
+        self.file_view_open_ocr_button = ttk.Button(points_frame, text="OCR anzeigen", command=self.open_file_view_ocr_pdf)
+        self.file_view_open_ocr_button.pack(side="right")
         if not self.is_current_admin():
             self.file_view_actions_frame.grid_remove()
 

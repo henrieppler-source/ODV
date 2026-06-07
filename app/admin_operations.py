@@ -291,17 +291,30 @@ class AdminOperationsMixin:
         backup_tree.configure(yscrollcommand=backup_scroll.set)
         backup_scroll.grid(row=0, column=1, sticky="ns")
 
-        def load_server_backups() -> None:
+        load_backups_state: dict[str, int] = {"id": 0}
+
+        def _apply_backups(backups: list[dict]) -> None:
             for iid in backup_tree.get_children():
                 backup_tree.delete(iid)
-            try:
-                backups = self.list_routes_backups_via_ftp()
-                for item in backups:
-                    name = str(item.get("name") or "")
-                    backup_tree.insert("", "end", iid=name, values=(name, item.get("modified", ""), self.format_backup_size(item.get("size"))))
-                result_var.set(f"{len(backups)} Server-Backup(s) gefunden.")
-            except Exception as exc:
-                result_var.set(f"Server-Backups konnten nicht geladen werden: {exc}")
+            for item in backups:
+                name = str(item.get("name") or "")
+                backup_tree.insert("", "end", iid=name, values=(name, item.get("modified", ""), self.format_backup_size(item.get("size"))))
+            result_var.set(f"{len(backups)} Server-Backup(s) gefunden.")
+
+        def load_server_backups() -> None:
+            load_backups_state["id"] += 1
+            request_id = load_backups_state["id"]
+            result_var.set("Lade Server-Backups ...")
+
+            def worker() -> None:
+                try:
+                    backups = self.list_routes_backups_via_ftp()
+                except Exception as exc:
+                    self.after(0, lambda: request_id == load_backups_state["id"] and result_var.set(f"Server-Backups konnten nicht geladen werden: {exc}"))
+                    return
+                self.after(0, lambda: request_id == load_backups_state["id"] and _apply_backups(backups))
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def run_deploy() -> None:
             if not messagebox.askyesno(
@@ -408,13 +421,27 @@ class AdminOperationsMixin:
         status_var = tk.StringVar(value="")
         ttk.Label(dialog, textvariable=status_var, foreground="#444444").grid(row=4, column=0, sticky="ew", padx=12, pady=(4, 8))
 
+        operating_mode_state: dict[str, int] = {"id": 0}
+
         def refresh() -> None:
-            try:
-                resp = self.api.operating_mode(self.api_token)
+            operating_mode_state["id"] += 1
+            request_id = operating_mode_state["id"]
+            status_var.set("Aktueller Modus wird geladen ...")
+
+            def worker() -> None:
+                try:
+                    resp = self.api.operating_mode(self.api_token)
+                except Exception as exc:
+                    self.after(0, lambda: request_id == operating_mode_state["id"] and status_var.set(f"Betriebsmodus konnte nicht geladen werden: {exc}"))
+                    return
+
+                self.after(0, lambda: request_id == operating_mode_state["id"] and _apply_operating_mode(resp))
+
+            def _apply_operating_mode(resp: dict) -> None:
                 mode_var.set(str(resp.get("mode") or "production"))
                 status_var.set(f"Aktueller Modus: {resp.get('label') or mode_var.get()}")
-            except Exception as exc:
-                status_var.set(f"Betriebsmodus konnte nicht geladen werden: {exc}")
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def save() -> None:
             mode = mode_var.get()
@@ -494,11 +521,22 @@ class AdminOperationsMixin:
                 backup_text = f"letzte Sicherung: {backup.get('created_at','?')} ({backup.get('file','?')})"
             info_var.set(f"API-Version: {resp.get('api_version', '?')} | offene Migrationen: {resp.get('pending_count', 0)} | {backup_text}")
 
+        migration_state: dict[str, int] = {"id": 0}
+
         def refresh() -> None:
-            try:
-                render_status(self.api.schema_migrations(self.api_token))
-            except Exception as exc:
-                info_var.set(f"Status konnte nicht geladen werden: {exc}")
+            migration_state["id"] += 1
+            request_id = migration_state["id"]
+            info_var.set("Status wird geladen ...")
+
+            def worker() -> None:
+                try:
+                    resp = self.api.schema_migrations(self.api_token)
+                except Exception as exc:
+                    self.after(0, lambda: request_id == migration_state["id"] and info_var.set(f"Status konnte nicht geladen werden: {exc}"))
+                    return
+                self.after(0, lambda: request_id == migration_state["id"] and render_status(resp))
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def apply() -> None:
             pending = int(last_status.get("pending_count") or 0)
@@ -567,18 +605,35 @@ class AdminOperationsMixin:
         result_var = tk.StringVar(value="")
         ttk.Label(dialog, textvariable=result_var, wraplength=780).grid(row=5, column=0, sticky="ew", padx=12, pady=(0, 8))
 
+        backup_restore_state: dict[str, int] = {"id": 0}
+
         def load_backups() -> None:
-            try:
-                resp = self.api.list_database_backups(self.api_token)
-                for iid in tree.get_children():
-                    tree.delete(iid)
-                for item in resp.get("backups", []) or []:
-                    file = str(item.get("file", ""))
-                    if file:
-                        tree.insert("", "end", iid=file, values=(file, item.get("created_at", ""), item.get("size_human", "")))
-                result_var.set(f"{len(tree.get_children())} Backup(s) gefunden.")
-            except Exception as exc:
-                result_var.set(f"Backups konnten nicht geladen werden: {exc}")
+            backup_restore_state["id"] += 1
+            request_id = backup_restore_state["id"]
+            result_var.set("Backups werden geladen ...")
+
+            def worker() -> None:
+                try:
+                    resp = self.api.list_database_backups(self.api_token)
+                    rows: list[tuple[str, object, object]] = []
+                    for item in resp.get("backups", []) or []:
+                        file = str(item.get("file", ""))
+                        if file:
+                            rows.append((file, item.get("created_at", ""), item.get("size_human", "")))
+                except Exception as exc:
+                    self.after(0, lambda: request_id == backup_restore_state["id"] and result_var.set(f"Backups konnten nicht geladen werden: {exc}"))
+                    return
+
+                def apply_rows() -> None:
+                    for iid in tree.get_children():
+                        tree.delete(iid)
+                    for file, created_at, size in rows:
+                        tree.insert("", "end", iid=file, values=(file, created_at, size))
+                    result_var.set(f"{len(rows)} Backup(s) gefunden.")
+
+                self.after(0, lambda: request_id == backup_restore_state["id"] and apply_rows())
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def selected_backup_file() -> str:
             sel = tree.selection()
@@ -639,18 +694,29 @@ class AdminOperationsMixin:
         msg = tk.Text(frm, width=54, height=4, wrap="word")
         msg.grid(row=3, column=1, sticky="ew", pady=6)
         msg.insert("1.0", "Die ODV-Datenbank wird für Wartungsarbeiten gesperrt. Bitte speichern Sie Ihre Arbeit.")
+        maintenance_state: dict[str, int] = {"id": 0}
+
         def refresh():
-            try:
-                st = self.api.maintenance_status(self.api_token)
-                m = st.get("maintenance") or {}
-                if m.get("active"):
-                    info_var.set(f"Aktuell aktiv seit {m.get('starts_at','?')}. Superadmin bleibt zugriffsberechtigt.")
-                elif m.get("scheduled"):
-                    info_var.set(f"Geplant ab {m.get('starts_at','?')}. Nicht-Superadmins werden dann gesperrt.")
-                else:
-                    info_var.set("Wartungsmodus ist aktuell nicht aktiv/geplant.")
-            except Exception as exc:
-                info_var.set(f"Status konnte nicht geladen werden: {exc}")
+            maintenance_state["id"] += 1
+            request_id = maintenance_state["id"]
+            info_var.set("Status wird geladen …")
+
+            def worker() -> None:
+                try:
+                    st = self.api.maintenance_status(self.api_token)
+                    m = st.get("maintenance") or {}
+                    if m.get("active"):
+                        text = f"Aktuell aktiv seit {m.get('starts_at','?')}. Superadmin bleibt zugriffsberechtigt."
+                    elif m.get("scheduled"):
+                        text = f"Geplant ab {m.get('starts_at','?')}. Nicht-Superadmins werden dann gesperrt."
+                    else:
+                        text = "Wartungsmodus ist aktuell nicht aktiv/geplant."
+                except Exception as exc:
+                    self.after(0, lambda: request_id == maintenance_state["id"] and info_var.set(f"Status konnte nicht geladen werden: {exc}"))
+                    return
+                self.after(0, lambda: request_id == maintenance_state["id"] and info_var.set(text))
+
+            threading.Thread(target=worker, daemon=True).start()
         def activate():
             try:
                 minutes = int(minutes_var.get().strip() or "0")
@@ -664,7 +730,7 @@ class AdminOperationsMixin:
                 return
             try:
                 resp = self.api.set_maintenance(self.api_token, minutes, msg.get("1.0", "end").strip())
-                refresh()
+                self.after(0, refresh)
                 m = resp.get("maintenance") or {}
                 starts = m.get("starts_at") or ("sofort" if minutes == 0 else f"in {minutes} Minute(n)")
                 warn = (
