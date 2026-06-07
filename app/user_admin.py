@@ -8,7 +8,7 @@ from .api_client import ApiError
 from .app_logging import app_log_exception
 from .database import add_history
 from .models import HistoryEntry
-from .users import ROLES, normalize_username, role_allows_user_management
+from .users import ROLES, role_allows_user_management
 
 
 class UserAdminMixin:
@@ -595,7 +595,7 @@ class UserAdminMixin:
 
         def build_payload(include_password: bool) -> dict:
             name = name_var.get().strip()
-            username = normalize_username(username_var.get().strip())
+            username = username_var.get().strip()
             password = password_var.get()
             nextcloud_username = nextcloud_username_var.get().strip()
             role = role_var.get().strip() or "Ortschronist"
@@ -640,10 +640,10 @@ class UserAdminMixin:
                     nextcloud_username = nextcloud_username_var.get().strip()
                     if nextcloud_username:
                         payload["nextcloud_username"] = nextcloud_username
-                    # Schutz gegen Selbst-Deaktivierung: Der angemeldete Benutzer darf
-                    # sich nicht versehentlich über die Benutzerverwaltung deaktivieren.
-                    current_username = normalize_username(self.username_var.get().strip())
-                    edited_username = normalize_username(username_var.get().strip())
+            # Schutz gegen Selbst-Deaktivierung: Der angemeldete Benutzer darf
+            # sich nicht versehentlich über die Benutzerverwaltung deaktivieren.
+                    current_username = self.username_var.get().strip().lower()
+                    edited_username = username_var.get().strip().lower()
                     if edited_username == current_username and not bool(payload.get("is_active", True)):
                         active_var.set(True)
                         messagebox.showwarning(
