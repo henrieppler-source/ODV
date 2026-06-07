@@ -582,9 +582,11 @@ class UserAdminMixin:
                         "is_active": 1 if str(item[5]).strip().lower() in {"ja", "true", "1", "yes"} else 0,
                     }
             if not user:
+                users_status_var.set("Auswahl konnte nicht aufgelöst werden.")
                 return
             try:
                 item_values = tree.item(iid, "values")
+                users_status_var.set(f"Ausgewählt: {str(item_values[1] if item_values else '')}")
                 update_selected_user_fields(_coerce_user_record(user, item_values))
             except Exception as exc:
                 app_log_exception("Benutzerdaten konnten nicht geladen werden", exc)
