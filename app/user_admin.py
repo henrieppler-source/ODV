@@ -670,6 +670,7 @@ class UserAdminMixin:
         users_refresh_button.pack(side="left", padx=4)
 
         tree.bind("<<TreeviewSelect>>", load_selected)
+        tree.bind("<ButtonRelease-1>", lambda _e: load_selected())
         refresh_tree()
         if tree.get_children():
             first = tree.get_children()[0]
