@@ -255,6 +255,28 @@ class UserAdminMixin:
         save_user_button: tk.Button | None = None
         deactivate_user_button: tk.Button | None = None
         users_by_id: dict[str, dict] = {}
+        current_form_state: tuple = tuple()
+
+        def _snapshot_form_state() -> tuple:
+            return (
+                str(selected_user_id.get("id") or ""),
+                name_var.get().strip(),
+                normalize_username(username_var.get().strip()),
+                email_var.get().strip(),
+                password_var.get(),
+                nextcloud_username_var.get().strip(),
+                nextcloud_password_var.get(),
+                role_var.get().strip(),
+                place_var.get().strip(),
+                bool(active_var.get()),
+            )
+
+        def _mark_form_clean() -> None:
+            nonlocal current_form_state
+            current_form_state = _snapshot_form_state()
+
+        def _has_unsaved_changes() -> bool:
+            return _snapshot_form_state() != current_form_state
 
         labels = [
             ("Name:", name_var),
@@ -401,6 +423,7 @@ class UserAdminMixin:
                 tree.selection_remove(tree.selection())
             except tk.TclError:
                 pass
+            _mark_form_clean()
 
         def _set_users_busy_controls(disabled: bool) -> None:
             target_state = "disabled" if disabled else "normal"
@@ -578,6 +601,7 @@ class UserAdminMixin:
                     return
                 user = _coerce_user_record(None, item_values)
             update_selected_user_fields(user)
+            _mark_form_clean()
             if source_note:
                 pass
             selected_username = ""
@@ -681,7 +705,7 @@ class UserAdminMixin:
                 payload["password"] = password
             return payload
 
-        def save_user():
+        def save_user() -> bool:
             user_id = selected_user_id.get("id")
             try:
                 if user_id is None:
@@ -719,10 +743,13 @@ class UserAdminMixin:
                     refresh_tree(select_id=user_id_int)
                 add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Benutzerverwaltung API", f"{name_var.get().strip()} / {username_var.get().strip()}"))
                 self.refresh_history()
+                _mark_form_clean()
+                return True
             except ValueError as exc:
                 messagebox.showwarning("Benutzerverwaltung", str(exc), parent=dialog)
             except ApiError as exc:
                 messagebox.showerror("Benutzerverwaltung", str(exc), parent=dialog)
+            return False
 
         def deactivate_user():
             user_id = selected_user_id.get("id")
@@ -746,8 +773,25 @@ class UserAdminMixin:
                 refresh_tree(select_id=user_id_int)
                 add_history(HistoryEntry.now(self.display_name_var.get().strip() or "Superadmin", "Benutzer deaktiviert API", username_var.get().strip()))
                 self.refresh_history()
+                _mark_form_clean()
             except (ValueError, ApiError) as exc:
                 messagebox.showerror("Benutzerverwaltung", str(exc), parent=dialog)
+
+        def _handle_dialog_close() -> None:
+            if not _has_unsaved_changes():
+                dialog.destroy()
+                return
+            response = messagebox.askyesnocancel(
+                "Benutzerverwaltung",
+                "Es wurden Änderungen vorgenommen. Möchten Sie speichern?",
+                parent=dialog,
+            )
+            if response is None:
+                return
+            if response:
+                if not save_user():
+                    return
+            dialog.destroy()
 
         btns = ttk.Frame(form)
         btns.grid(row=11, column=0, columnspan=2, sticky="ew", pady=8)
@@ -762,6 +806,8 @@ class UserAdminMixin:
 
         tree.bind("<<TreeviewSelect>>", load_selected)
         tree.bind("<ButtonRelease-1>", lambda _e: load_selected())
+        dialog.protocol("WM_DELETE_WINDOW", _handle_dialog_close)
+        _mark_form_clean()
         refresh_tree()
         if tree.get_children():
             first = tree.get_children()[0]
