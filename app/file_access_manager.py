@@ -65,7 +65,9 @@ class FileAccessManagerMixin:
 
     def update_file_view_ocr_button(self) -> None:
         path = self.resolve_item_ocr_pdf_path(self.file_view_current_metadata)
-        self.file_view_open_ocr_button.configure(state=("normal" if path else "disabled"))
+        button = getattr(self, "file_view_open_ocr_button", None)
+        if button is not None:
+            button.configure(state=("normal" if path else "disabled"))
 
     def open_file_view_ocr_pdf(self) -> None:
         path = self.resolve_item_ocr_pdf_path(self.file_view_current_metadata)
