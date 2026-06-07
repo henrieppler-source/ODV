@@ -84,6 +84,62 @@ function quote_identifier(string $name): string
 
 
 
+function ensure_point_rules_model_columns(PDO $pdo): void
+
+{
+
+    $columns = [
+        'rule_type' => "ALTER TABLE point_rules ADD COLUMN rule_type VARCHAR(40) NOT NULL DEFAULT 'metadata' AFTER category",
+        'source_field' => "ALTER TABLE point_rules ADD COLUMN source_field VARCHAR(120) DEFAULT NULL AFTER rule_type",
+        'evaluation_source' => "ALTER TABLE point_rules ADD COLUMN evaluation_source VARCHAR(30) DEFAULT NULL AFTER source_field",
+        'check_type' => "ALTER TABLE point_rules ADD COLUMN check_type VARCHAR(30) NOT NULL DEFAULT 'none' AFTER evaluation_source",
+        'min_value' => "ALTER TABLE point_rules ADD COLUMN min_value INT NOT NULL DEFAULT 0 AFTER check_type",
+        'is_system' => "ALTER TABLE point_rules ADD COLUMN is_system TINYINT(1) NOT NULL DEFAULT 0 AFTER is_active",
+    ];
+    foreach ($columns as $column => $sql) {
+        if (!db_column_exists($pdo, 'point_rules', $column)) {
+            $pdo->exec($sql);
+        }
+    }
+
+}
+
+
+function ensure_points_schema_available(PDO $pdo): void
+
+{
+
+    $missing = [];
+    foreach (['documents', 'contribution_points', 'point_rules', 'document_history'] as $tableName) {
+        if (!db_table_exists($pdo, $tableName)) {
+            $missing[] = 'Tabelle ' . $tableName;
+        }
+    }
+    foreach ([
+        ['documents', 'keywords'],
+        ['documents', 'transcription_done'],
+        ['documents', 'transcription_type'],
+        ['documents', 'transcription_note'],
+        ['documents', 'points_eligible'],
+        ['contribution_points', 'document_id'],
+        ['contribution_points', 'points_year'],
+        ['contribution_points', 'rule_key'],
+        ['contribution_points', 'source_field'],
+        ['contribution_points', 'is_manual'],
+        ['contribution_points', 'is_confirmed'],
+    ] as $pair) {
+        if (!db_column_exists($pdo, $pair[0], $pair[1])) {
+            $missing[] = 'Spalte ' . $pair[0] . '.' . $pair[1];
+        }
+    }
+    if ($missing) {
+        throw new RuntimeException('Punkte-Datenbankschema unvollständig. Bitte SQL-Migrationen v48/v49/v51/v55 prüfen. Fehlend: ' . implode(', ', $missing));
+    }
+    ensure_point_rules_model_columns($pdo);
+
+}
+
+
 function backup_table_for_version(PDO $pdo, string $tableName, string $fromVersion): ?string
 
 {
