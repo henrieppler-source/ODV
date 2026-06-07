@@ -3,15 +3,20 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+import shutil
 
 import tkinter as tk
+from tkinter import ttk
 from tkinter import messagebox
 
 from .app_logging import app_log_exception
 from .config import save_config
 from .file_service import copy_with_metadata, make_upload_id, save_metadata_file, unique_path_with_counter, append_metadata_history
+from .upload_tab_openai_cache_utils import file_sha256
 from .models import HistoryEntry, UploadMetadata
+from .database import add_history
 from .api_client import ApiError
+import re
 
 
 class UploadManagerMixin:
@@ -286,6 +291,7 @@ class UploadManagerMixin:
             "target_folder": data.get("target_folder"),
             "current_path": data.get("current_path"),
             "uploaded_at": str(data.get("uploaded_at", "")).replace("T", " "),
+            "sha256": data.get("source_sha256", ""),
             "status": data.get("status", "hochgeladen"),
             "person_status": data.get("person_status", "none"),
             "metadata": {
@@ -355,15 +361,273 @@ class UploadManagerMixin:
                 self.api.update_persons(self.api_token, metadata.upload_id, persons)
             return True, "Metadaten wurden in MySQL gespeichert"
         except ApiError as exc:
-            app_log_exception("Upload-Metadaten konnten nicht in MySQL gespeichert werden", exc, upload_id=upload_id)
+            app_log_exception(
+                "Upload-Metadaten konnten nicht in MySQL gespeichert werden",
+                exc,
+                upload_id=metadata.upload_id,
+            )
             return False, str(exc)
 
-    def build_upload_metadata_for_source(self, source: Path, target_folder: Path, display_name: str) -> UploadMetadata:
+    def _rollback_upload_artifacts(self, target_file: Path | None, json_file: Path | None, ocr_target: Path | None) -> None:
+        """Entfernt lokale Upload-Artefakte bei fehlgeschlagenem Upload."""
+        for candidate in (target_file, json_file, ocr_target):
+            if not candidate:
+                continue
+            try:
+                if candidate.exists() and candidate.is_file():
+                    candidate.unlink()
+            except Exception as exc:
+                app_log_exception("Upload-Artefakt konnte nicht bereinigt werden", exc, path=str(candidate))
+
+    def compute_source_sha256(self, source: Path) -> str:
+        try:
+            return file_sha256(source)
+        except Exception as exc:
+            app_log_exception("SHA-256 konnte nicht berechnet werden", exc, path=str(source))
+            return ""
+
+    def find_duplicates_by_file_sha256(self, sha256: str) -> list[dict]:
+        normalized_sha256 = sha256.strip().lower()
+        if not self.api_token or not normalized_sha256:
+            return []
+        try:
+            response = self.api.find_documents_by_sha256(self.api_token, normalized_sha256)
+            documents = response.get("documents")
+            if isinstance(documents, list) and documents:
+                return documents
+        except ApiError as exc:
+            app_log_exception("Duplikatprüfung via SHA-256 fehlgeschlagen", exc, sha256=normalized_sha256)
+
+        # Fallback: lokale Fallbacks via Dokumentenliste, falls der neue Endpunkt
+        # keine Treffer liefert oder keine Treffer in der erwarteten JSON-Struktur findet.
+        return [doc for doc in self._find_duplicates_in_document_list(normalized_sha256)]
+
+    @staticmethod
+    def _normalize_sha256(value: object) -> str:
+        value_text = str(value or "").strip().lower()
+        if len(value_text) != 64 or any(ch not in "0123456789abcdef" for ch in value_text):
+            return ""
+        return value_text
+
+    @staticmethod
+    def _extract_sha256_from_document_payload(document: dict) -> str:
+        if not isinstance(document, dict):
+            return ""
+
+        direct = UploadManagerMixin._normalize_sha256(document.get("sha256", ""))
+        if direct:
+            return direct
+
+        nested = UploadManagerMixin._normalize_sha256(document.get("source_sha256", ""))
+        if nested:
+            return nested
+
+        metadata = document.get("metadata")
+        if isinstance(metadata, dict):
+            nested = UploadManagerMixin._normalize_sha256(metadata.get("sha256", ""))
+            if nested:
+                return nested
+
+        raw_json_metadata = document.get("json_metadata")
+        if isinstance(raw_json_metadata, str):
+            try:
+                payload = json.loads(raw_json_metadata)
+                if isinstance(payload, dict):
+                    nested = UploadManagerMixin._normalize_sha256(payload.get("sha256", ""))
+                    if nested:
+                        return nested
+                    nested = UploadManagerMixin._normalize_sha256(payload.get("source_sha256", ""))
+                    if nested:
+                        return nested
+                    nested_data = payload.get("metadata")
+                    if isinstance(nested_data, dict):
+                        nested = UploadManagerMixin._normalize_sha256(nested_data.get("sha256", ""))
+                        if nested:
+                            return nested
+            except Exception:
+                return ""
+        return ""
+
+    def _find_duplicates_in_document_list(self, normalized_sha256: str) -> list[dict]:
+        try:
+            visible_documents: list[dict] = []
+            responses = [
+                self.api.list_documents(self.api_token, status=None, only_own=False),
+                self.api.list_documents(self.api_token, status="archiviert", only_own=False),
+            ]
+            for response in responses:
+                documents = response.get("documents")
+                if isinstance(documents, list):
+                    visible_documents.extend(documents)
+
+            unique_documents: dict[str, dict] = {}
+            for document in visible_documents:
+                upload_id = str(document.get("upload_id") or "")
+                if upload_id:
+                    unique_documents.setdefault(upload_id, document)
+                else:
+                    unique_documents[str(id(document))] = document
+
+            return [
+                doc for doc in unique_documents.values()
+                if self._extract_sha256_from_document_payload(doc) == normalized_sha256
+            ]
+        except ApiError as exc:
+            app_log_exception("Fallback-Duplikatprüfung via Dokumentenliste fehlgeschlagen", exc, sha256=normalized_sha256)
+            return []
+
+    def confirm_upload_for_duplicate(self, source: Path, sha256: str) -> bool:
+        documents = self.find_duplicates_by_file_sha256(sha256)
+        if not documents:
+            return True
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Duplikatprüfung")
+        dialog.geometry("860x420")
+        dialog.minsize(740, 320)
+        dialog.transient(self)
+        dialog.grab_set()
+        try:
+            dialog.focus_force()
+        except Exception:
+            pass
+        main = ttk.Frame(dialog, padding=10)
+        main.pack(fill="both", expand=True)
+        ttk.Label(
+            main,
+            text=(
+                f"{len(documents)} Treffer für denselben SHA-256-Wert gefunden.\n"
+                "Die Datei wurde wahrscheinlich bereits über ODV hochgeladen."
+            ),
+            justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+
+        cols = ("typ", "datei", "hochgeladen", "benutzer", "pfad")
+        list_frame = ttk.Frame(main)
+        list_frame.pack(fill="both", expand=True)
+        tree = ttk.Treeview(list_frame, columns=cols, show="headings", selectmode="browse", height=10)
+        tree.heading("typ", text="Typ")
+        tree.heading("datei", text="Datei")
+        tree.heading("hochgeladen", text="Hochgeladen")
+        tree.heading("benutzer", text="Benutzer")
+        tree.heading("pfad", text="Pfad / Ort")
+        tree.column("typ", width=90, anchor="w", stretch=False)
+        tree.column("datei", width=220, anchor="w")
+        tree.column("hochgeladen", width=140, anchor="w")
+        tree.column("benutzer", width=120, anchor="w")
+        tree.column("pfad", width=250, anchor="w")
+        vsb = ttk.Scrollbar(main, orient="vertical", command=tree.yview)
+        tree.configure(yscrollcommand=vsb.set)
+        tree.pack(side="left", fill="both", expand=True, in_=list_frame)
+        vsb.pack(side="right", fill="y", in_=list_frame)
+
+        row_paths: dict[str, Path | None] = {}
+
+        source_uploaded = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        source_row = tree.insert("", "end", values=(
+            "Ausgewählt",
+            source.name,
+            source_uploaded,
+            self.display_name_var.get().strip() or "",
+            str(source),
+        ))
+        row_paths[source_row] = source
+
+        for doc in documents:
+            filename = doc.get("original_filename") or doc.get("current_filename") or "unbekannte Datei"
+            uploaded_at = doc.get("uploaded_at", "") or "Datum fehlt"
+            uploaded_by = doc.get("uploaded_by_name", "") or ""
+            path_text = str(doc.get("current_path") or doc.get("target_folder") or "").strip()
+            tree.insert("", "end", values=(
+                "ODV",
+                filename,
+                uploaded_at,
+                uploaded_by,
+                path_text,
+            ))
+            row_paths[str(tree.get_children()[-1])] = Path(path_text) if path_text else None
+
+        action = {"value": False}
+
+        button_bar = ttk.Frame(main)
+        button_bar.pack(fill="x", pady=(8, 0))
+
+        def selected_path() -> Path | None:
+            selected = tree.selection()
+            if not selected:
+                return None
+            return row_paths.get(selected[0], None)
+
+        def can_open_selected() -> bool:
+            item_path = selected_path()
+            return bool(item_path and item_path.exists() and item_path.is_file())
+
+        def update_open_state() -> None:
+            open_btn.configure(state=("normal" if can_open_selected() else "disabled"))
+
+        def on_open_selected() -> None:
+            item_path = selected_path()
+            if not item_path:
+                messagebox.showwarning("Datei anzeigen", "Bitte zuerst einen Eintrag wählen.")
+                return
+            if not item_path.exists() or not item_path.is_file():
+                messagebox.showwarning("Datei anzeigen", f"Die ausgewählte Datei ist lokal nicht vorhanden:\n{item_path}")
+                return
+            self.open_file_with_default_app(item_path)
+
+        def on_accept() -> None:
+            action["value"] = True
+            dialog.destroy()
+
+        def on_cancel() -> None:
+            action["value"] = False
+            dialog.destroy()
+
+        dialog.protocol("WM_DELETE_WINDOW", on_cancel)
+
+        open_btn = ttk.Button(button_bar, text="Ausgewählte Datei öffnen", command=on_open_selected)
+        open_btn.pack(side="left")
+
+        ttk.Button(button_bar, text="Trotzdem hochladen", command=on_accept).pack(side="right", padx=(0, 6))
+        ttk.Button(button_bar, text="Abbrechen", command=on_cancel).pack(side="right")
+
+        def on_double_click(_event: tk.Event) -> None:
+            on_open_selected()
+
+        tree.bind("<Double-1>", on_double_click)
+        tree.bind("<<TreeviewSelect>>", lambda _event: update_open_state())
+        try:
+            first_iid = tree.get_children()[0]
+            tree.selection_set(first_iid)
+            update_open_state()
+        except Exception:
+            pass
+        self.wait_window(dialog)
+        return action["value"]
+
+    def _suggest_unique_stored_filename(self, target_folder: Path, stored_filename: str) -> str:
+        candidate = Path(stored_filename)
+        stem = candidate.stem
+        suffix = candidate.suffix
+        base_stem = stem
+        match = re.match(r"^(.*)_v(\d+)$", stem)
+        if match:
+            base_stem = match.group(1)
+
+        attempt = 1
+        current = stored_filename
+        while (target_folder / current).exists():
+            current = f"{base_stem}_v{attempt}{suffix}"
+            attempt += 1
+        return current
+
+    def build_upload_metadata_for_source(self, source: Path, target_folder: Path, display_name: str, source_sha256: str = "", stored_filename: str | None = None) -> UploadMetadata:
         upload_id = make_upload_id()
         requested_filename = str(self.meta_vars.get("current_filename", tk.StringVar()).get()).strip()
         if self.selected_folder is not None:
             requested_filename = source.name
-        stored_filename = self.planned_upload_filename(source, requested_filename)
+        planned_filename = self.planned_upload_filename(source, requested_filename)
+        stored_filename = stored_filename or planned_filename
         current_path = str(target_folder / stored_filename)
         document_type = self.meta_vars["document_type"].get().strip()
         if document_type in {"", "Mehrere Dateien"}:
@@ -409,6 +673,7 @@ class UploadManagerMixin:
             ocr_pdf_filename=Path(ocr_planned_path).name if ocr_planned_path else "",
             ocr_source_filename=ocr_source.name if ocr_source else "",
             ocr_created_at=datetime.now().isoformat(timespec="seconds") if ocr_source else "",
+            source_sha256=source_sha256,
             openai_metadata_fields=openai_fields,
             openai_metadata_model=str(self.config_data.get("openai_model", "") or "") if openai_fields else "",
             openai_metadata_applied_at=datetime.now().isoformat(timespec="seconds") if openai_fields else "",
@@ -417,6 +682,7 @@ class UploadManagerMixin:
             person_status=self.person_status_var.get() if self.selected_file else "none",
             persons=self.persons if self.selected_file else [],
         )
+
 
     def planned_upload_ocr_pdf_path(self, source: Path, target_folder: Path, stored_filename: str) -> str:
         if self.selected_file != source:
@@ -428,43 +694,79 @@ class UploadManagerMixin:
         return str(unique_path_with_counter(target))
 
     def upload_single_source_file(self, source: Path, target_folder: Path, display_name: str) -> tuple[bool, str]:
-        metadata = self.build_upload_metadata_for_source(source, target_folder, display_name)
+        source_sha256 = self.compute_source_sha256(source)
+        if source_sha256 and not self.confirm_upload_for_duplicate(source, source_sha256):
+            return False, "Upload abgebrochen: Es wurde bereits eine identische Datei in ODV gefunden."
+
+        requested_filename = str(self.meta_vars.get("current_filename", tk.StringVar()).get()).strip()
+        if self.selected_folder is not None and not requested_filename:
+            requested_filename = source.name
+        suggested_name = self.planned_upload_filename(source, requested_filename)
+        unique_stored_filename = self._suggest_unique_stored_filename(target_folder, suggested_name)
+
+        metadata = self.build_upload_metadata_for_source(
+            source,
+            target_folder,
+            display_name,
+            source_sha256=source_sha256,
+            stored_filename=unique_stored_filename,
+        )
         metadata_folder = self.metadata_folder_path()
-        target_file, json_file = copy_with_metadata(source, target_folder, metadata, metadata_folder)
-        with json_file.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-        append_metadata_history(data, display_name, "Datei hochgeladen", f"{source.name} → {target_file}")
-        ocr_source = self.current_upload_ocr_pdf_path() if self.selected_file == source else None
-        ocr_target_text = str(data.get("ocr_pdf_path") or "")
-        if ocr_source and ocr_target_text:
-            ocr_target = Path(ocr_target_text)
-            try:
-                ocr_target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(ocr_source, ocr_target)
-                data["ocr_pdf_path"] = str(ocr_target)
-                data["ocr_pdf_filename"] = ocr_target.name
-                data["ocr_source_filename"] = ocr_source.name
-                append_metadata_history(data, display_name, "OCR-PDF verknüpft", f"{ocr_source.name} → {ocr_target}")
-            except Exception as exc:
-                app_log_exception("OCR-PDF konnte nicht zum Upload kopiert werden", exc, source=str(ocr_source), target=ocr_target_text)
-                raise RuntimeError(f"Original wurde kopiert, aber OCR-PDF konnte nicht verknüpft werden:\n{exc}") from exc
-        save_metadata_file(json_file, data)
-        api_ok, api_message = self.save_upload_to_api(metadata)
-        if api_ok:
+
+        target_file: Path | None = None
+        json_file: Path | None = None
+        ocr_target: Path | None = None
+
+        try:
+            target_file, json_file = copy_with_metadata(source, target_folder, metadata, metadata_folder)
+            with json_file.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+
+            if unique_stored_filename != suggested_name:
+                append_metadata_history(
+                    data,
+                    display_name,
+                    "Dateiname kollidiert",
+                    f"{suggested_name} → {unique_stored_filename}",
+                )
+
+            ocr_source = self.current_upload_ocr_pdf_path() if self.selected_file == source else None
+            ocr_target_text = str(data.get("ocr_pdf_path") or "")
+            if ocr_source and ocr_target_text:
+                ocr_target = Path(ocr_target_text)
+                try:
+                    ocr_target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(ocr_source, ocr_target)
+                    data["ocr_pdf_path"] = str(ocr_target)
+                    data["ocr_pdf_filename"] = ocr_target.name
+                    data["ocr_source_filename"] = ocr_source.name
+                    append_metadata_history(data, display_name, "OCR-PDF verknüpft", f"{ocr_source.name} → {ocr_target}")
+                except Exception as exc:
+                    self._rollback_upload_artifacts(target_file, json_file, ocr_target)
+                    app_log_exception("OCR-PDF konnte nicht zum Upload kopiert werden", exc, source=str(ocr_source), target=ocr_target_text)
+                    raise RuntimeError(f"Original wurde kopiert, aber OCR-PDF konnte nicht verknüpft werden:\n{exc}") from exc
+
+            save_metadata_file(json_file, data)
+            api_ok, api_message = self.save_upload_to_api(metadata)
+            if not api_ok:
+                append_metadata_history(data, display_name, "MySQL nicht gespeichert", api_message)
+                save_metadata_file(json_file, data)
+                self._rollback_upload_artifacts(target_file, json_file, ocr_target)
+                raise RuntimeError(api_message or "Die Datei wurde lokal kopiert, konnte aber nicht in MySQL/API gespeichert werden.")
+
+            append_metadata_history(data, display_name, "Datei hochgeladen", f"{source.name} → {target_file}")
             append_metadata_history(data, display_name, "MySQL gespeichert", "Metadaten wurden über die API in MySQL gespeichert")
-        else:
-            append_metadata_history(data, display_name, "MySQL nicht gespeichert", api_message)
-        save_metadata_file(json_file, data)
-        add_history(HistoryEntry.now(display_name, "Datei hochgeladen", f"{source.name} → {target_file} | Metadaten: {json_file}", metadata.upload_id))
-        if api_ok:
+            save_metadata_file(json_file, data)
+
+            add_history(HistoryEntry.now(display_name, "Datei hochgeladen", f"{source.name} → {target_file} | Metadaten: {json_file}", metadata.upload_id))
             add_history(HistoryEntry.now(display_name, "MySQL gespeichert", api_message, metadata.upload_id))
-        else:
-            add_history(HistoryEntry.now(display_name, "MySQL nicht gespeichert", api_message, metadata.upload_id))
-        if metadata.persons:
-            add_history(HistoryEntry.now(display_name, "Personen markiert", f"{len(metadata.persons)} Personen in {metadata.stored_filename}", metadata.upload_id))
-        if not api_ok:
-            raise RuntimeError(api_message or "Die Datei wurde lokal kopiert, konnte aber nicht in MySQL/API gespeichert werden.")
-        return api_ok, str(target_file)
+            if metadata.persons:
+                add_history(HistoryEntry.now(display_name, "Personen markiert", f"{len(metadata.persons)} Personen in {metadata.stored_filename}", metadata.upload_id))
+
+            return True, str(target_file)
+        except Exception:
+            self._rollback_upload_artifacts(target_file, json_file, ocr_target)
+            raise
 
     def submit_upload(self) -> None:
         base = self.nextcloud_base_path(show_message=True)
@@ -498,19 +800,24 @@ class UploadManagerMixin:
                 return
             ok_count = 0
             fail_count = 0
+            skipped_count = 0
             for source in files:
                 try:
                     rel_parent = source.relative_to(source_folder).parent
                     file_target_folder = target_folder / rel_parent if str(rel_parent) != "." else target_folder
                     file_target_folder.mkdir(parents=True, exist_ok=True)
-                    self.upload_single_source_file(source, file_target_folder, display_name)
+                    api_ok, _ = self.upload_single_source_file(source, file_target_folder, display_name)
+                    if not api_ok:
+                        skipped_count += 1
+                        continue
                     ok_count += 1
                 except Exception as exc:
                     fail_count += 1
                     app_log_exception("Datei im Ordnerupload konnte nicht hochgeladen werden", exc, path=str(source))
             self.refresh_history()
             self.refresh_admin_uploads(show_message=False)
-            messagebox.showinfo("Ordnerupload", f"Hochgeladen: {ok_count}\nFehler: {fail_count}")
+            skip_info = f"\nÜbersprungen: {skipped_count}" if skipped_count else ""
+            messagebox.showinfo("Ordnerupload", f"Hochgeladen: {ok_count}\nFehler: {fail_count}{skip_info}")
             self.clear_upload_form(keep_target_folder=True)
             return
 
@@ -523,6 +830,9 @@ class UploadManagerMixin:
         except Exception as exc:
             app_log_exception("Datei konnte beim Hochladen nicht kopiert werden", exc, path=str(source), target_folder=str(target_folder))
             messagebox.showerror("Fehler beim Kopieren", str(exc))
+            return
+        if not api_ok:
+            messagebox.showinfo("Hinweis", target_file)
             return
         self.refresh_history()
         self.refresh_admin_uploads(show_message=False)

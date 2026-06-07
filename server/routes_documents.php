@@ -179,6 +179,63 @@ if ($method === 'GET' && $path === '/api/documents') {
     }
 }
 
+if ($method === 'GET' && $path === '/api/documents/by-sha256') {
+    $currentUser = current_user();
+    $sha256 = strtolower(trim((string)($_GET['sha256'] ?? '')));
+    if ($sha256 === '') {
+        json_response(['success' => false, 'error' => 'SHA-256 fehlt'], 400);
+    }
+    if (!preg_match('/^[a-f0-9]{64}$/', $sha256)) {
+        json_response(['success' => false, 'error' => 'Ungültiges SHA-256-Format'], 400);
+    }
+    $pdo = db();
+    try {
+        $stmt = $pdo->prepare("
+            SELECT upload_id, original_filename, current_filename, uploaded_by_name, uploaded_at, status, target_folder, current_path
+            FROM documents
+            WHERE JSON_VALID(json_metadata)
+              AND (
+                JSON_UNQUOTE(JSON_EXTRACT(json_metadata, '$.sha256')) = :sha256
+                OR JSON_UNQUOTE(JSON_EXTRACT(json_metadata, '$.metadata.sha256')) = :sha256
+                OR JSON_UNQUOTE(JSON_EXTRACT(json_metadata, '$.source_sha256')) = :sha256
+              )
+            ORDER BY uploaded_at DESC
+            LIMIT 200
+        ");
+        $stmt->execute([':sha256' => $sha256]);
+        $documents = $stmt->fetchAll();
+
+        api_log(
+            'info',
+            'SHA-256-Duplikatprüfung',
+            [
+                'sha256' => $sha256,
+                'count' => count($documents),
+                'by_user' => (int)$currentUser['id'],
+            ]
+        );
+
+        if (!is_superadmin($currentUser)) {
+            $filtered = [];
+            foreach ($documents as $doc) {
+                $pathForPermission = (string)(($doc['target_folder'] ?? '') !== '' ? $doc['target_folder'] : ($doc['current_path'] ?? ''));
+                if ($pathForPermission === '' || user_has_folder_permission($pdo, $currentUser, $pathForPermission, 'read')) {
+                    $filtered[] = $doc;
+                }
+            }
+            $documents = $filtered;
+        }
+        json_response([
+            'success' => true,
+            'sha256' => $sha256,
+            'documents' => $documents,
+        ]);
+    } catch (Throwable $e) {
+        api_log('error', 'SHA-256-Duplikatprüfung fehlgeschlagen', ['error' => $e->getMessage(), 'sha256' => $sha256]);
+        json_response(['success' => false, 'error' => 'Duplikatprüfung konnte nicht ausgeführt werden'], 500);
+    }
+}
+
 if ($method === 'POST' && preg_match('#^/api/documents/([^/]+)/access-log$#', $path, $matches)) {
     $currentUser = current_user();
     $uploadId = urldecode($matches[1]);
