@@ -75,6 +75,8 @@ class UiStateMixin:
             pass
 
     def on_notebook_tab_changed(self, _event=None) -> None:
+        if getattr(self, "_suspend_notebook_tab_events", False):
+            return
         self.update_tab_labels()
         self.update_connection_status()
         try:

@@ -103,7 +103,9 @@ class BootstrapMixin:
             app_log("warning", "Programmstart ohne erfolgreiche Anmeldung beendet")
             self.destroy()
             return
+        self._suspend_notebook_tab_events = True
         self.create_ui()
+        self.after(300, self._release_tab_event_suspend)
         self.restore_window_geometry(self, "main_window", "1250x920")
         self.protocol("WM_DELETE_WINDOW", self.on_main_window_close)
         self.deiconify()
@@ -128,3 +130,7 @@ class BootstrapMixin:
             self.load_folders_from_config()
         except Exception as exc:
             app_log_exception("Startordner konnten nicht geladen werden", exc)
+
+    def _release_tab_event_suspend(self) -> None:
+        self._suspend_notebook_tab_events = False
+        self.after_idle(self.update_tab_labels)

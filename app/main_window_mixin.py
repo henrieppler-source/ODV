@@ -1,4 +1,5 @@
 from __future__ import annotations
+import threading
 
 from pathlib import Path
 
@@ -100,7 +101,7 @@ class MainWindowMixin:
         self.ensure_standard_metadata_folder()
         self.apply_selected_user()
         self.update_tab_labels()
-        self.update_connection_status()
+        self.after(100, self.update_connection_status)
         self.bind_global_mousewheel()
 
     def create_status_bar(self) -> None:
@@ -113,31 +114,56 @@ class MainWindowMixin:
         ttk.Label(bar, textvariable=self.nextcloud_status_var).grid(row=0, column=1, sticky="w")
 
     def update_connection_status(self) -> None:
+        base_text = ""
         try:
-            status = self.api.status()
-            api_version = str(status.get("api_version") or status.get("version") or "?")
-            version_note = f"API: verbunden ({api_version})"
-            if api_version not in ("?", APP_VERSION):
-                version_note += f" – Achtung: App {APP_VERSION}"
-            maintenance = status.get("maintenance") or {}
-            if maintenance.get("active"):
-                version_note += " – Wartungsmodus aktiv"
-            elif maintenance.get("scheduled"):
-                version_note += " – Wartung geplant"
-            self.api_status_var.set(version_note)
-            self.report_current_device_version()
-        except Exception as exc:
-            self.api_status_var.set("API: nicht erreichbar")
-            app_log_exception("API-Statusprüfung fehlgeschlagen", exc)
-        try:
-            base = Path(self.base_folder_var.get().strip()).expanduser()
-            if base and base.exists() and base.is_dir():
-                self.nextcloud_status_var.set(f"Nextcloud: gefunden ({base})")
-            else:
-                self.nextcloud_status_var.set("Nextcloud: Stammverzeichnis nicht gesetzt/gefunden")
-        except Exception as exc:
-            self.nextcloud_status_var.set("Nextcloud: Fehler bei Prüfung")
-            app_log_exception("Nextcloud-Stammverzeichnis konnte nicht geprüft werden", exc)
+            base_text = str(self.base_folder_var.get()).strip()
+        except Exception:
+            pass
+
+        def worker() -> None:
+            api_note = "API: wird geprüft ..."
+            nc_note = "Nextcloud: wird geprüft ..."
+            report_version = False
+            try:
+                status = self.api.status()
+                api_version = str(status.get("api_version") or status.get("version") or "?")
+                api_note = f"API: verbunden ({api_version})"
+                if api_version not in ("?", APP_VERSION):
+                    api_note += f" – Achtung: App {APP_VERSION}"
+                maintenance = status.get("maintenance") or {}
+                if maintenance.get("active"):
+                    api_note += " – Wartungsmodus aktiv"
+                elif maintenance.get("scheduled"):
+                    api_note += " – Wartung geplant"
+                report_version = True
+            except Exception as exc:
+                api_note = "API: nicht erreichbar"
+                app_log_exception("API-Statusprüfung fehlgeschlagen", exc)
+
+            try:
+                base = Path(base_text).expanduser()
+                if base and base.exists() and base.is_dir():
+                    nc_note = f"Nextcloud: gefunden ({base})"
+                else:
+                    nc_note = "Nextcloud: Stammverzeichnis nicht gesetzt/gefunden"
+            except Exception as exc:
+                nc_note = "Nextcloud: Fehler bei Prüfung"
+                app_log_exception("Nextcloud-Stammverzeichnis konnte nicht geprüft werden", exc)
+
+            def apply_status() -> None:
+                try:
+                    self.api_status_var.set(api_note)
+                except Exception:
+                    return
+                try:
+                    self.nextcloud_status_var.set(nc_note)
+                except Exception:
+                    pass
+                if report_version:
+                    threading.Thread(target=self.report_current_device_version, daemon=True).start()
+            self.after(0, apply_status)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def create_menu(self) -> None:
         menubar = tk.Menu(self)
