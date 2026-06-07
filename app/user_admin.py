@@ -526,23 +526,29 @@ class UserAdminMixin:
             load_user_permissions(_to_int_user_id(user.get("id")), role_var.get())
 
         def load_selected(_event=None):
-            sel = tree.selection()
-            if not sel:
+            iid = None
+            if _event is not None and hasattr(_event, "y"):
+                iid = tree.identify_row(_event.y)
+            if not iid:
+                selected = tree.selection()
+                if selected:
+                    iid = selected[0]
+            if not iid:
+                iid = tree.focus()
+            if not iid:
                 return
-            user_id = str(sel[0]).strip()
+            user_id = str(iid).strip()
             selected_user_id["id"] = user_id
-            user = users_by_iid.get(user_id)
-            if user is None and not user_id.startswith("row-"):
-                user = find_loaded_user(user_id)
+            user = users_by_iid.get(iid)
             if user is None:
                 try:
-                    index = tree.index(sel[0])
+                    index = tree.get_children().index(iid)
                     if 0 <= index < len(api_users):
                         user = api_users[index]
                 except Exception:
                     user = None
             if user is None:
-                item = tree.item(sel[0], "values")
+                item = tree.item(iid, "values")
                 if item:
                     if api_users and item[1]:
                         candidate = str(item[1]).strip()
@@ -550,6 +556,17 @@ class UserAdminMixin:
                             if str(candidate_user.get("username", "")) == candidate:
                                 user = candidate_user
                                 break
+            if user is None:
+                item = tree.item(iid, "values")
+                if item:
+                    user = {
+                        "display_name": str(item[0] or ""),
+                        "username": str(item[1] or ""),
+                        "email": str(item[2] or ""),
+                        "role": str(item[3] or ""),
+                        "place": str(item[4] or ""),
+                        "is_active": 1 if str(item[5]).strip().lower() in {"ja", "true", "1", "yes"} else 0,
+                    }
             if not user:
                 return
             try:
