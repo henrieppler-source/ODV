@@ -694,7 +694,12 @@ class UploadManagerMixin:
         return str(unique_path_with_counter(target))
 
     def upload_single_source_file(self, source: Path, target_folder: Path, display_name: str) -> tuple[bool, str]:
-        source_sha256 = self.compute_source_sha256(source)
+        cached_sha256 = str(getattr(self, "_selected_upload_source_sha256", "") or "")
+        cached_source = getattr(self, "_selected_upload_source_file", None)
+        if cached_source is not None and str(Path(cached_source)) == str(Path(source)):
+            source_sha256 = cached_sha256
+        else:
+            source_sha256 = self.compute_source_sha256(source)
         if source_sha256 and not self.confirm_upload_for_duplicate(source, source_sha256):
             return False, "Upload abgebrochen: Es wurde bereits eine identische Datei in ODV gefunden."
 

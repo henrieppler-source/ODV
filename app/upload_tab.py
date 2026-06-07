@@ -21,6 +21,13 @@ try:
 except Exception:
     DND_FILES = None
 
+try:
+    from PIL import Image, ImageOps, ImageTk
+except Exception:  # pragma: no cover - optional dependency
+    Image = None
+    ImageOps = None
+    ImageTk = None
+
 from .app_logging import app_log, app_log_exception
 from .config import (
     APP_DIR,
@@ -63,39 +70,77 @@ class UploadTabMixin:
     def create_upload_tab(self) -> None:
         """Upload-Reiter mit geführtem Wizard."""
         self.upload_tab.columnconfigure(0, weight=1)
-        row = 0
         top = ttk.LabelFrame(self.upload_tab, text="Datei / Ziel", padding=8)
-        top.grid(row=row, column=0, sticky="ew", padx=4, pady=(0, 8))
-        top.columnconfigure(2, weight=1)
-        # File drop hint will be placed directly above the filename entry
+        top.grid(row=0, column=0, sticky="ew", padx=4, pady=(0, 8))
+        top.columnconfigure(0, weight=1)
+        top.rowconfigure(0, weight=1)
+
+        upload_split = ttk.PanedWindow(top, orient=tk.HORIZONTAL)
+        upload_split.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        upload_left = ttk.Frame(upload_split)
+        upload_left.columnconfigure(0, weight=0)
+        upload_left.columnconfigure(1, weight=0)
+        upload_left.columnconfigure(2, weight=1)
+        upload_left.rowconfigure(0, weight=0)
+        upload_left.rowconfigure(1, weight=0)
+        upload_left.rowconfigure(2, weight=0)
+        upload_left.rowconfigure(3, weight=0)
+        upload_left.rowconfigure(4, weight=0)
+        upload_left.rowconfigure(5, weight=0)
+        upload_left.rowconfigure(6, weight=0)
+        upload_left.rowconfigure(7, weight=0)
+        upload_left.rowconfigure(8, weight=1)
+
+        upload_right = ttk.Frame(upload_split)
+        upload_right.columnconfigure(0, weight=1)
+        upload_right.rowconfigure(0, weight=1)
+
         self.upload_drop_hint_var = tk.StringVar(value="Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
         self.file_var = tk.StringVar()
         self.upload_filename_var = tk.StringVar()
         self._upload_filename_auto_value = ""
+        self._upload_preview_photo = None
 
-        # Place the select button in the same row as the file entry, OpenAI below it,
-        # and target-folder on the next row.
+        file_select_button_width = 16
         upload_button_width = 24
-        ttk.Button(top, text="Datei auswählen", command=self.choose_file, width=upload_button_width).grid(row=1, column=1, sticky="nw", padx=(6, 6), pady=(0, 6))
-        self.open_file_openai_button = ttk.Button(top, text="OpenAI prüfen", command=self.queue_openai_check, width=upload_button_width)
-        self.open_file_openai_button.grid(row=2, column=1, sticky="nw", padx=(6, 6), pady=(0, 6))
-        self.upload_openai_metadata_button = ttk.Button(top, text="Metadaten übernehmen", command=self.on_apply_openai_metadata, state="disabled", width=upload_button_width)
+        target_tree_button_width = 34
+        file_button_frame = ttk.Frame(upload_left)
+        file_button_frame.grid(row=1, column=1, sticky="se", padx=(6, 6), pady=(0, 6))
+        ttk.Button(
+            file_button_frame,
+            text="Datei auswählen",
+            command=self.choose_file,
+            width=file_select_button_width,
+        ).grid(row=0, column=0, sticky="ew")
+        ttk.Button(
+            file_button_frame,
+            text="Datei entfernen",
+            command=self.clear_selected_upload_file,
+            width=file_select_button_width - 2,
+        ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+        file_button_frame.columnconfigure(0, weight=1)
+
+        self.open_file_openai_button = ttk.Button(
+            upload_left,
+            text="OpenAI prüfen",
+            command=self.queue_openai_check,
+            width=target_tree_button_width,
+        )
+        self.open_file_openai_button.grid(row=2, column=1, sticky="ew", padx=(6, 6), pady=(0, 6))
+        self.upload_openai_metadata_button = ttk.Button(upload_left, text="Metadaten übernehmen", command=self.on_apply_openai_metadata, state="disabled", width=upload_button_width)
         self.upload_openai_metadata_button.grid(row=3, column=1, sticky="nw", padx=(6, 6), pady=(0, 6))
-        self.upload_ocr_pdf_button = ttk.Button(top, text="PDF OCR erstellen", command=self.create_searchable_pdf_for_upload, width=upload_button_width)
+        self.upload_ocr_pdf_button = ttk.Button(upload_left, text="PDF OCR erstellen", command=self.create_searchable_pdf_for_upload, width=upload_button_width)
         self.upload_ocr_pdf_button.grid(row=4, column=1, sticky="nw", padx=(6, 6), pady=(0, 6))
-        self.upload_show_ocr_pdf_button = ttk.Button(top, text="OCR anzeigen", command=self.open_upload_ocr_pdf, state="disabled", width=upload_button_width)
+        self.upload_show_ocr_pdf_button = ttk.Button(upload_left, text="OCR anzeigen", command=self.open_upload_ocr_pdf, state="disabled", width=upload_button_width)
         self.upload_show_ocr_pdf_button.grid(row=5, column=1, sticky="nw", padx=(6, 6), pady=(0, 6))
 
-        ttk.Label(top, text="Datei:").grid(row=1, column=0, sticky="nw", pady=(0, 0))
-        # hint directly above the filename entry
-        self.upload_drop_hint = ttk.Label(top, textvariable=self.upload_drop_hint_var, foreground="#555555")
+        ttk.Label(upload_left, text="Datei:").grid(row=1, column=0, sticky="sw", pady=(0, 0))
+        self.upload_drop_hint = ttk.Label(upload_left, textvariable=self.upload_drop_hint_var, foreground="#555555")
         self.upload_drop_hint.grid(row=0, column=2, sticky="w", padx=(0, 6), pady=(6, 2))
-        self.upload_file_entry = ttk.Entry(top, textvariable=self.file_var)
-        self.upload_file_entry.grid(row=1, column=2, sticky="ew", padx=(0, 6), pady=(0, 0))
+        self.upload_file_entry = ttk.Entry(upload_left, textvariable=self.file_var)
+        self.upload_file_entry.grid(row=1, column=2, sticky="sew", padx=(0, 6), pady=(0, 6))
 
-        top.columnconfigure(3, weight=0)
-        # Status area under the file entry and left of the OpenAI button
-        status_container = ttk.Frame(top)
+        status_container = ttk.Frame(upload_left)
         self.upload_status_container = status_container
         status_container.grid(row=2, column=2, sticky="nw", padx=(0, 6), pady=(0, 6))
         self.upload_status_canvas = tk.Canvas(status_container, width=14, height=14, highlightthickness=0)
@@ -107,7 +152,7 @@ class UploadTabMixin:
         self.upload_openai_usage_var = tk.StringVar(value="Verbrauch: k.A.")
         ttk.Label(status_container, textvariable=self.upload_openai_usage_var, foreground="#555555").grid(row=0, column=3, sticky="w", padx=(8, 0))
 
-        precheck_container = ttk.Frame(top)
+        precheck_container = ttk.Frame(upload_left)
         self.upload_precheck_container = precheck_container
         precheck_container.grid(row=3, column=2, sticky="nw", padx=(0, 6), pady=(0, 6))
         self.upload_openai_precheck_canvas = tk.Canvas(precheck_container, width=14, height=14, highlightthickness=0)
@@ -116,7 +161,7 @@ class UploadTabMixin:
         ttk.Label(precheck_container, textvariable=self.upload_openai_precheck_var, foreground="#555555", wraplength=760).grid(row=0, column=1, sticky="w", padx=(6, 0))
 
         self.upload_ocr_progress_var = tk.StringVar(value="")
-        self.upload_ocr_progress_frame = ttk.Frame(top)
+        self.upload_ocr_progress_frame = ttk.Frame(upload_left)
         self.upload_ocr_progress_frame.grid(row=4, column=2, sticky="ew", padx=(0, 6), pady=(0, 6))
         self.upload_ocr_progress_frame.columnconfigure(0, weight=1)
         self.upload_ocr_progress = ttk.Progressbar(self.upload_ocr_progress_frame, mode="indeterminate", length=260)
@@ -124,20 +169,47 @@ class UploadTabMixin:
         ttk.Label(self.upload_ocr_progress_frame, textvariable=self.upload_ocr_progress_var, foreground="#555555").grid(row=0, column=1, sticky="w", padx=(8, 0))
         self.upload_ocr_progress_frame.grid_remove()
 
-        # move target folder line below the OpenAI section
-        ttk.Label(top, text="Zielordner Nextcloud:").grid(row=6, column=0, sticky="w", pady=(6, 0))
         self.target_folder_var = tk.StringVar()
-        ttk.Button(top, text="Baum...", command=self.choose_upload_target_tree, width=upload_button_width).grid(row=6, column=1, sticky="nw", padx=(6, 6), pady=(6, 0))
-        self.target_combo = ttk.Combobox(top, textvariable=self.target_folder_var, state="readonly")
-        self.target_combo.grid(row=6, column=2, sticky="ew", padx=(0, 6), pady=(6, 0))
-        ttk.Label(top, text="Ziel-Dateiname:").grid(row=7, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(top, textvariable=self.upload_filename_var).grid(row=7, column=1, columnspan=2, sticky="ew", padx=(6, 6), pady=(6, 0))
-        self.enable_upload_drag_and_drop(top)
+        target_row_padding = (6, 0)
+        ttk.Label(upload_left, text="Zielordner Nextcloud:").grid(row=6, column=0, sticky="sw", pady=target_row_padding)
+        target_button_frame = ttk.Frame(upload_left)
+        target_button_frame.grid(row=6, column=1, sticky="s", padx=(6, 6), pady=target_row_padding)
+        ttk.Button(
+            target_button_frame,
+            text="Baum...",
+            command=self.choose_upload_target_tree,
+            width=target_tree_button_width,
+        ).grid(row=0, column=0, sticky="ew")
+        self.target_combo = ttk.Combobox(upload_left, textvariable=self.target_folder_var, state="readonly")
+        self.target_combo.grid(row=6, column=2, sticky="sew", padx=(0, 6), pady=target_row_padding)
+        ttk.Label(upload_left, text="Ziel-Dateiname:").grid(row=7, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(upload_left, textvariable=self.upload_filename_var).grid(row=7, column=1, columnspan=2, sticky="ew", padx=(6, 6), pady=(6, 0))
 
-        row += 1
-        wizard_frame = ttk.Frame(self.upload_tab)
-        wizard_frame.grid(row=row, column=0, sticky="nsew", padx=4, pady=(0, 8))
-        self.upload_tab.rowconfigure(row, weight=1)
+        self.upload_preview_frame = ttk.LabelFrame(upload_right, text="Vorschau", padding=(6, 4))
+        self.upload_preview_frame.grid(row=0, column=0, sticky="nsew")
+        upload_right.rowconfigure(0, weight=1)
+        upload_right.columnconfigure(0, weight=1)
+        self.upload_image_preview_label = ttk.Label(self.upload_preview_frame, text="", anchor="center", justify="center", width=34)
+        self.upload_image_preview_label.grid(row=0, column=0, sticky="nsew")
+        self.upload_preview_frame.rowconfigure(0, weight=1)
+        self.upload_preview_frame.columnconfigure(0, weight=1)
+        self.upload_image_preview_label.configure(width=34)
+
+        upload_split.add(upload_left, weight=3)
+        upload_split.add(upload_right, weight=1)
+        for _option in ("minsize", "width"):
+            try:
+                if _option == "width":
+                    upload_split.pane(upload_right, width=320)
+                else:
+                    upload_split.paneconfigure(upload_right, minsize=260)
+                break
+            except Exception:
+                continue
+        self.enable_upload_drag_and_drop(upload_left)
+
+        wizard_frame = ttk.Frame(upload_left)
+        wizard_frame.grid(row=8, column=0, columnspan=3, sticky="nsew", padx=(0, 6), pady=(6, 0))
         self.upload_wizard = UploadWizard(self, wizard_frame)
         self.update_upload_technical_fields(selected_file=None)
         self.update_upload_status_indicator()
@@ -281,8 +353,12 @@ class UploadTabMixin:
         self.clear_pdf_text_searchability_cache(self.selected_file)
         self.selected_file = None
         self.selected_folder = None
+        self._selected_upload_source_file = None
+        self._selected_upload_source_sha256 = ""
         self.upload_ocr_pdf_path = None
         self.file_var.set("")
+        self.upload_drop_hint_var.set("Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
+        self.update_upload_image_preview(None)
         for key, var in self.meta_vars.items():
             if key == "place":
                 try:
@@ -478,8 +554,12 @@ class UploadTabMixin:
             if suffix == ".pdf":
                 text_parts: list[str] = []
                 try:
+                    import warnings
                     from pypdf import PdfReader
-                    reader = PdfReader(str(path))
+
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        reader = PdfReader(str(path), strict=False)
                     for page in reader.pages[:max_pdf_pages]:
                         page_text = page.extract_text() or ""
                         if page_text.strip():
@@ -1025,10 +1105,61 @@ class UploadTabMixin:
         color, text = self.evaluate_upload_status()
         self.set_upload_status(color, text)
 
+    def update_upload_image_preview(self, path: Path | None) -> None:
+        if self.upload_image_preview_label is None:
+            return
+        if path is None or not path.exists():
+            self.upload_image_preview_label.configure(
+                text="",
+                image="",
+            )
+            self._upload_preview_photo = None
+            return
+
+        if not is_image_file(path):
+            self.upload_image_preview_label.configure(
+                text="",
+                image="",
+            )
+            self._upload_preview_photo = None
+            return
+
+        if Image is None or ImageTk is None:
+            self.upload_image_preview_label.configure(
+                text="Pillow nicht installiert – Vorschau nicht verfügbar.",
+                image="",
+            )
+            self._upload_preview_photo = None
+            return
+
+        try:
+            image = Image.open(path)
+            try:
+                if ImageOps is not None:
+                    image = ImageOps.exif_transpose(image)
+            except Exception:
+                pass
+            image = image.convert("RGB")
+            image.thumbnail((420, 420))
+            photo = ImageTk.PhotoImage(image)
+            self.upload_image_preview_label.configure(image=photo, text="")
+            self._upload_preview_photo = photo
+        except Exception as exc:
+            app_log_exception("Upload-Bildvorschau konnte nicht geladen werden", exc)
+            self.upload_image_preview_label.configure(
+                text="Vorschau nicht möglich.",
+                image="",
+            )
+            self._upload_preview_photo = None
+
     def choose_file(self) -> None:
         filename = filedialog.askopenfilename(title="Datei auswählen")
         if filename:
             self.set_selected_upload_file(Path(filename), source="dialog")
+
+    def clear_selected_upload_file(self) -> None:
+        self.clear_upload_form(keep_target_folder=True)
+        self.upload_drop_hint_var.set("Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
 
     def set_selected_upload_file(self, path: Path, source: str = "dialog") -> None:
         """Übernimmt eine einzelne Datei in den Upload-Reiter.
@@ -1042,12 +1173,25 @@ class UploadTabMixin:
         if not path.exists() or not path.is_file():
             messagebox.showwarning("Datei auswählen", f"Die Datei wurde nicht gefunden oder ist kein Dokument:\n{path}")
             return
+        source_sha256 = self.compute_source_sha256(path)
+        if source_sha256 and not self.confirm_upload_for_duplicate(path, source_sha256):
+            self.clear_upload_form(keep_target_folder=True)
+            self.upload_drop_hint_var.set("Auswahl abgebrochen: Datei wurde bereits in ODV hochgeladen (wurde nicht übernommen).")
+            messagebox.showinfo(
+                "Duplikatprüfung",
+                "Die Datei wurde bereits in ODV erkannt.\n\n"
+                "Der Upload wurde abgebrochen. Bitte eine andere Datei wählen oder im Warnungsdialog \"Trotzdem hochladen\" entscheiden.",
+            )
+            return
         self.reset_upload_metadata_for_new_file()
         self.selected_file = path
         self.selected_folder = None
+        self._selected_upload_source_file = path
+        self._selected_upload_source_sha256 = source_sha256
         if source != "keep_ocr_link":
             self.upload_ocr_pdf_path = None
         self.file_var.set(self.normalize_local_path_text(path))
+        self.update_upload_image_preview(path)
         self.update_upload_technical_fields(selected_file=path)
         detected_type = detect_document_type(self.selected_file)
         self.meta_vars["document_type"].set(detected_type)
@@ -1161,6 +1305,7 @@ class UploadTabMixin:
             self.selected_folder = Path(folder)
             self.selected_file = None
             self.file_var.set(self.normalize_local_path_text(folder))
+            self.update_upload_image_preview(None)
             self.meta_vars["document_type"].set("Mehrere Dateien")
             self.remember_document_type("Mehrere Dateien")
             if not self.meta_vars.get("place").get().strip():
