@@ -47,6 +47,7 @@ from .upload_tab_metadata_utils import (
     merge_metadata_values as _utm_merge_metadata_values,
     merge_place_values as _utm_merge_place_values,
     normalize_upload_text_sample as _utm_normalize_upload_text_sample,
+    limit_openai_keywords as _utm_limit_openai_keywords,
 )
 from .upload_tab_openai_cache_utils import (
     add_openai_metadata_cache_entry as _utauc_add_openai_metadata_cache_entry,
@@ -286,7 +287,7 @@ class UploadTabMixin:
         path = path or self.selected_file
         if path is None:
             return False
-        return path.suffix.lower() in {".pdf", ".txt", ".md", ".csv", ".log", ".docx", ".odt"}
+        return path.suffix.lower() in {".pdf", ".txt", ".md", ".csv", ".log", ".docx", ".odt", ".xlsx"}
 
     def is_upload_image_pdf(self, path: Path | None = None) -> bool:
         path = path or self.selected_file
@@ -552,6 +553,9 @@ class UploadTabMixin:
             if suffix in {".txt", ".md", ".csv", ".log"}:
                 text = path.read_text(encoding="utf-8", errors="ignore")
                 return self.normalize_upload_text_sample(text, max_chars=max_chars)
+            if suffix == ".xlsx":
+                text = self._extract_excel_text(path)
+                return self.normalize_upload_text_sample(text, max_chars=max_chars)
             if suffix == ".pdf":
                 text_parts: list[str] = []
                 try:
@@ -597,6 +601,87 @@ class UploadTabMixin:
         except Exception as exc:
             app_log_exception("OpenAI-Textauszug konnte nicht gelesen werden", exc, path=str(path))
         return None
+
+    def _extract_excel_text(self, path: Path) -> str | None:
+        try:
+            try:
+                import openpyxl
+            except Exception:
+                openpyxl = None
+
+            if openpyxl is not None:
+                text_chunks: list[str] = []
+                workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
+                try:
+                    for worksheet in workbook.worksheets:
+                        for row in worksheet.iter_rows(values_only=True):
+                            for value in row:
+                                text = str(value).strip() if value is not None else ""
+                                if text:
+                                    text_chunks.append(text)
+                            if len(text_chunks) > 20000:
+                                break
+                        if len(text_chunks) > 20000:
+                            break
+                finally:
+                    try:
+                        workbook.close()
+                    except Exception:
+                        pass
+                return " ".join(text_chunks)
+
+            with zipfile.ZipFile(path) as zf:
+                shared_strings: list[str] = []
+                if "xl/sharedStrings.xml" in zf.namelist():
+                    shared_root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+                    for item in shared_root:
+                        piece: list[str] = []
+                        for node in item.iter():
+                            if node.tag.endswith("}t") and node.text:
+                                piece.append(node.text)
+                        value = "".join(piece).strip()
+                        if value:
+                            shared_strings.append(value)
+
+                sheet_files = [name for name in zf.namelist() if name.startswith("xl/worksheets/") and name.endswith(".xml")]
+                if not sheet_files:
+                    return None
+
+                text_chunks: list[str] = []
+                for sheet_name in sheet_files:
+                    sheet_root = ET.fromstring(zf.read(sheet_name))
+                    for cell in sheet_root.iter():
+                        if not cell.tag.endswith("}c"):
+                            continue
+                        value_type = cell.get("t")
+                        value_text = ""
+                        for child in cell:
+                            tag = child.tag
+                            if tag.endswith("}v"):
+                                value_text = child.text or ""
+                                break
+                            if value_type == "inlineStr" and tag.endswith("}t"):
+                                value_text = child.text or ""
+                                break
+                        if not value_text:
+                            continue
+                        if value_type == "s":
+                            try:
+                                index = int(value_text)
+                                if 0 <= index < len(shared_strings):
+                                    value_text = shared_strings[index]
+                            except Exception:
+                                pass
+                        value = str(value_text).strip()
+                        if value:
+                            text_chunks.append(value)
+                    if len(text_chunks) > 20000:
+                        break
+                return " ".join(text_chunks)
+            return None
+        except Exception as exc:
+            app_log_exception("Excel-Textauszug konnte nicht gelesen werden", exc, path=str(path))
+            return None
 
     def normalize_upload_text_sample(self, text: str | None, max_chars: int = 4000) -> str | None:
         return _utm_normalize_upload_text_sample(text, max_chars=max_chars)
@@ -946,10 +1031,19 @@ class UploadTabMixin:
         local_metadata = self.derive_metadata_from_text(filename=filename, extension=extension, sample=sample)
         try:
             result = client.analyze_upload_file(filename=filename, extension=extension, sample=sample)
+            metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+            metadata_keywords = _utm_limit_openai_keywords(
+                str(metadata.get("keywords", "")),
+                reference_text=sample,
+                max_keywords=30,
+            )
+            if metadata_keywords:
+                metadata["keywords"] = metadata_keywords
+            else:
+                metadata.pop("keywords", None)
             file_type = str(result.get("file_type") or "unbekannt").strip()
             confidence = str(result.get("confidence") or "").strip()
             advice = str(result.get("advice") or "").strip()
-            metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
             merged_metadata = dict(local_metadata)
             for k, v in metadata.items():
                 if str(v or "").strip():
@@ -1010,6 +1104,11 @@ class UploadTabMixin:
         ) if analysis_file else None
         try:
             suggestions = client.suggest_metadata(filename=filename, extension=extension, sample=sample)
+            suggestions["keywords"] = _utm_limit_openai_keywords(
+                str(suggestions.get("keywords", "")),
+                reference_text=sample,
+                max_keywords=30,
+            )
             self.openai_metadata_suggestions = suggestions
             self.after(0, lambda: self.upload_openai_text_var.set("OpenAI: Metadatenvorschläge bereit"))
             self.after(0, lambda: self.upload_openai_metadata_button.configure(state="normal"))

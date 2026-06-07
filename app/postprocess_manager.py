@@ -23,12 +23,13 @@ from .postprocess_openai_utils import (
     openai_used_models as _ppm_openai_used_models,
     store_openai_model_result as _ppm_store_openai_model_result,
 )
+from .upload_tab_metadata_utils import limit_openai_keywords as _utm_limit_openai_keywords
 
 
 class PostprocessManagerMixin:
     """OpenAI-, OCR- und Nachbearbeitungshelfer für die zentrale Dateiliste."""
 
-    _OPENAI_SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md", ".csv", ".log", ".docx", ".odt"}
+    _OPENAI_SUPPORTED_SUFFIXES = {".pdf", ".txt", ".md", ".csv", ".log", ".docx", ".odt", ".xlsx"}
     _OPENAI_FALLBACK_MODELS = OPENAI_MODEL_OPTIONS
 
     def _read_int_config(self, key: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
@@ -364,6 +365,15 @@ class PostprocessManagerMixin:
             try:
                 result = client.analyze_upload_file(filename=path.name, extension=path.suffix.lower(), sample=sample)
                 metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+                metadata_keywords = _utm_limit_openai_keywords(
+                    str(metadata.get("keywords", "")),
+                    reference_text=sample,
+                    max_keywords=30,
+                )
+                if metadata_keywords:
+                    metadata["keywords"] = metadata_keywords
+                else:
+                    metadata.pop("keywords", None)
                 local_metadata = self.derive_metadata_from_text(filename=path.name, extension=path.suffix.lower(), sample=sample)
                 merged = dict(local_metadata)
                 for key, value in metadata.items():
@@ -504,6 +514,11 @@ class PostprocessManagerMixin:
         def run() -> None:
             try:
                 result = client.analyze_place_contexts(path.name, contexts, fallback_text=fallback_text, max_context_chars=(place_context_chars * 2 + 80))
+                result["keywords"] = _utm_limit_openai_keywords(
+                    str(result.get("keywords", "")),
+                    reference_text=(fallback_text if fallback_text else sample),
+                    max_keywords=30,
+                )
                 usage_text = self.format_openai_usage(result.get("usage", {}), model_name=client.model)
                 self.store_openai_model_result(item, client.model, "openai_place_model_results", {
                     "result": result,

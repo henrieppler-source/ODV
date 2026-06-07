@@ -15,6 +15,34 @@ def normalize_upload_text_sample(text: str | None, max_chars: int = 4000) -> str
     return text[:max_chars]
 
 
+def limit_openai_keywords(value: str | None, reference_text: str | None, max_keywords: int = 30) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    limit = max(1, min(200, int(max_keywords)))
+    entries = [part.strip() for part in re.split(r"[,;\n]+", raw) if part.strip()]
+    if not entries:
+        return ""
+    normalized_entries: list[str] = []
+    for entry in entries:
+        cleaned = re.sub(r"\s+", " ", entry).strip(" ;,\n\t")
+        if not cleaned:
+            continue
+        if cleaned.lower() not in {item.lower() for item in normalized_entries}:
+            normalized_entries.append(cleaned)
+    if len(normalized_entries) <= limit:
+        return ", ".join(normalized_entries)
+    reference = str(reference_text or "").lower()
+    ranked = []
+    for index, keyword in enumerate(normalized_entries):
+        escaped = re.escape(keyword.lower())
+        freq = len(re.findall(escaped, reference, flags=re.IGNORECASE))
+        ranked.append((freq, index, keyword))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    selected = [keyword for freq, _index, keyword in ranked[:limit]]
+    return ", ".join(selected)
+
+
 def local_places_from_text(text: str | None, local_place_names: list[str]) -> list[str]:
     if not text:
         return []
@@ -65,4 +93,3 @@ def append_openai_description(current: str, suggested: str, model: str) -> str:
     if suggested.lower() in current.lower() or block.lower() in current.lower():
         return current
     return current + "\n\n" + block
-
