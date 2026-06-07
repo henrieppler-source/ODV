@@ -17,6 +17,24 @@ POWERPOINT_EXTENSIONS = {".ppt", ".pptx", ".odp"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".wmv", ".m4v"}
 TEXT_EXTENSIONS = {".txt", ".md"}
+ROEMHILD_PLACE_NAMES = (
+    "Bedheim",
+    "Eicha",
+    "Gleicherwiesen",
+    "Gleichamberg",
+    "Hindfeld",
+    "Milz",
+    "Mendhausen",
+    "Roth",
+    "Haina",
+    "Römhild",
+    "Sülzdorf",
+    "Westenfeld",
+    "Zeilfeld",
+    "Mönchshof",
+    "Simmershausen",
+)
+_ROEMHILD_PLACE_TOKENS = None
 
 
 def is_image_file(path: Path) -> bool:
@@ -109,6 +127,69 @@ def normalize_filename_component(value: str) -> str:
     text = re.sub(r"_+", "_", text)
     text = text.strip("._-")
     return text or "datei"
+
+
+def split_place_values(value: str) -> list[str]:
+    """Teilt ein Ortsfeld wie \"A, B; C\" in einzelne Ortsnamen auf."""
+    parts: list[str] = []
+    for raw in re.split(r"[,;/\n]+", str(value or "")):
+        text = raw.strip(" .;,-")
+        if text:
+            parts.append(text)
+    return parts
+
+
+def _normalize_place_token_for_grouping(value: str) -> str:
+    token = normalize_filename_component(value)
+    token = re.sub(r"^(?:stadt|gemeinde)_", "", token)
+    return token
+
+
+def _roemhild_place_tokens() -> set[str]:
+    """Liefert normalisierte Ortsnamen, die zur Römhild-Gemeinden-Liste gehören."""
+    global _ROEMHILD_PLACE_TOKENS
+    if _ROEMHILD_PLACE_TOKENS is None:
+        _ROEMHILD_PLACE_TOKENS = {normalize_filename_component(name) for name in ROEMHILD_PLACE_NAMES}
+    return _ROEMHILD_PLACE_TOKENS
+
+
+def _build_filename_cleanup_tokens(place_part: str, place_candidates: list[str] | None = None) -> set[str]:
+    tokens = {normalize_filename_component(t) for t in (place_part or "").split("_") if t}
+    cleaned_candidates = {token for token in (place_candidates or []) if token}
+    if place_part in {"andere_orte", "andere_Orte", "andere Orte", "other_places"}:
+        tokens.update({"andere", "orte"})
+        tokens.update(cleaned_candidates)
+        return tokens
+
+    if place_part in {"Gemeinden_Römhild", "Gemeinden_Roemhild", "gemeinden_roemhild", "roemhild"}:
+        tokens.update({"gemeinden", "roemhild"})
+        roemhild_tokens = _roemhild_place_tokens()
+        tokens.update(cleaned_candidates.intersection(roemhild_tokens))
+        return tokens
+
+    tokens.update(cleaned_candidates)
+    return tokens
+
+
+def _extract_filename_place_part(places_value: str) -> str:
+    places = split_place_values(places_value)
+    if not places:
+        return ""
+
+    normalized = [_normalize_place_token_for_grouping(place) for place in places if place]
+    if len(normalized) <= 1:
+        return normalized[0] if normalized else ""
+
+    roemhild_tokens = _roemhild_place_tokens()
+    all_known_roemhild = all(place in roemhild_tokens for place in normalized)
+    has_roemhild_place = any(place in roemhild_tokens for place in normalized)
+
+    if len(normalized) > 1:
+        if all_known_roemhild and has_roemhild_place:
+            return "Gemeinden_Römhild"
+        return "andere_Orte"
+
+    return normalized[0]
 
 
 def normalize_date_for_filename(value: str) -> str:
@@ -239,14 +320,22 @@ def make_normalized_archive_filename(metadata: dict, requested_filename: str) ->
     stem = normalize_filename_component(stem)
     date_text = metadata.get("document_date") or metadata.get("date") or ""
     date_part = normalize_date_for_filename(str(date_text)) or "0000"
-    place_part = normalize_filename_component(str(metadata.get("place") or metadata.get("ort") or ""))
+    place_input = str(metadata.get("place") or metadata.get("ort") or "")
+    place_candidates = [
+        _normalize_place_token_for_grouping(part)
+        for part in split_place_values(place_input)
+        if part
+    ]
+    place_part = _extract_filename_place_part(place_input)
+    place_part = normalize_filename_component(place_part)
 
     # v79: Dateiname ist immer DATUM_ORT_rest.ext.
     # Datum fehlt -> 0000. Ort kommt immer aus den Metadaten in das Präfix.
     # Kommt der Ort im Restdateinamen erneut vor, wird er dort entfernt.
     stem_tokens = [tok for tok in stem.split("_") if tok]
+    cleanup_tokens = _build_filename_cleanup_tokens(place_part, place_candidates)
     if place_part and place_part != "datei":
-        stem_tokens = [tok for tok in stem_tokens if tok != place_part]
+        stem_tokens = [tok for tok in stem_tokens if tok not in cleanup_tokens]
     stem = "_".join(stem_tokens) or "datei"
 
     parts = []
