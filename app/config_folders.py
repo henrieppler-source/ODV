@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
-from .app_logging import app_log
+from .app_logging import app_log, app_log_exception
 from .config import save_config
 from .file_service import find_writable_folders
 
@@ -275,59 +276,121 @@ class ConfigFoldersMixin:
         self.wait_window(dlg)
         return selected_path[0]
 
-    def load_writable_folders(self, show_message: bool = True) -> None:
-        if self._loading_writable_folders:
-            return
-        self._loading_writable_folders = True
-        try:
-            base = self.nextcloud_base_path(show_message=show_message)
-            if base is None:
-                self.writable_folders = []
-                self.target_folder_map = {}
-                target_combo = self.target_combo
-                target_folder_var = self.target_folder_var
-                file_view_combo = self.file_view_combo
-                if target_combo is not None:
-                    target_combo["values"] = []
-                if target_folder_var is not None:
-                    target_folder_var.set("")
-                if file_view_combo is not None:
-                    self.refresh_file_view_folder_choices()
-                return
-            self.ensure_standard_metadata_folder()
-            self.writable_folders = find_writable_folders(base)
-            metadata_folder = self.metadata_folder_path()
-            filtered: list[Path] = []
-            for folder in self.writable_folders:
-                try:
-                    if folder == metadata_folder or metadata_folder in folder.parents:
-                        continue
-                except Exception:
-                    pass
-                if not self.is_folder_allowed_for_current_user(folder, base):
+    def _build_writable_folders(self, base: Path) -> list[Path]:
+        self.ensure_standard_metadata_folder()
+        writable = find_writable_folders(base)
+        metadata_folder = self.metadata_folder_path()
+        filtered: list[Path] = []
+        for folder in writable:
+            try:
+                if folder == metadata_folder or metadata_folder in folder.parents:
                     continue
-                filtered.append(folder)
-            self.writable_folders = filtered
-            self.target_folder_map = {self.display_path_for_folder(path, base): path for path in self.writable_folders}
-            values = sorted(self.target_folder_map.keys(), key=str.lower)
-            target_combo = self.target_combo
-            target_folder_var = self.target_folder_var
-            if target_combo is not None:
-                target_combo["values"] = values
-            if values and target_folder_var is not None and target_folder_var.get() not in values:
-                target_folder_var.set(self.default_upload_target() or values[0])
-            elif not values:
-                if target_folder_var is not None:
-                    target_folder_var.set("")
-            file_view_combo = self.file_view_combo
-            if file_view_combo is not None:
-                self.refresh_file_view_folder_choices()
-            admin_destination_combo = self.admin_destination_combo
-            if admin_destination_combo is not None:
-                self.refresh_admin_destination_choices()
-            self.update_connection_status()
-            app_log("info", "Zielordner geprüft", count=len(values), user=self.username_var.get())
+            except Exception:
+                pass
+            if not self.is_folder_allowed_for_current_user(folder, base):
+                continue
+            filtered.append(folder)
+        return filtered
+
+    def _apply_writable_folder_state(
+        self,
+        folders: list[Path],
+        base: Path,
+        show_message: bool,
+        request_id: int,
+        scan_error: Exception | None = None,
+    ) -> None:
+        if request_id != getattr(self, "_load_writable_request_id", -1):
+            return
+
+        if scan_error is not None:
+            app_log_exception("Zielordner konnten nicht geprüft werden", scan_error, user=self.username_var.get())
             if show_message:
-                messagebox.showinfo("Ordnerprüfung", f"{len(values)} beschreibbare Zielordner gefunden.")
-        finally:
-            self._loading_writable_folders = False
+                messagebox.showerror("Ordnerprüfung", f"Zielordner konnten nicht geprüft werden:\n{scan_error}")
+            folders = []
+
+        self.writable_folders = folders
+        self.target_folder_map = {self.display_path_for_folder(path, base): path for path in self.writable_folders}
+        values = sorted(self.target_folder_map.keys(), key=str.lower)
+        target_combo = self.target_combo
+        target_folder_var = self.target_folder_var
+        if target_combo is not None:
+            target_combo["values"] = values
+        if values and target_folder_var is not None and target_folder_var.get() not in values:
+            target_folder_var.set(self.default_upload_target() or values[0])
+        elif not values and target_folder_var is not None:
+            target_folder_var.set("")
+        file_view_combo = self.file_view_combo
+        if file_view_combo is not None:
+            try:
+                self.refresh_file_view_folder_choices()
+            except Exception:
+                pass
+        admin_destination_combo = self.admin_destination_combo
+        if admin_destination_combo is not None:
+            try:
+                self.refresh_admin_destination_choices()
+            except Exception:
+                pass
+        try:
+            self.update_connection_status()
+        except Exception:
+            pass
+        app_log("info", "Zielordner geprüft", count=len(values), user=self.username_var.get())
+        if show_message and scan_error is None:
+            messagebox.showinfo("Ordnerprüfung", f"{len(values)} beschreibbare Zielordner gefunden.")
+        self._loading_writable_folders = False
+
+    def _clear_writable_folders(self, show_message: bool) -> None:
+        self._load_writable_request_id = getattr(self, "_load_writable_request_id", 0) + 1
+        self._loading_writable_folders = True
+        self.writable_folders = []
+        self.target_folder_map = {}
+        target_combo = self.target_combo
+        target_folder_var = self.target_folder_var
+        if target_combo is not None:
+            target_combo["values"] = []
+        if target_folder_var is not None:
+            target_folder_var.set("")
+        file_view_combo = self.file_view_combo
+        if file_view_combo is not None:
+            self.refresh_file_view_folder_choices()
+        self._loading_writable_folders = False
+        if show_message:
+            messagebox.showinfo("Ordnerprüfung", "0 beschreibbare Zielordner gefunden.")
+
+    def load_writable_folders(self, show_message: bool = True, async_scan: bool = False) -> None:
+        if self._loading_writable_folders:
+            if show_message:
+                messagebox.showinfo("Ordnerprüfung", "Zielordnerprüfung läuft bereits. Bitte warten.")
+            return
+
+        base = self.nextcloud_base_path(show_message=show_message)
+        if base is None:
+            self._clear_writable_folders(show_message=show_message)
+            return
+
+        request_id = getattr(self, "_load_writable_request_id", 0) + 1
+        self._load_writable_request_id = request_id
+        self._loading_writable_folders = True
+
+        if not async_scan:
+            try:
+                folders = self._build_writable_folders(base)
+            except Exception as exc:
+                self._apply_writable_folder_state([], base, show_message, request_id, scan_error=exc)
+            else:
+                self._apply_writable_folder_state(folders, base, show_message, request_id)
+            return
+
+        app_log("info", "Zielordnerprüfung asynchron gestartet", user=self.username_var.get(), base=str(base))
+
+        def worker() -> None:
+            try:
+                folders = self._build_writable_folders(base)
+            except Exception as exc:
+                self.after(0, lambda: self._apply_writable_folder_state([], base, show_message, request_id, scan_error=exc))
+            else:
+                self.after(0, lambda: self._apply_writable_folder_state(folders, base, show_message, request_id))
+
+        threading.Thread(target=worker, daemon=True).start()

@@ -169,7 +169,10 @@ class MainWindowMixin:
         menubar = tk.Menu(self)
         file_menu = tk.Menu(menubar, tearoff=False)
         file_menu.add_command(label="Stammdaten...", command=self.open_masterdata_dialog)
-        file_menu.add_command(label="Nextcloud-Zielordner neu prüfen", command=self.load_writable_folders)
+        file_menu.add_command(
+            label="Nextcloud-Zielordner neu prüfen",
+            command=lambda: self.load_writable_folders(show_message=True, async_scan=True),
+        )
         file_menu.add_separator()
         file_menu.add_command(label="Benutzer wechseln...", command=self.logout_and_login)
         file_menu.add_separator()
