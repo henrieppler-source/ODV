@@ -126,7 +126,15 @@ class FileTreeManagerMixin:
         hay = [path.name]
         try:
             item = self.file_view_metadata_by_path.get(str(path)) or {}
-            hay.extend([str(item.get("keywords") or ""), str(item.get("description") or "")])
+            hay.extend(
+                [
+                    str(item.get("keywords") or ""),
+                    str(item.get("description") or ""),
+                    str(item.get("original_filename") or ""),
+                    str(item.get("stored_filename") or ""),
+                    str(item.get("current_filename") or ""),
+                ]
+            )
         except Exception:
             pass
         return any(term in self.normalize_search_text(x) for x in hay)
@@ -218,21 +226,77 @@ class FileTreeManagerMixin:
                     continue
                 display_name = child.name
                 display_name = f"{self.pdf_display_prefix(child)}{display_name}"
-                if child.suffix.lower() == ".pdf":
-                    linked = {}
-                    linked_resolver = getattr(self, "linked_pdf_paths_for_item", None)
-                    if callable(linked_resolver):
-                        linked = linked_resolver(self.file_view_metadata_by_path.get(str(child)), child) or {}
-                    if not linked.get("ocr") and not self.pdf_is_non_searchable_text(child, has_linked_ocr=bool(linked.get("ocr"))):
-                        display_name = f"# {display_name}"
                 if str(child) not in self.file_view_metadata_by_path:
                     display_name = f"* {display_name}"
                 self.file_tree.insert(parent_id, "end", text=display_name, values=(str(child),), open=False, tags=self.pdf_tree_tags(child))
+
+    @staticmethod
+    def _strip_file_tree_prefixes(text: str) -> str:
+        cleaned = text
+        changed = True
+        while changed:
+            changed = False
+            for marker in ("* ", "# "):
+                if cleaned.startswith(marker):
+                    cleaned = cleaned[len(marker) :]
+                    changed = True
+        return cleaned
+
+    def _has_document_ocr_copy(self, path: Path, item: dict | None = None) -> bool:
+        if path.suffix.lower() != ".pdf":
+            return False
+        if path.name.lower().endswith("_ocr.pdf"):
+            return True
+        linked_resolver = getattr(self, "linked_pdf_paths_for_item", None)
+        if callable(linked_resolver):
+            linked = linked_resolver(item, path) or {}
+            if linked.get("ocr"):
+                return True
+        if path.with_name(f"{path.stem}_ocr.pdf").exists():
+            return True
+        return False
+
+    def _format_file_tree_pdf_name(
+        self,
+        path: Path,
+        item: dict | None,
+        base_text: str,
+        check_searchability: bool,
+    ) -> str:
+        raw_name = self._strip_file_tree_prefixes(base_text)
+        raw_name = f"{self.pdf_display_prefix(path)}{raw_name}" if path.suffix.lower() == ".pdf" else raw_name
+        name_has_markers = str(path) not in self.file_view_metadata_by_path
+        if path.suffix.lower() != ".pdf":
+            return f"* {raw_name}" if name_has_markers else raw_name
+
+        has_ocr_copy = self._has_document_ocr_copy(path=path, item=item)
+        if has_ocr_copy:
+            return f"* {raw_name}" if name_has_markers else raw_name
+
+        if check_searchability and self.pdf_is_non_searchable_text(path, has_linked_ocr=False):
+            return f"* # {raw_name}" if name_has_markers else f"# {raw_name}"
+        return f"* {raw_name}" if name_has_markers else raw_name
+
+    def _update_selected_tree_item_searchability_marker(self) -> None:
+        selection = self.file_tree.selection()
+        if not selection:
+            return
+        item_id = selection[0]
+        values = self.file_tree.item(item_id, "values")
+        if not values:
+            return
+        path = Path(values[0])
+        item = self.file_view_metadata_by_path.get(str(path))
+        text = str(self.file_tree.item(item_id, "text") or "")
+        marked = self._format_file_tree_pdf_name(path=path, item=item, base_text=text, check_searchability=True)
+        if marked and marked != text:
+            self.file_tree.item(item_id, text=marked)
 
     def on_file_tree_select(self) -> None:
         sel = self.file_tree.selection()
         if not sel:
             return
+        self._update_selected_tree_item_searchability_marker()
         values = self.file_tree.item(sel[0], "values")
         if not values:
             return
