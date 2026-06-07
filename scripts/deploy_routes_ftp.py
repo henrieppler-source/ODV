@@ -42,7 +42,9 @@ def main() -> int:
 
     local_dir = Path("server")
     main_path = local_dir / "routes.php"
+    local_shared_dir = local_dir / "shared"
     local_files: list[Path] = []
+    local_shared_files: list[Path] = []
     seen: set[str] = set()
     for candidate in [main_path, *sorted(local_dir.glob("routes*.php"))]:
         try:
@@ -54,6 +56,8 @@ def main() -> int:
             continue
         seen.add(key)
         local_files.append(candidate)
+    if local_shared_dir.is_dir():
+        local_shared_files.extend(sorted(local_shared_dir.glob("*.php")))
 
     remote_dir = posixpath.dirname(remote_path)
     remote_main_name = posixpath.basename(remote_path)
@@ -77,6 +81,19 @@ def main() -> int:
             with local_path.open("rb") as fh:
                 ftp.storbinary(f"STOR {remote_name}", fh)
             uploaded.append(remote_name)
+
+        if local_shared_files:
+            try:
+                if "shared" not in set(ftp.nlst()):
+                    ftp.mkd("shared")
+                ftp.cwd("shared")
+                shared_files = sorted({str(p.resolve()).lower(): p for p in local_shared_files}.values(), key=lambda p: p.name)
+                for local_path in shared_files:
+                    with local_path.open("rb") as fh:
+                        ftp.storbinary(f"STOR {local_path.name}", fh)
+                    uploaded.append(f"shared/{local_path.name}")
+            finally:
+                ftp.cwd("..")
 
         backups = [name for name in ftp.nlst() if _is_routes_backup_name(name)]
         grouped: dict[str, list[str]] = {}
