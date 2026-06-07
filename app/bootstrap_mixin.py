@@ -49,6 +49,7 @@ class BootstrapMixin:
         self.target_combo = None
         self.target_folder_var = None
         self.file_view_merge_pdfs_button = None
+        self.file_view_open_ocr_button = None
         self._loading_admin_details = False
         self._last_lock_warning = ""
         self.file_preview_image = None
