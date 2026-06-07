@@ -212,7 +212,11 @@ class PostprocessManagerMixin:
             self.admin_openai_status_var.set("OpenAI: Datei ist kein lesbares Textdokument/PDF")
             return
         analysis_path = self.existing_ocr_pdf_for_path(path) or path
-        sample = self.extract_upload_text_sample(analysis_path, max_chars=500, max_pdf_pages=2)
+        sample = self.extract_upload_text_sample(
+            analysis_path,
+            max_chars=self.openai_text_sample_chars(),
+            max_pdf_pages=self.openai_pdf_sample_pages(),
+        )
         item = self.selected_admin_upload() or {}
         can_edit = self.can_edit_file_view_metadata(path, item)
         contexts_button = self.admin_place_contexts_button
