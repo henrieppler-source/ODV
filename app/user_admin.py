@@ -462,7 +462,7 @@ class UserAdminMixin:
                     ))
                     users_by_iid[uid] = user
                     if user_id_text:
-                        users_by_id.setdefault(user_id_text, user)
+                        users_by_id[user_id_text] = user
                 if select_id is not None and tree.exists(str(select_id)):
                     tree.selection_set(str(select_id))
                     tree.see(str(select_id))
@@ -597,7 +597,11 @@ class UserAdminMixin:
                     self.after(0, lambda fallback_user=fallback_user, item_values=item_values: _apply_selected_user_record(fallback_user, item_values, "lokal"))
                 return
 
+            request_id = refresh_state["id"]
+
             def worker() -> None:
+                if request_id != refresh_state["id"]:
+                    return
                 try:
                     payload = self.api.get_user(self.api_token, resolved_id)
                     user_record = payload.get("user")
@@ -605,7 +609,9 @@ class UserAdminMixin:
                         raise RuntimeError("Ungültige Benutzerdaten")
                     self.after(0, lambda user_record=user_record, item_values=item_values: _apply_selected_user_record(user_record, item_values, "Server"))
                 except Exception:
-                    if fallback_user is not None:
+                    if request_id != refresh_state["id"]:
+                        return
+                    if item_values:
                         self.after(0, lambda fallback_user=fallback_user, item_values=item_values: _apply_selected_user_record(fallback_user, item_values, "lokal"))
                     else:
                         self.after(0, lambda: users_status_var.set("Auswahl konnte nicht aufgelöst werden."))
