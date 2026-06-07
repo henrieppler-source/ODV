@@ -8,7 +8,7 @@ from typing import Any
 
 import tkinter as tk
 
-from .app_logging import app_log
+from .app_logging import app_log, app_log_exception
 from .api_client import APIClient
 from .config import load_config
 from .database import init_db
@@ -109,12 +109,22 @@ class BootstrapMixin:
         self.deiconify()
         if not self.ui_settings().get("main_window", {}).get("geometry"):
             self.after(50, self.maximize_window)
-        self.refresh_history()
-        self.load_folders_from_config()
-        self.refresh_window_title()
+        self.after(150, self._run_startup_background_tasks)
+        self.after(150, self.refresh_window_title)
         self.after(1200, lambda: threading.Thread(target=self.ensure_ghostscript_on_startup, daemon=True).start())
         self.after(500, self.show_startup_action_warnings)
         if not self.skip_update_check_once:
             self.after(7600, self.check_app_update_on_startup)
         else:
             app_log("info", "Start-Updateprüfung übersprungen, weil ODV gerade aus einem Update gestartet wurde")
+
+    def _run_startup_background_tasks(self) -> None:
+        """Führt potenziell längere Startaufgaben aus, nachdem das Fenster sichtbar ist."""
+        try:
+            self.refresh_history()
+        except Exception as exc:
+            app_log_exception("Initiale Historie konnte nicht geladen werden", exc)
+        try:
+            self.load_folders_from_config()
+        except Exception as exc:
+            app_log_exception("Startordner konnten nicht geladen werden", exc)
