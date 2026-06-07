@@ -122,14 +122,17 @@ class BootstrapMixin:
 
     def _run_startup_background_tasks(self) -> None:
         """Führt potenziell längere Startaufgaben aus, nachdem das Fenster sichtbar ist."""
-        try:
-            self.refresh_history()
-        except Exception as exc:
-            app_log_exception("Initiale Historie konnte nicht geladen werden", exc)
-        try:
-            self.load_folders_from_config()
-        except Exception as exc:
-            app_log_exception("Startordner konnten nicht geladen werden", exc)
+        def worker() -> None:
+            try:
+                self.refresh_history()
+            except Exception as exc:
+                app_log_exception("Initiale Historie konnte nicht geladen werden", exc)
+            try:
+                self.load_folders_from_config()
+            except Exception as exc:
+                app_log_exception("Startordner konnten nicht geladen werden", exc)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _release_tab_event_suspend(self) -> None:
         self._suspend_notebook_tab_events = False
