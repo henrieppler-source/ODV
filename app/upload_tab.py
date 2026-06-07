@@ -534,7 +534,7 @@ class UploadTabMixin:
         ocr_path = self.current_upload_ocr_pdf_path()
         sample = self.extract_upload_text_sample(
             ocr_path if ocr_path and ocr_path.exists() else path,
-            max_chars=min(2500, self.openai_text_sample_chars()),
+            max_chars=self.openai_text_sample_chars(),
             max_pdf_pages=self.openai_pdf_sample_pages(),
         )
         text = sample or ""
