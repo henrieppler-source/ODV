@@ -247,6 +247,7 @@ class UserAdminMixin:
         active_var = tk.BooleanVar(value=True)
         selected_user_id = {"id": None}
         api_users: list[dict] = []
+        users_by_iid: dict[str, dict] = {}
         refresh_state = {"id": 0}
         users_status_var = tk.StringVar(value="")
         users_refresh_button: tk.Button | None = None
@@ -410,7 +411,7 @@ class UserAdminMixin:
                         pass
 
         def refresh_tree(select_id: int | None = None):
-            nonlocal api_users
+            nonlocal api_users, users_by_iid
             if not dialog.winfo_exists():
                 return
             refresh_state["id"] += 1
@@ -435,10 +436,20 @@ class UserAdminMixin:
                 if request_id != refresh_state["id"]:
                     return
                 api_users = users
+                users_by_iid = {}
                 for item in tree.get_children():
                     tree.delete(item)
                 for user in api_users:
-                    uid = str(user.get("id"))
+                    user_id_text = (
+                        str(user.get("id") or user.get("user_id") or user.get("uid") or user.get("userId") or user.get("api_id") or "").strip()
+                    )
+                    if not user_id_text:
+                        user_id_text = f"row-{len(users_by_iid)}"
+                    uid = user_id_text
+                    suffix = 1
+                    while tree.exists(uid):
+                        suffix += 1
+                        uid = f"{user_id_text}#{suffix}"
                     tree.insert("", "end", iid=uid, values=(
                         user.get("display_name", ""),
                         user.get("username", ""),
@@ -448,6 +459,7 @@ class UserAdminMixin:
                         "ja" if int(user.get("is_active", 0) or 0) == 1 else "nein",
                         user.get("last_login_at", "") or "",
                     ))
+                    users_by_iid[uid] = user
                 if select_id is not None and tree.exists(str(select_id)):
                     tree.selection_set(str(select_id))
                     tree.see(str(select_id))
@@ -477,9 +489,8 @@ class UserAdminMixin:
                 return 0
 
         def find_loaded_user(user_id: str) -> dict | None:
-            user_id_text = str(user_id or "").strip()
             for user in api_users:
-                if str(user.get("id") or "").strip() == user_id_text:
+                if str(user.get("id") or user.get("user_id") or user.get("uid") or user.get("userId") or user.get("api_id") or "").strip() == user_id:
                     return user
             return None
 
@@ -520,7 +531,9 @@ class UserAdminMixin:
                 return
             user_id = str(sel[0]).strip()
             selected_user_id["id"] = user_id
-            user = find_loaded_user(user_id)
+            user = users_by_iid.get(user_id)
+            if user is None and not user_id.startswith("row-"):
+                user = find_loaded_user(user_id)
             if not user:
                 return
             try:
