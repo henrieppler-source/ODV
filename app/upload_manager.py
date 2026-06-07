@@ -700,8 +700,12 @@ class UploadManagerMixin:
             source_sha256 = cached_sha256
         else:
             source_sha256 = self.compute_source_sha256(source)
-        if source_sha256 and not self.confirm_upload_for_duplicate(source, source_sha256):
+        duplicate_checked = bool(getattr(self, "_selected_upload_duplicate_checked", False)) and cached_source is not None and str(Path(cached_source)) == str(Path(source)) and cached_sha256 == source_sha256
+        if source_sha256 and not duplicate_checked and not self.confirm_upload_for_duplicate(source, source_sha256):
+            self._selected_upload_duplicate_checked = False
             return False, "Upload abgebrochen: Es wurde bereits eine identische Datei in ODV gefunden."
+        if source_sha256 and cached_source is not None and str(Path(cached_source)) == str(Path(source)):
+            self._selected_upload_duplicate_checked = True
 
         requested_filename = str(self.meta_vars.get("current_filename", tk.StringVar()).get()).strip()
         if self.selected_folder is not None and not requested_filename:

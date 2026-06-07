@@ -355,6 +355,7 @@ class UploadTabMixin:
         self.selected_folder = None
         self._selected_upload_source_file = None
         self._selected_upload_source_sha256 = ""
+        self._selected_upload_duplicate_checked = False
         self.upload_ocr_pdf_path = None
         self.file_var.set("")
         self.upload_drop_hint_var.set("Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
@@ -1183,6 +1184,7 @@ class UploadTabMixin:
                 "Der Upload wurde abgebrochen. Bitte eine andere Datei wählen oder im Warnungsdialog \"Trotzdem hochladen\" entscheiden.",
             )
             return
+        self._selected_upload_duplicate_checked = True
         self.reset_upload_metadata_for_new_file()
         self.selected_file = path
         self.selected_folder = None
