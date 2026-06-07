@@ -15,13 +15,21 @@ except Exception:  # Tk ist im PyInstaller-Build vorhanden; Fallback nur zur Sic
     tk = None
     messagebox = None
 
+if os.name == "nt":
+    try:
+        _HIDDEN_WINDOW_FLAG = subprocess.CREATE_NO_WINDOW
+    except AttributeError:
+        _HIDDEN_WINDOW_FLAG = 0
+else:
+    _HIDDEN_WINDOW_FLAG = 0
+
 SKIP_NAMES = set()
 
 
 def hidden_subprocess_kwargs() -> dict:
     """Verhindert sichtbare Konsolen-/Eingabefenster bei Hilfsaufrufen unter Windows."""
     if os.name == "nt":
-        return {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0)}
+        return {"creationflags": _HIDDEN_WINDOW_FLAG}
     return {}
 
 

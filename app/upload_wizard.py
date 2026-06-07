@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk, messagebox
-from pathlib import Path
+from tkinter import ttk
 
 from .file_service import is_image_file
 
@@ -13,6 +12,63 @@ TRANSCRIPTION_TYPE_OPTIONS = [
     "schwierige Handschrift",
     "Zeitung / Akte / Urkunde",
 ]
+
+WIZARD_SOURCE_FIELDS = (
+    ("Primärquelle", "primary_source"),
+    ("Sekundärquelle", "secondary_source"),
+    ("Standort Original", "original_location"),
+    ("Archiv / Sammlung", "archive_name"),
+    ("Signatur", "archive_signature"),
+    ("Abruf am", "archive_accessed_at"),
+)
+
+WIZARD_RIGHTS_FIELDS = (
+    ("Urheber/in", "copyright_author"),
+    ("Rechteinhaber", "rights_holder"),
+    ("Nutzungsfreigabe", "usage_permission"),
+    ("Lizenz / Einschränkungen", "license_note"),
+    ("Rechtehinweis", "rights_note"),
+)
+
+WIZARD_POTENTIAL_POINT_CHECKS = (
+    ("document_date", "document_date", "document_date", 1, "Datum/Zeitraum"),
+    ("event", "event", "event_topic", 1, "Ereignis"),
+    ("description", "description", "metadata_description", 2, "Beschreibung"),
+    ("keywords", "keywords", "metadata_keywords", 2, "Stichwörter"),
+    ("source", "primary_source", "metadata_source", 2, "Quelle/Herkunft"),
+    ("usage_permission", "usage_permission", "rights_usage_permission", 3, "Nutzungsfreigabe"),
+    ("rights_note", "rights_note", "rights_note", 2, "Rechtehinweis"),
+    ("copyright_author", "copyright_author", "rights_author", 2, "Urheber/in"),
+    ("rights_holder", "rights_holder", "rights_holder", 2, "Rechteinhaber"),
+    ("archive_name", "archive_name", "archive_name", 1, "Archiv/Sammlung"),
+    ("archive_signature", "archive_signature", "archive_signature", 2, "Signatur"),
+)
+
+UPLOAD_META_FIELD_KEYS = (
+    "upload_id",
+    "document_type",
+    "status",
+    "uploaded_by",
+    "uploaded_at",
+    "primary_source",
+    "secondary_source",
+    "original_location",
+    "archive_name",
+    "archive_signature",
+    "archive_accessed_at",
+    "document_date",
+    "event",
+    "place",
+    "gps_coordinates",
+    "gps_place",
+    "keywords",
+    "copyright_author",
+    "rights_holder",
+    "usage_permission",
+    "license_note",
+    "rights_note",
+    "transcription_note",
+)
 
 
 class UploadWizard:
@@ -27,44 +83,22 @@ class UploadWizard:
         self.create_ui()
 
     def create_upload_meta_vars(self) -> None:
-        if not hasattr(self.owner, "upload_filename_var"):
+        if self.owner.upload_filename_var is None:
             self.owner.upload_filename_var = tk.StringVar()
-        values = {
-            "upload_id": tk.StringVar(),
-            "document_type": tk.StringVar(),
-            "status": tk.StringVar(),
-            "current_filename": self.owner.upload_filename_var,
-            "uploaded_by": tk.StringVar(),
-            "uploaded_at": tk.StringVar(),
-            "primary_source": tk.StringVar(),
-            "secondary_source": tk.StringVar(),
-            "original_location": tk.StringVar(),
-            "archive_name": tk.StringVar(),
-            "archive_signature": tk.StringVar(),
-            "archive_accessed_at": tk.StringVar(),
-            "document_date": tk.StringVar(),
-            "event": tk.StringVar(),
-            "place": tk.StringVar(),
-            "gps_coordinates": tk.StringVar(),
-            "gps_place": tk.StringVar(),
-            "keywords": tk.StringVar(),
-            "copyright_author": tk.StringVar(),
-            "rights_holder": tk.StringVar(),
-            "usage_permission": tk.StringVar(),
-            "license_note": tk.StringVar(),
-            "rights_note": tk.StringVar(),
-            "transcription_done": tk.BooleanVar(value=False),
-            "transcription_type": tk.StringVar(),
-            "transcription_note": tk.StringVar(),
-        }
+        values = {key: tk.StringVar() for key in UPLOAD_META_FIELD_KEYS}
+        values["current_filename"] = self.owner.upload_filename_var
+        values["transcription_done"] = tk.BooleanVar(value=False)
+        values["transcription_type"] = tk.StringVar()
         self.owner.meta_vars = values
         self.owner.upload_option_comboboxes = {}
         self.owner.upload_description_counter_var = tk.StringVar(value="Zeichen: 0 / 50")
         self.owner.person_status_var = tk.StringVar(value="none")
         self.owner.person_summary_var = tk.StringVar(value="Keine Personen markiert.")
         self.owner.upload_multiline_meta_widgets = {}
+        def _refresh_planned_upload_filename() -> None:
+            self.owner.refresh_planned_upload_filename()
         for key in ("document_date", "place"):
-            values[key].trace_add("write", lambda *_args: getattr(self.owner, "refresh_planned_upload_filename", lambda *a, **k: None)())
+            values[key].trace_add("write", lambda *_args: _refresh_planned_upload_filename())
 
     def bind_multiline_meta_field(self, key: str, widget: tk.Text) -> None:
         var = self.owner.meta_vars[key]
@@ -238,24 +272,8 @@ class UploadWizard:
         self.source_hint_var = tk.StringVar(value="Quellenfelder helfen bei späterer Recherche und sollten so vollständig wie möglich sein. Ohne Quellenangaben können Dokumente nicht verwendet werden oder sind nicht belastbar.")
         ttk.Label(frame, textvariable=self.source_hint_var, foreground="#555555", wraplength=820).grid(row=1, column=0, columnspan=4, sticky="w", pady=(0, 10))
 
-        source_fields = [
-            ("Primärquelle", "primary_source"),
-            ("Sekundärquelle", "secondary_source"),
-            ("Standort Original", "original_location"),
-            ("Archiv / Sammlung", "archive_name"),
-            ("Signatur", "archive_signature"),
-            ("Abruf am", "archive_accessed_at"),
-        ]
-        rights_fields = [
-            ("Urheber/in", "copyright_author"),
-            ("Rechteinhaber", "rights_holder"),
-            ("Nutzungsfreigabe", "usage_permission"),
-            ("Lizenz / Einschränkungen", "license_note"),
-            ("Rechtehinweis", "rights_note"),
-        ]
-
         source_row = 2
-        for label, key in source_fields:
+        for label, key in WIZARD_SOURCE_FIELDS:
             ttk.Label(frame, text=f"{label}:").grid(row=source_row, column=0, sticky="w", pady=2)
             if key == "archive_name":
                 widget = ttk.Combobox(
@@ -272,7 +290,7 @@ class UploadWizard:
             source_row += 1
 
         rights_row = 2
-        for label, key in rights_fields:
+        for label, key in WIZARD_RIGHTS_FIELDS:
             ttk.Label(frame, text=f"{label}:").grid(row=rights_row, column=2, sticky=("nw" if key == "rights_note" else "w"), pady=2)
             if key == "rights_note":
                 widget = tk.Text(frame, height=3, wrap="word", undo=True)
@@ -438,8 +456,9 @@ class UploadWizard:
             "openai_metadata": 2,
         }
         try:
-            if getattr(self.owner, "api_token", ""):
-                resp = self.owner.api.list_point_rules(self.owner.api_token, self.owner._current_points_year())
+            api_token = self.owner.api_token
+            if api_token:
+                resp = self.owner.api.list_point_rules(api_token, self.owner._current_points_year())
                 for rule in resp.get("rules", []) or []:
                     if int(rule.get("is_active", 1)) == 1:
                         defaults[str(rule.get("rule_key") or "")] = int(rule.get("points", 0) or 0)
@@ -453,24 +472,21 @@ class UploadWizard:
                 return key, int(rules.get(key, default) or 0)
         return fallback, default
 
+    @staticmethod
+    def person_display_name(person) -> str:
+        if isinstance(person, dict):
+            return str(person.get("display_name") or person.get("name") or "")
+        try:
+            person_vars = vars(person)
+        except Exception:
+            person_vars = {}
+        return str(person_vars.get("display_name", "") or person_vars.get("name", "") or "")
+
     def potential_points_lines(self) -> list[str]:
         rules = self.current_point_rules()
-        checks = [
-            ("document_date", "document_date", "document_date", 1, "Datum/Zeitraum"),
-            ("event", "event", "event_topic", 1, "Ereignis"),
-            ("description", "description", "metadata_description", 2, "Beschreibung"),
-            ("keywords", "keywords", "metadata_keywords", 2, "Stichwörter"),
-            ("source", "primary_source", "metadata_source", 2, "Quelle/Herkunft"),
-            ("usage_permission", "usage_permission", "rights_usage_permission", 3, "Nutzungsfreigabe"),
-            ("rights_note", "rights_note", "rights_note", 2, "Rechtehinweis"),
-            ("copyright_author", "copyright_author", "rights_author", 2, "Urheber/in"),
-            ("rights_holder", "rights_holder", "rights_holder", 2, "Rechteinhaber"),
-            ("archive_name", "archive_name", "archive_name", 1, "Archiv/Sammlung"),
-            ("archive_signature", "archive_signature", "archive_signature", 2, "Signatur"),
-        ]
         lines: list[str] = []
         total = 0
-        for field, meta_key, fallback, default, label in checks:
+        for field, meta_key, fallback, default, label in WIZARD_POTENTIAL_POINT_CHECKS:
             if field == "description":
                 value = self.owner.description_text.get("1.0", "end-1c").strip()
                 eligible = len(value) >= 50
@@ -499,22 +515,18 @@ class UploadWizard:
             if points > 0:
                 total += points
                 lines.append(f"+ {points} Transkription ({rule_key})")
-        persons = getattr(self.owner, "persons", []) or []
+        persons = self.owner.persons or []
         if persons:
             points = int(rules.get("persons_marked", 1) or 0)
             if points > 0:
                 total += points
                 lines.append(f"+ {points} Personen markiert (persons_marked)")
-            def person_name(person) -> str:
-                if isinstance(person, dict):
-                    return str(person.get("display_name") or person.get("name") or "")
-                return str(getattr(person, "display_name", "") or getattr(person, "name", "") or "")
-            if any(person_name(p).strip() for p in persons):
+            if any(self.person_display_name(person).strip() for person in persons):
                 points = int(rules.get("persons_named", 2) or 0)
                 if points > 0:
                     total += points
                     lines.append(f"+ {points} Personen benannt (persons_named)")
-        openai_fields = getattr(self.owner, "openai_metadata_applied_fields", []) or []
+        openai_fields = self.owner.openai_metadata_applied_fields or []
         if openai_fields:
             points = int(rules.get("openai_metadata", 2) or 0)
             if points > 0:
@@ -527,7 +539,20 @@ class UploadWizard:
     def update_summary(self) -> None:
         if self.summary_text is None or self.points_text is None:
             return
-        fields = [
+        fields = self._summary_fields()
+        self.summary_text.configure(state="normal")
+        self.summary_text.delete("1.0", "end")
+        for label, value in fields:
+            self.summary_text.insert("end", f"{label}: {value or '-'}\n")
+        self.summary_text.configure(state="disabled")
+        self.points_text.configure(state="normal")
+        self.points_text.delete("1.0", "end")
+        for line in self.potential_points_lines():
+            self.points_text.insert("end", f"{line}\n")
+        self.points_text.configure(state="disabled")
+
+    def _summary_fields(self) -> list[tuple[str, str]]:
+        return [
             ("Datei", self.owner.file_var.get().strip()),
             ("Geplanter Dateiname", self.owner.meta_vars["current_filename"].get().strip()),
             ("Dokumenttyp", self.owner.meta_vars["document_type"].get().strip()),
@@ -552,13 +577,3 @@ class UploadWizard:
             ("Bemerkung", self.owner.note_text.get("1.0", "end-1c").strip()),
             ("Personen", self.owner.person_summary_var.get().strip()),
         ]
-        self.summary_text.configure(state="normal")
-        self.summary_text.delete("1.0", "end")
-        for label, value in fields:
-            self.summary_text.insert("end", f"{label}: {value or '-'}\n")
-        self.summary_text.configure(state="disabled")
-        self.points_text.configure(state="normal")
-        self.points_text.delete("1.0", "end")
-        for line in self.potential_points_lines():
-            self.points_text.insert("end", f"{line}\n")
-        self.points_text.configure(state="disabled")

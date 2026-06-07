@@ -19,10 +19,16 @@ from .app_logging import app_log, app_log_exception
 
 class AppUpdateMixin:
     def app_version(self) -> str:
-        return str(getattr(self, "APP_VERSION", "v0") or "v0")
+        return str(self.APP_VERSION or "v0")
+
+    def is_frozen_runtime(self) -> bool:
+        try:
+            return bool(sys.frozen)
+        except Exception:
+            return False
 
     def app_short_name(self) -> str:
-        return str(getattr(self, "APP_SHORT_NAME", "ODV") or "ODV")
+        return str(self.APP_SHORT_NAME or "ODV")
 
     def parse_version_number(self, version: str) -> int:
         """Extrahiert die führende ODV-Versionsnummer aus Strings wie v69."""
@@ -95,7 +101,7 @@ class AppUpdateMixin:
 
     def resolve_nextcloud_update_source(self, update: dict) -> Path | None:
         """Ermittelt die lokale Nextcloud-Quelle der freigegebenen Update-Datei."""
-        base_text = self.base_folder_var.get().strip() if hasattr(self, "base_folder_var") else ""
+        base_text = self.base_folder_var.get().strip()
         if not base_text:
             return None
         base = Path(base_text).expanduser()
@@ -174,7 +180,7 @@ class AppUpdateMixin:
 
     def current_install_dir(self) -> Path:
         """Ermittelt den Programmordner, der vom Komfort-Updater ersetzt werden soll."""
-        if getattr(sys, "frozen", False):
+        if self.is_frozen_runtime():
             return Path(sys.executable).resolve().parent
         return Path(__file__).resolve().parent.parent
 
@@ -184,7 +190,7 @@ class AppUpdateMixin:
         candidates = [
             install_dir / "ODV_Updater.exe",
             install_dir / "updater" / "ODV_Updater.exe",
-            Path(sys.executable).resolve().parent / "ODV_Updater.exe" if getattr(sys, "frozen", False) else None,
+            Path(sys.executable).resolve().parent / "ODV_Updater.exe" if self.is_frozen_runtime() else None,
         ]
         for candidate in candidates:
             if candidate and candidate.exists() and candidate.is_file():

@@ -50,9 +50,7 @@ class HistoryManagerMixin:
         self.history_tree.bind("<Double-1>", lambda _e: self.show_history_metadata_details())
 
     def refresh_history(self) -> None:
-        if not hasattr(self, "history_tree"):
-            return
-        scope = getattr(self, "history_scope_var", tk.StringVar(value="all")).get()
+        scope = self.history_scope_var.get()
         self.config_data["history_scope"] = scope
         save_config(self.config_data)
         for item in self.history_tree.get_children():
@@ -62,7 +60,7 @@ class HistoryManagerMixin:
         if self.api_token:
             try:
                 response = self.api.list_documents(self.api_token, only_own=(scope == "own"))
-                current_name = (self.display_name_var.get().strip() if hasattr(self, "display_name_var") else "")
+                current_name = self.display_name_var.get().strip()
                 current_user_id = str((self.current_user or {}).get("id", ""))
                 for doc in response.get("documents", []):
                     if scope == "own":
@@ -91,12 +89,10 @@ class HistoryManagerMixin:
             self.history_upload_id_by_item[iid] = entry.upload_id
 
     def show_history_metadata_details(self) -> None:
-        if not hasattr(self, "history_tree"):
-            return
         sel = self.history_tree.selection()
         if not sel:
             return
-        upload_id = getattr(self, "history_upload_id_by_item", {}).get(sel[0])
+        upload_id = self.history_upload_id_by_item.get(sel[0])
         details = self.history_tree.item(sel[0], "values")
         item = None
         if upload_id and self.api_token:

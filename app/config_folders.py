@@ -43,11 +43,13 @@ class ConfigFoldersMixin:
 
 
     def ensure_standard_metadata_folder(self) -> None:
-        if not hasattr(self, "metadata_folder_var") or not hasattr(self, "base_folder_var"):
+        metadata_folder_var = self.metadata_folder_var
+        base_folder_var = self.base_folder_var
+        if not metadata_folder_var or not base_folder_var:
             return
-        base_text = self.base_folder_var.get().strip()
+        base_text = base_folder_var.get().strip()
         if not base_text:
-            self.metadata_folder_var.set("")
+            metadata_folder_var.set("")
             self.config_data["metadata_folder"] = ""
             return
         folder_name = self.config_data.get("metadata_folder_name", ".ortschronik_metadaten") or ".ortschronik_metadaten"
@@ -56,7 +58,7 @@ class ConfigFoldersMixin:
             folder_name = "." + folder_name
         self.config_data["metadata_folder_name"] = folder_name
         default_folder = Path(base_text).expanduser() / folder_name
-        self.metadata_folder_var.set(self.normalize_local_path_text(default_folder))
+        metadata_folder_var.set(self.normalize_local_path_text(default_folder))
         self.config_data["metadata_folder"] = self.normalize_local_path_text(default_folder)
 
     def set_default_metadata_folder(self, show_message: bool = True) -> None:
@@ -77,7 +79,7 @@ class ConfigFoldersMixin:
         Programmordner interpretiert werden, sonst erscheinen _internal, PIL,
         pypdf usw. in der Zielordnerauswahl.
         """
-        base_text = self.base_folder_var.get().strip() if hasattr(self, "base_folder_var") else ""
+        base_text = self.base_folder_var.get().strip()
         if not base_text:
             if show_message:
                 messagebox.showwarning("Nextcloud-Stammverzeichnis", "Bitte zuerst unter Datei > Stammdaten das lokale Nextcloud-Stammverzeichnis auswählen.")
@@ -237,7 +239,8 @@ class ConfigFoldersMixin:
         # Aktuellen Ordner markieren, falls möglich.
         current_path = None
         if current_display:
-            current_path = self.target_folder_map.get(current_display) or getattr(self, "admin_destination_map", {}).get(current_display)
+            admin_destination_map = self.admin_destination_map
+            current_path = self.target_folder_map.get(current_display) or admin_destination_map.get(current_display)
         if current_path:
             current_resolved = str(Path(current_path).resolve())
             for iid, pth in path_by_iid.items():
@@ -273,7 +276,7 @@ class ConfigFoldersMixin:
         return selected_path[0]
 
     def load_writable_folders(self, show_message: bool = True) -> None:
-        if getattr(self, "_loading_writable_folders", False):
+        if self._loading_writable_folders:
             return
         self._loading_writable_folders = True
         try:
@@ -281,11 +284,14 @@ class ConfigFoldersMixin:
             if base is None:
                 self.writable_folders = []
                 self.target_folder_map = {}
-                if hasattr(self, "target_combo"):
-                    self.target_combo["values"] = []
-                if hasattr(self, "target_folder_var"):
-                    self.target_folder_var.set("")
-                if hasattr(self, "file_view_combo"):
+                target_combo = self.target_combo
+                target_folder_var = self.target_folder_var
+                file_view_combo = self.file_view_combo
+                if target_combo is not None:
+                    target_combo["values"] = []
+                if target_folder_var is not None:
+                    target_folder_var.set("")
+                if file_view_combo is not None:
                     self.refresh_file_view_folder_choices()
                 return
             self.ensure_standard_metadata_folder()
@@ -304,15 +310,20 @@ class ConfigFoldersMixin:
             self.writable_folders = filtered
             self.target_folder_map = {self.display_path_for_folder(path, base): path for path in self.writable_folders}
             values = sorted(self.target_folder_map.keys(), key=str.lower)
-            if hasattr(self, "target_combo"):
-                self.target_combo["values"] = values
-            if values and self.target_folder_var.get() not in values:
-                self.target_folder_var.set(self.default_upload_target() or values[0])
+            target_combo = self.target_combo
+            target_folder_var = self.target_folder_var
+            if target_combo is not None:
+                target_combo["values"] = values
+            if values and target_folder_var is not None and target_folder_var.get() not in values:
+                target_folder_var.set(self.default_upload_target() or values[0])
             elif not values:
-                self.target_folder_var.set("")
-            if hasattr(self, "file_view_combo"):
+                if target_folder_var is not None:
+                    target_folder_var.set("")
+            file_view_combo = self.file_view_combo
+            if file_view_combo is not None:
                 self.refresh_file_view_folder_choices()
-            if hasattr(self, "admin_destination_combo"):
+            admin_destination_combo = self.admin_destination_combo
+            if admin_destination_combo is not None:
                 self.refresh_admin_destination_choices()
             self.update_connection_status()
             app_log("info", "Zielordner geprüft", count=len(values), user=self.username_var.get())
@@ -320,4 +331,3 @@ class ConfigFoldersMixin:
                 messagebox.showinfo("Ordnerprüfung", f"{len(values)} beschreibbare Zielordner gefunden.")
         finally:
             self._loading_writable_folders = False
-

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-import hashlib
 import importlib.util
-import json
 import re
 import threading
 import shutil
@@ -24,12 +22,33 @@ except Exception:
     DND_FILES = None
 
 from .app_logging import app_log, app_log_exception
-from .config import APP_DIR, save_config
+from .config import (
+    APP_DIR,
+    OPENAI_DEFAULT_MODEL,
+    OPENAI_PDF_SAMPLE_PAGES,
+    OPENAI_TEXT_SAMPLE_CHARS,
+    OPENAI_USAGE_MODELS,
+)
 from .file_service import detect_document_type, is_image_file, make_normalized_archive_filename, unique_path_with_counter
 from .openai_client import OpenAIClient, OpenAIError
 from .person_tagger import PersonTagger
 from .ui_helpers import reset_tk_var, clear_text_widget
 from .upload_wizard import UploadWizard
+from .upload_tab_metadata_utils import (
+    append_openai_description as _utm_append_openai_description,
+    local_places_from_text as _utm_local_places_from_text,
+    merge_metadata_values as _utm_merge_metadata_values,
+    merge_place_values as _utm_merge_place_values,
+    normalize_upload_text_sample as _utm_normalize_upload_text_sample,
+)
+from .upload_tab_openai_cache_utils import (
+    add_openai_metadata_cache_entry as _utauc_add_openai_metadata_cache_entry,
+    cached_openai_metadata_for_key as _utauc_cached_openai_metadata_for_key,
+    openai_metadata_cache_key as _utauc_openai_metadata_cache_key,
+    openai_metadata_cache_path as _utauc_openai_metadata_cache_path,
+    load_openai_metadata_cache as _utauc_load_openai_metadata_cache,
+    save_openai_metadata_cache as _utauc_save_openai_metadata_cache,
+)
 
 LOCAL_PLACE_NAMES = [
     "Bedheim", "Eicha", "Gleicherwiesen", "Gleichamberg", "Hindfeld", "Milz",
@@ -37,14 +56,7 @@ LOCAL_PLACE_NAMES = [
     "Zeilfeld", "Mönchshof", "Simmershausen",
 ]
 
-OPENAI_USAGE_MODELS = {
-    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50, "context": 16385},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "context": 128000},
-    "gpt-4o": {"input": 2.50, "output": 10.00, "context": 128000},
-}
-
-OPENAI_PDF_SAMPLE_PAGES = 10
-OPENAI_TEXT_SAMPLE_CHARS = 4000
+UPLOAD_METADATA_REQUIRED_FIELDS = ("document_date", "event", "place", "keywords")
 
 
 class UploadTabMixin:
@@ -58,8 +70,7 @@ class UploadTabMixin:
         # File drop hint will be placed directly above the filename entry
         self.upload_drop_hint_var = tk.StringVar(value="Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
         self.file_var = tk.StringVar()
-        if not hasattr(self, "upload_filename_var"):
-            self.upload_filename_var = tk.StringVar()
+        self.upload_filename_var = tk.StringVar()
         self._upload_filename_auto_value = ""
 
         # Place the select button in the same row as the file entry, OpenAI below it,
@@ -133,41 +144,8 @@ class UploadTabMixin:
         self.update_openai_precheck_indicator()
         self.refresh_upload_ai_controls_visibility()
 
-    def update_upload_status_indicator(self) -> None:
-        color, text = self.evaluate_upload_status()
-        self.set_upload_status(color, text)
-
-    def evaluate_upload_status(self) -> tuple[str, str]:
-        if getattr(self, "selected_folder", None) is not None:
-            return "yellow", "Ordnerupload"
-        if getattr(self, "selected_file", None) is None:
-            return "red", "Keine Datei"
-        if not self.selected_file.exists():
-            return "red", "Datei fehlt"
-        detected_type = detect_document_type(self.selected_file)
-        ready = self.is_upload_metadata_ready()
-        if detected_type == "Sonstiges":
-            return "yellow", "Dateityp unklar"
-        if not ready:
-            return "yellow", "Metadaten ergänzen"
-        return "green", "Bereit zum Upload"
-
-    def is_upload_metadata_ready(self) -> bool:
-        # No mandatory fields — consider metadata always ready
-        return True
-
-    def set_upload_status(self, color: str, text: str) -> None:
-        if not hasattr(self, "upload_status_canvas"):
-            return
-        self.upload_status_canvas.delete("all")
-        self.upload_status_canvas.create_oval(1, 1, 13, 13, fill=color, outline=color)
-        if hasattr(self, "upload_status_text_var"):
-            self.upload_status_text_var.set(text)
-
     def update_upload_technical_fields(self, selected_file: Path | None = None) -> None:
         """Befüllt die technischen Upload-Felder im Upload-Reiter."""
-        if not hasattr(self, "meta_vars"):
-            return
         display_name = self.display_name_var.get().strip() or self.username_var.get().strip() or ""
         if "uploaded_by" in self.meta_vars:
             self.meta_vars["uploaded_by"].set(display_name)
@@ -188,18 +166,16 @@ class UploadTabMixin:
             self.meta_vars["uploaded_at"].set("")
 
     def planned_upload_filename(self, source: Path, requested_name: str | None = None) -> str:
-        if not hasattr(self, "meta_vars"):
-            return source.name
-        metadata = {key: (var.get() if hasattr(var, "get") else "") for key, var in self.meta_vars.items()}
+        metadata = {key: var.get() for key, var in self.meta_vars.items()}
         metadata["current_filename"] = (requested_name or metadata.get("current_filename") or source.name).strip()
         metadata["stored_filename"] = metadata.get("stored_filename") or metadata["current_filename"]
         metadata["original_filename"] = metadata.get("original_filename") or source.name
         return make_normalized_archive_filename(metadata, metadata["current_filename"])
 
     def refresh_planned_upload_filename(self, source: Path | None = None, force: bool = False) -> None:
-        if not hasattr(self, "meta_vars") or "current_filename" not in self.meta_vars:
+        if "current_filename" not in self.meta_vars:
             return
-        source = source or getattr(self, "selected_file", None)
+        source = source or self.selected_file
         if source is None:
             return
         current_value = str(self.meta_vars["current_filename"].get() or "").strip()
@@ -211,26 +187,37 @@ class UploadTabMixin:
         self.meta_vars["current_filename"].set(planned)
 
     def openai_available(self) -> bool:
-        return bool(getattr(self, "config_data", {}).get("openai_api_key", "").strip())
+        return bool(self.config_data.get("openai_api_key", "").strip())
+
+    def _read_int_config(self, key: str, default: int, min_value: int = 0, max_value: int | None = None) -> int:
+        try:
+            value = int(self.config_data.get(key, default))
+        except Exception:
+            return default
+        if min_value is not None:
+            value = max(min_value, value)
+        if max_value is not None:
+            value = min(max_value, value)
+        return value
 
     def openai_client(self) -> OpenAIClient | None:
-        api_key = getattr(self, "config_data", {}).get("openai_api_key", "").strip()
+        api_key = self.config_data.get("openai_api_key", "").strip()
         if not api_key:
             return None
         if str(self.current_role()).strip().lower() in {"admin", "superadmin"}:
-            model = getattr(self, "config_data", {}).get("openai_model", "gpt-4o-mini")
+            model = self.config_data.get("openai_model", OPENAI_DEFAULT_MODEL)
         else:
-            model = "gpt-4o-mini"
-        return OpenAIClient(api_key=api_key, model=model)
+            model = OPENAI_DEFAULT_MODEL
+        return OpenAIClient(api_key=api_key, model=model or OPENAI_DEFAULT_MODEL)
 
     def is_upload_text_or_pdf_document(self, path: Path | None = None) -> bool:
-        path = path or getattr(self, "selected_file", None)
+        path = path or self.selected_file
         if path is None:
             return False
         return path.suffix.lower() in {".pdf", ".txt", ".md", ".csv", ".log", ".docx", ".odt"}
 
     def is_upload_image_pdf(self, path: Path | None = None) -> bool:
-        path = path or getattr(self, "selected_file", None)
+        path = path or self.selected_file
         if path is None or path.suffix.lower() != ".pdf":
             return False
         if path.name.lower().endswith("_ocr.pdf"):
@@ -238,35 +225,63 @@ class UploadTabMixin:
         ocr_path = self.current_upload_ocr_pdf_path()
         if ocr_path and ocr_path.exists():
             return True
-        return not bool(self.extract_upload_text_sample(path, max_chars=500, max_pdf_pages=2))
+        return not self.pdf_is_non_searchable_text(path, max_chars=500, max_pdf_pages=2)
+
+    def _pdf_text_cache_key(self, path: Path) -> str | None:
+        try:
+            stat = path.stat()
+        except Exception:
+            return None
+        return f"{path}|{stat.st_size}|{stat.st_mtime_ns}"
+
+    def pdf_is_non_searchable_text(self, path: Path | None, max_chars: int = 500, max_pdf_pages: int = 2, has_linked_ocr: bool = False) -> bool:
+        if path is None or path.suffix.lower() != ".pdf":
+            return False
+        if path.name.lower().endswith("_ocr.pdf"):
+            return False
+        if has_linked_ocr:
+            return False
+        path = path.expanduser()
+        cache_key = self._pdf_text_cache_key(path)
+        if not cache_key:
+            return False
+        cached = self._pdf_text_searchability_cache.get(str(path))
+        if cached and cached[0] == cache_key:
+            return cached[1]
+        has_text = bool(self.extract_upload_text_sample(path, max_chars=max_chars, max_pdf_pages=max_pdf_pages))
+        result = not has_text
+        self._pdf_text_searchability_cache[str(path)] = (cache_key, result)
+        return result
+
+    def clear_pdf_text_searchability_cache(self, path: Path | None = None) -> None:
+        if path is None:
+            self._pdf_text_searchability_cache = {}
+            return
+        for key in (str(path), str(path.expanduser()), str(path.resolve())):
+            self._pdf_text_searchability_cache.pop(key, None)
 
     def refresh_upload_ai_controls_visibility(self) -> None:
         show_ai = self.is_upload_text_or_pdf_document()
         widgets = [
-            getattr(self, "open_file_openai_button", None),
-            getattr(self, "upload_status_container", None),
-            getattr(self, "upload_precheck_container", None),
+            self.open_file_openai_button,
+            self.upload_status_container,
+            self.upload_precheck_container,
         ]
         for widget in widgets:
-            if not widget:
-                continue
             widget.grid() if show_ai else widget.grid_remove()
-        if hasattr(self, "upload_openai_metadata_button"):
-            self.upload_openai_metadata_button.grid_remove()
+        self.upload_openai_metadata_button.grid_remove()
 
         show_ocr_create = self.is_upload_image_pdf() and not self.current_upload_ocr_pdf_path()
         show_ocr_open = self.is_upload_image_pdf() and bool(self.current_upload_ocr_pdf_path())
-        if hasattr(self, "upload_ocr_pdf_button"):
-            self.upload_ocr_pdf_button.grid() if show_ocr_create else self.upload_ocr_pdf_button.grid_remove()
-        if hasattr(self, "upload_show_ocr_pdf_button"):
-            self.upload_show_ocr_pdf_button.grid() if show_ocr_open else self.upload_show_ocr_pdf_button.grid_remove()
+        self.upload_ocr_pdf_button.grid() if show_ocr_create else self.upload_ocr_pdf_button.grid_remove()
+        self.upload_show_ocr_pdf_button.grid() if show_ocr_open else self.upload_show_ocr_pdf_button.grid_remove()
 
     def clear_upload_form(self, keep_target_folder: bool = True) -> None:
         selected_target = self.target_folder_var.get()
+        self.clear_pdf_text_searchability_cache(self.selected_file)
         self.selected_file = None
         self.selected_folder = None
-        if hasattr(self, "upload_ocr_pdf_path"):
-            self.upload_ocr_pdf_path = None
+        self.upload_ocr_pdf_path = None
         self.file_var.set("")
         for key, var in self.meta_vars.items():
             if key == "place":
@@ -277,53 +292,24 @@ class UploadTabMixin:
                 continue
             reset_tk_var(var)
         clear_text_widget(self.description_text)
-        if getattr(self, "upload_description_counter_var", None):
-            self.update_description_counter(self.description_text, self.upload_description_counter_var)
+        self.update_description_counter(self.description_text, self.upload_description_counter_var)
         clear_text_widget(self.note_text)
         self.person_status_var.set("none")
         self.persons = []
         self.person_summary_var.set("Keine Personen markiert.")
-        if getattr(self, "upload_wizard", None):
-            try:
-                self.upload_wizard.show_step(0)
-            except Exception:
-                pass
-        if getattr(self, "update_upload_status_indicator", None):
-            try:
-                self.update_upload_status_indicator()
-            except Exception:
-                pass
-        if getattr(self, "upload_openai_text_var", None):
-            try:
-                self.upload_openai_text_var.set("OpenAI: nicht geprüft")
-            except Exception:
-                pass
-        if getattr(self, "upload_openai_usage_var", None):
-            try:
-                self.upload_openai_usage_var.set("Verbrauch: k.A.")
-            except Exception:
-                pass
-        if getattr(self, "update_openai_precheck_indicator", None):
-            try:
-                self.update_openai_precheck_indicator()
-            except Exception:
-                pass
+        self.upload_wizard.show_step(0)
+        self.update_upload_status_indicator()
+        self.upload_openai_text_var.set("OpenAI: nicht geprüft")
+        self.upload_openai_usage_var.set("Verbrauch: k.A.")
+        self.update_openai_precheck_indicator()
         if keep_target_folder:
             self.target_folder_var.set(selected_target)
 
     def openai_pdf_sample_pages(self) -> int:
-        try:
-            value = int(getattr(self, "config_data", {}).get("openai_pdf_sample_pages", OPENAI_PDF_SAMPLE_PAGES))
-        except Exception:
-            value = OPENAI_PDF_SAMPLE_PAGES
-        return max(1, min(100, value))
+        return self._read_int_config("openai_pdf_sample_pages", OPENAI_PDF_SAMPLE_PAGES, 1, 100)
 
     def openai_text_sample_chars(self) -> int:
-        try:
-            value = int(getattr(self, "config_data", {}).get("openai_text_sample_chars", OPENAI_TEXT_SAMPLE_CHARS))
-        except Exception:
-            value = OPENAI_TEXT_SAMPLE_CHARS
-        return max(500, min(100000, value))
+        return self._read_int_config("openai_text_sample_chars", OPENAI_TEXT_SAMPLE_CHARS, 500, 100000)
 
     def format_openai_usage(self, usage: dict[str, Any], model_name: str | None = None) -> str:
         if not usage:
@@ -336,7 +322,7 @@ class UploadTabMixin:
         details = f"{total} Tokens"
         if prompt is not None and completion is not None:
             details += f" (p{prompt}+c{completion})"
-        model_key = str(model_name or getattr(self, "config_data", {}).get("openai_model", "") or "").strip().lower()
+        model_key = str(model_name or self.config_data.get("openai_model", "") or "").strip().lower()
         price = OPENAI_USAGE_MODELS.get(model_key)
         if price and prompt is not None and completion is not None:
             cost = (float(prompt) * price["input"] + float(completion) * price["output"]) / 1_000_000
@@ -353,12 +339,11 @@ class UploadTabMixin:
         self.openai_metadata_suggestions = {}
         self.openai_metadata_applied_fields = []
         self.openai_metadata_source_model = ""
-        if hasattr(self, "upload_openai_metadata_button"):
-            self.upload_openai_metadata_button.configure(state="disabled")
+        self.upload_openai_metadata_button.configure(state="disabled")
 
         if not self.openai_available():
             status = "OpenAI: nicht konfiguriert"
-        elif not getattr(self, "selected_file", None):
+        elif not self.selected_file:
             status = "OpenAI: keine Einzeldatei ausgewählt"
         else:
             status = message or "OpenAI: nicht geprüft"
@@ -368,8 +353,6 @@ class UploadTabMixin:
         self.update_openai_precheck_indicator()
 
     def set_openai_precheck_status(self, color: str, text: str) -> None:
-        if not hasattr(self, "upload_openai_precheck_canvas"):
-            return
         self.upload_openai_precheck_canvas.delete("all")
         self.upload_openai_precheck_canvas.create_oval(1, 1, 13, 13, fill=color, outline=color)
         self.upload_openai_precheck_var.set(text)
@@ -378,21 +361,15 @@ class UploadTabMixin:
         color, text = self.evaluate_openai_precheck()
         self.set_openai_precheck_status(color, text)
         self.refresh_upload_ai_controls_visibility()
-        if hasattr(self, "open_file_openai_button"):
-            if color == "red":
-                self.open_file_openai_button.configure(state="disabled")
-            else:
-                self.open_file_openai_button.configure(state="normal")
-        if hasattr(self, "upload_ocr_pdf_button"):
-            self.upload_ocr_pdf_button.configure(state=("normal" if self.is_upload_image_pdf() else "disabled"))
-        if hasattr(self, "upload_show_ocr_pdf_button"):
-            ocr_path = self.current_upload_ocr_pdf_path()
-            self.upload_show_ocr_pdf_button.configure(state=("normal" if ocr_path and ocr_path.exists() else "disabled"))
+        self.open_file_openai_button.configure(state=("disabled" if color == "red" else "normal"))
+        self.upload_ocr_pdf_button.configure(state=("normal" if self.is_upload_image_pdf() else "disabled"))
+        ocr_path = self.current_upload_ocr_pdf_path()
+        self.upload_show_ocr_pdf_button.configure(state=("normal" if ocr_path and ocr_path.exists() else "disabled"))
         return color, text
 
     def evaluate_openai_precheck(self) -> tuple[str, str]:
-        path = getattr(self, "selected_file", None)
-        if getattr(self, "selected_folder", None) is not None:
+        path = self.selected_file
+        if self.selected_folder is not None:
             return "yellow", "OpenAI-Ampel gelb: Ordnerupload - OpenAI-Prüfung nur für einzelne Dateien."
         if path is None:
             return "red", "OpenAI-Ampel rot: keine Datei ausgewählt."
@@ -448,7 +425,7 @@ class UploadTabMixin:
         return "yellow", "OpenAI-Ampel gelb: Prüfung mit OpenAI möglich, Archivbezug ist lokal nicht eindeutig."
 
     def current_upload_ocr_pdf_path(self) -> Path | None:
-        path = getattr(self, "upload_ocr_pdf_path", None)
+        path = self.upload_ocr_pdf_path
         if path:
             path = Path(path)
             if path.exists() and path.is_file():
@@ -460,7 +437,7 @@ class UploadTabMixin:
         return None
 
     def inferred_upload_ocr_pdf_path(self) -> Path | None:
-        selected = getattr(self, "selected_file", None)
+        selected = self.selected_file
         if not selected:
             return None
         selected = Path(selected)
@@ -541,64 +518,20 @@ class UploadTabMixin:
         return None
 
     def normalize_upload_text_sample(self, text: str | None, max_chars: int = 4000) -> str | None:
-        if not text:
-            return None
-        # Häufige XML-/Word-Trennzeichen bereinigen, aber Zeilenstruktur erhalten.
-        text = text.replace("\u00ad", "")
-        text = re.sub(r"[ \t\r\f\v]+", " ", text)
-        text = re.sub(r" *\n *", "\n", text)
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-        if not text:
-            return None
-        return text[:max_chars]
+        return _utm_normalize_upload_text_sample(text, max_chars=max_chars)
 
     def local_places_from_text(self, text: str | None) -> list[str]:
-        if not text:
-            return []
-        found: list[str] = []
-        for place in LOCAL_PLACE_NAMES:
-            if re.search(rf"(?<!\w){re.escape(place)}(?!\w)", text, flags=re.IGNORECASE):
-                found.append(place)
-        return found
+        return _utm_local_places_from_text(text, LOCAL_PLACE_NAMES)
 
     def merge_place_values(self, current: str, suggested: str) -> str:
-        values: list[str] = []
-        for raw in [current, suggested]:
-            for part in re.split(r"[,;/\n]+", raw or ""):
-                text = part.strip(" .;,-")
-                if text and text.lower() not in {v.lower() for v in values}:
-                    values.append(text)
-        return ", ".join(values)
+        return _utm_merge_place_values(current, suggested)
 
     def merge_metadata_values(self, current: str, suggested: str, separator: str = ", ") -> str:
-        current = str(current or "").strip()
-        suggested = str(suggested or "").strip()
-        if not suggested:
-            return current
-        if not current:
-            return suggested
-        values: list[str] = []
-        for raw in [current, suggested]:
-            for part in re.split(r"[,;\n]+", raw):
-                text = part.strip(" .;,-")
-                if text and text.lower() not in {v.lower() for v in values}:
-                    values.append(text)
-        if len(values) <= 1:
-            return current
-        return separator.join(values)
+        return _utm_merge_metadata_values(current, suggested, separator=separator)
 
     def append_openai_description(self, current: str, suggested: str) -> str:
-        suggested = str(suggested or "").strip()
-        if not suggested:
-            return current
-        model = str(getattr(self, "openai_metadata_source_model", "") or getattr(self, "config_data", {}).get("openai_model", "") or "OpenAI").strip()
-        block = f"**{model}**: {suggested}"
-        current = str(current or "").strip()
-        if not current:
-            return block
-        if suggested.lower() in current.lower() or block.lower() in current.lower():
-            return current
-        return current + "\n\n" + block
+        model = str(self.openai_metadata_source_model or self.config_data.get("openai_model", "") or OPENAI_DEFAULT_MODEL).strip()
+        return _utm_append_openai_description(current, suggested, model)
 
     def derive_metadata_from_text(self, filename: str, extension: str, sample: str | None) -> dict[str, str]:
         """Robuste lokale Fallback-Ableitung für typische Protokolle/Niederschriften.
@@ -678,7 +611,7 @@ class UploadTabMixin:
         return metadata
 
     def create_searchable_pdf_for_upload(self) -> None:
-        path = getattr(self, "selected_file", None)
+        path = self.selected_file
         if path is None or path.suffix.lower() != ".pdf":
             messagebox.showwarning("PDF OCR", "Bitte zuerst eine PDF-Datei auswählen.")
             return
@@ -705,19 +638,13 @@ class UploadTabMixin:
         thread.start()
 
     def start_upload_ocr_progress(self, message: str) -> None:
-        if not hasattr(self, "upload_ocr_progress_frame"):
-            return
         self.upload_ocr_progress_var.set(message)
         self.upload_ocr_progress_frame.grid()
         self.upload_ocr_progress.start(12)
-        for button_name in ("upload_ocr_pdf_button", "open_file_openai_button"):
-            button = getattr(self, button_name, None)
-            if button is not None:
-                button.configure(state="disabled")
+        self.upload_ocr_pdf_button.configure(state="disabled")
+        self.open_file_openai_button.configure(state="disabled")
 
     def stop_upload_ocr_progress(self) -> None:
-        if not hasattr(self, "upload_ocr_progress_frame"):
-            return
         try:
             self.upload_ocr_progress.stop()
         except Exception:
@@ -844,97 +771,34 @@ class UploadTabMixin:
             src.close()
 
     def openai_metadata_cache_path(self) -> Path:
-        return APP_DIR / "openai_metadata_cache.json"
+        return _utauc_openai_metadata_cache_path(APP_DIR)
 
     def load_openai_metadata_cache(self) -> dict[str, Any]:
-        path = self.openai_metadata_cache_path()
-        try:
-            if not path.exists():
-                return {"version": 2, "items": {}}
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
-                return {"version": 2, "items": {}}
-            if not isinstance(data.get("items"), dict):
-                data["items"] = {}
-            data["version"] = 2
-            return data
-        except Exception:
-            app_log_exception("OpenAI-Metadaten-Cache konnte nicht gelesen werden", path=str(path))
-            return {"version": 2, "items": {}}
+        return _utauc_load_openai_metadata_cache(self.openai_metadata_cache_path())
 
     def save_openai_metadata_cache(self, data: dict[str, Any]) -> None:
-        path = self.openai_metadata_cache_path()
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            items = data.get("items") if isinstance(data.get("items"), dict) else {}
-            if len(items) > 200:
-                ordered = sorted(items.items(), key=lambda item: str(item[1].get("created_at", "")))
-                data["items"] = dict(ordered[-200:])
-            path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            app_log_exception("OpenAI-Metadaten-Cache konnte nicht gespeichert werden", path=str(path))
-
-    def file_sha256(self, path: Path) -> str:
-        digest = hashlib.sha256()
-        with Path(path).open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
-
-    def upload_file_fingerprint(self, path: Path | None) -> dict[str, Any] | None:
-        if path is None:
-            return None
-        try:
-            resolved = Path(path).expanduser().resolve()
-            stat = resolved.stat()
-            return {
-                "path": os.path.normcase(str(resolved)),
-                "size": int(stat.st_size),
-                "mtime_ns": int(stat.st_mtime_ns),
-                "sha256": self.file_sha256(resolved),
-            }
-        except Exception:
-            return None
+        _utauc_save_openai_metadata_cache(self.openai_metadata_cache_path(), data)
 
     def openai_metadata_cache_key(self, analysis_file: Path | None = None) -> str | None:
-        selected_fp = self.upload_file_fingerprint(getattr(self, "selected_file", None))
-        if not selected_fp:
-            return None
-        analysis_fp = self.upload_file_fingerprint(analysis_file)
-        parts = [f"selected:{selected_fp['sha256']}"]
-        if analysis_fp and analysis_fp["sha256"] != selected_fp["sha256"]:
-            parts.append(f"analysis:{analysis_fp['sha256']}")
-        return "|".join(parts)
+        return _utauc_openai_metadata_cache_key(self.selected_file, analysis_file)
 
     def cached_openai_metadata_for_current_file(self) -> dict[str, Any] | None:
-        analysis_file = self.current_upload_ocr_pdf_path() or getattr(self, "selected_file", None)
+        analysis_file = self.current_upload_ocr_pdf_path() or self.selected_file
         key = self.openai_metadata_cache_key(analysis_file)
-        if not key:
-            return None
-        cached = self.load_openai_metadata_cache().get("items", {}).get(key)
-        if not isinstance(cached, dict):
-            return None
-        metadata = cached.get("metadata")
-        if not isinstance(metadata, dict) or not any(str(v or "").strip() for v in metadata.values()):
-            return None
-        return cached
+        return _utauc_cached_openai_metadata_for_key(self.load_openai_metadata_cache(), key)
 
     def store_openai_metadata_cache(self, analysis_file: Path | None, metadata: dict[str, Any], usage: dict[str, Any] | None, model: str) -> None:
         key = self.openai_metadata_cache_key(analysis_file)
-        if not key or not metadata:
-            return
-        data = self.load_openai_metadata_cache()
-        items = data.setdefault("items", {})
-        items[key] = {
-            "created_at": datetime.now().isoformat(timespec="seconds"),
-            "filename": getattr(getattr(self, "selected_file", None), "name", ""),
-            "analysis_file": str(analysis_file or ""),
-            "selected_fingerprint": self.upload_file_fingerprint(getattr(self, "selected_file", None)),
-            "analysis_fingerprint": self.upload_file_fingerprint(analysis_file),
-            "model": str(model or ""),
-            "metadata": metadata,
-            "usage": usage or {},
-        }
+        data = _utauc_add_openai_metadata_cache_entry(
+            self.load_openai_metadata_cache(),
+            key,
+            self.selected_file,
+            analysis_file,
+            metadata,
+            usage,
+            model,
+            datetime.now().isoformat(timespec="seconds"),
+        )
         self.save_openai_metadata_cache(data)
 
     def apply_cached_openai_metadata_if_available(self) -> bool:
@@ -944,8 +808,7 @@ class UploadTabMixin:
         metadata = cached.get("metadata") if isinstance(cached.get("metadata"), dict) else {}
         self.openai_metadata_suggestions = {k: v for k, v in metadata.items() if str(v or "").strip()}
         self.openai_metadata_source_model = str(cached.get("model") or "OpenAI").strip() or "OpenAI"
-        if hasattr(self, "upload_openai_metadata_button"):
-            self.upload_openai_metadata_button.configure(state="normal" if self.openai_metadata_suggestions else "disabled")
+        self.upload_openai_metadata_button.configure(state="normal" if self.openai_metadata_suggestions else "disabled")
         self.upload_openai_usage_var.set("Verbrauch: 0 Tokens (Cache)")
         if self.openai_metadata_suggestions:
             self.apply_openai_metadata_suggestions()
@@ -955,8 +818,7 @@ class UploadTabMixin:
 
     def queue_openai_check(self, auto_apply: bool = False, allow_yellow: bool = False) -> None:
         self.openai_metadata_suggestions = {}
-        if hasattr(self, "upload_openai_metadata_button"):
-            self.upload_openai_metadata_button.configure(state="disabled")
+        self.upload_openai_metadata_button.configure(state="disabled")
         color, precheck_text = self.update_openai_precheck_indicator()
         if color == "red":
             self.upload_openai_text_var.set("OpenAI: durch Ampel gesperrt")
@@ -969,7 +831,7 @@ class UploadTabMixin:
                 self.upload_openai_text_var.set("OpenAI: Prüfung durch Benutzer abgebrochen")
                 self.upload_openai_usage_var.set("Verbrauch: k.A.")
                 return
-        if not getattr(self, "selected_file", None):
+        if not self.selected_file:
             self.upload_openai_text_var.set("OpenAI: keine Einzeldatei ausgewählt")
             self.upload_openai_usage_var.set("Verbrauch: k.A.")
             return
@@ -986,7 +848,7 @@ class UploadTabMixin:
         thread.start()
 
     def _run_openai_check(self, auto_apply: bool = False) -> None:
-        if not self.openai_available() or not getattr(self, "selected_file", None):
+        if not self.openai_available() or not self.selected_file:
             return
         client = self.openai_client()
         if client is None:
@@ -1045,14 +907,14 @@ class UploadTabMixin:
             self.after(0, lambda: self.upload_openai_usage_var.set("Verbrauch: k.A."))
 
     def on_apply_openai_metadata(self) -> None:
-        if not getattr(self, "openai_metadata_suggestions", None):
+        if not self.openai_metadata_suggestions:
             self.upload_openai_text_var.set("OpenAI: keine Metadatenvorschläge verfügbar – zuerst „OpenAI prüfen“ drücken")
             self.upload_openai_metadata_button.configure(state="disabled")
             return
         self.apply_openai_metadata_suggestions()
 
     def _fetch_openai_metadata_suggestions(self) -> None:
-        if not self.openai_available() or not getattr(self, "selected_file", None):
+        if not self.openai_available() or not self.selected_file:
             return
         client = self.openai_client()
         if client is None:
@@ -1081,7 +943,7 @@ class UploadTabMixin:
             self.after(0, lambda: self.upload_openai_usage_var.set("Verbrauch: k.A."))
 
     def apply_openai_metadata_suggestions(self) -> None:
-        suggestions = getattr(self, "openai_metadata_suggestions", {}) or {}
+        suggestions = self.openai_metadata_suggestions or {}
         if not suggestions:
             self.upload_openai_text_var.set("OpenAI: Keine Metadatenvorschläge verfügbar")
             return
@@ -1092,7 +954,7 @@ class UploadTabMixin:
                 continue
             if not value:
                 continue
-            if key == "place" and getattr(self, "meta_vars", None):
+            if key == "place":
                 current = str(self.meta_vars["place"].get() or "").strip()
                 merged = self.merge_place_values(current, str(value).strip())
                 if merged and merged != current:
@@ -1106,7 +968,7 @@ class UploadTabMixin:
                     self.meta_vars[key].set(merged)
                     applied = True
                     applied_fields.append(key)
-            elif key == "description" and getattr(self, "description_text", None):
+            elif key == "description":
                 current = self.description_text.get("1.0", "end-1c").strip()
                 merged = self.normalize_description_text(self.append_openai_description(current, str(value).strip()))
                 if merged != current:
@@ -1114,7 +976,7 @@ class UploadTabMixin:
                     self.description_text.insert("1.0", merged)
                     applied = True
                     applied_fields.append("description")
-            elif key == "keywords" and getattr(self, "meta_vars", None):
+            elif key == "keywords":
                 current = str(self.meta_vars["keywords"].get() or "").strip()
                 merged = self.merge_metadata_values(current, str(value).strip(), separator=", ")
                 if merged != current:
@@ -1122,7 +984,7 @@ class UploadTabMixin:
                     applied = True
                     applied_fields.append("keywords")
         if applied:
-            current_fields = list(getattr(self, "openai_metadata_applied_fields", []) or [])
+            current_fields = list(self.openai_metadata_applied_fields or [])
             for field in applied_fields:
                 if field not in current_fields:
                     current_fields.append(field)
@@ -1133,17 +995,14 @@ class UploadTabMixin:
             self.upload_openai_text_var.set("OpenAI: Keine neuen Metadaten übernommen")
 
     def set_upload_status(self, color: str, text: str) -> None:
-        if not hasattr(self, "upload_status_canvas"):
-            return
         self.upload_status_canvas.delete("all")
         self.upload_status_canvas.create_oval(1, 1, 13, 13, fill=color, outline=color)
-        if hasattr(self, "upload_status_text_var"):
-            self.upload_status_text_var.set(text)
+        self.upload_status_text_var.set(text)
 
     def evaluate_upload_status(self) -> tuple[str, str]:
-        if getattr(self, "selected_folder", None) is not None:
+        if self.selected_folder is not None:
             return "yellow", "Ordnerupload"
-        if getattr(self, "selected_file", None) is None:
+        if self.selected_file is None:
             return "red", "Keine Datei"
         if not self.selected_file.exists():
             return "red", "Datei fehlt"
@@ -1156,10 +1015,7 @@ class UploadTabMixin:
         return "green", "Bereit zum Upload"
 
     def is_upload_metadata_ready(self) -> bool:
-        if not hasattr(self, "meta_vars"):
-            return False
-        required = ["document_date", "event", "place", "keywords"]
-        for key in required:
+        for key in UPLOAD_METADATA_REQUIRED_FIELDS:
             value = self.meta_vars.get(key)
             if value is None or not str(value.get() or "").strip():
                 return False
@@ -1181,6 +1037,7 @@ class UploadTabMixin:
         genutzt. Drag & Drop startet bewusst keinen Upload, sondern wählt nur die
         Datei aus; der Benutzer muss weiterhin „Datei hochladen“ klicken.
         """
+        previous_selected = self.selected_file
         path = Path(path).expanduser()
         if not path.exists() or not path.is_file():
             messagebox.showwarning("Datei auswählen", f"Die Datei wurde nicht gefunden oder ist kein Dokument:\n{path}")
@@ -1204,22 +1061,20 @@ class UploadTabMixin:
         self.persons = []
         self.person_status_var.set("none")
         self.person_summary_var.set("Keine Personen markiert.")
-        if hasattr(self, "upload_drop_hint_var"):
-            self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name}")
+        self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name}")
         self.update_upload_status_indicator()
         self.reset_openai_status("OpenAI: nicht geprüft – Button „OpenAI prüfen“ drücken")
         color, _text = self.update_openai_precheck_indicator()
         ocr_path = self.current_upload_ocr_pdf_path()
-        if ocr_path and hasattr(self, "upload_drop_hint_var"):
+        if ocr_path:
             self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name} | OCR: {ocr_path.name}")
+        self.clear_pdf_text_searchability_cache(previous_selected)
         if color == "green":
             self.after(150, lambda: self.queue_openai_check(auto_apply=True, allow_yellow=True))
         app_log("info", "Upload-Datei ausgewählt", path=str(path), source=source)
 
     def reset_upload_metadata_for_new_file(self) -> None:
         """Leert fachliche Upload-Metadaten beim Wechsel auf ein neues Dokument."""
-        if not hasattr(self, "meta_vars"):
-            return
         self._upload_filename_auto_value = ""
         keep_empty_or_system = {"upload_id", "status", "current_filename", "uploaded_at", "uploaded_by"}
         for key, var in self.meta_vars.items():
@@ -1231,17 +1086,12 @@ class UploadTabMixin:
                 var.set(self.place_var.get().strip())
             else:
                 var.set("")
-        if getattr(self, "description_text", None):
-            self.description_text.delete("1.0", "end")
-        if getattr(self, "note_text", None):
-            self.note_text.delete("1.0", "end")
-        if getattr(self, "upload_description_counter_var", None):
-            self.update_description_counter(self.description_text, self.upload_description_counter_var)
+        self.description_text.delete("1.0", "end")
+        self.note_text.delete("1.0", "end")
+        self.update_description_counter(self.description_text, self.upload_description_counter_var)
         self.persons = []
-        if hasattr(self, "person_status_var"):
-            self.person_status_var.set("none")
-        if hasattr(self, "person_summary_var"):
-            self.person_summary_var.set("Keine Personen markiert.")
+        self.person_status_var.set("none")
+        self.person_summary_var.set("Keine Personen markiert.")
 
     def link_upload_ocr_pdf(self, path: Path) -> None:
         path = Path(path).expanduser()
@@ -1249,7 +1099,8 @@ class UploadTabMixin:
             messagebox.showwarning("PDF OCR", f"Das OCR-PDF wurde nicht gefunden:\n{path}")
             return
         self.upload_ocr_pdf_path = path
-        if hasattr(self, "upload_drop_hint_var") and getattr(self, "selected_file", None):
+        self.clear_pdf_text_searchability_cache(self.selected_file)
+        if self.selected_file:
             self.upload_drop_hint_var.set(f"Ausgewählte Datei: {self.selected_file.name} | OCR: {path.name}")
         self.update_openai_precheck_indicator()
         self.after(150, lambda: self.queue_openai_check(auto_apply=True, allow_yellow=True))
@@ -1274,7 +1125,12 @@ class UploadTabMixin:
         return paths
 
     def handle_upload_file_drop(self, event) -> str:
-        paths = [p for p in self.parse_dropped_files(getattr(event, "data", "")) if p.exists()]
+        dropped_data = ""
+        try:
+            dropped_data = event.data
+        except Exception:
+            dropped_data = ""
+        paths = [p for p in self.parse_dropped_files(dropped_data) if p.exists()]
         files = [p for p in paths if p.is_file()]
         folders = [p for p in paths if p.is_dir()]
         if files:
@@ -1290,12 +1146,9 @@ class UploadTabMixin:
     def enable_upload_drag_and_drop(self, *widgets: tk.Widget) -> None:
         """Aktiviert Drag & Drop im Upload-Reiter, sofern tkinterdnd2 verfügbar ist."""
         if DND_FILES is None:
-            if hasattr(self, "upload_drop_hint_var"):
-                self.upload_drop_hint_var.set("Drag & Drop ist in diesem Build nicht verfügbar. Bitte „Datei auswählen“ verwenden.")
+            self.upload_drop_hint_var.set("Drag & Drop ist in diesem Build nicht verfügbar. Bitte „Datei auswählen“ verwenden.")
             return
-        for widget in widgets + (getattr(self, "upload_file_entry", None), getattr(self, "upload_drop_hint", None), self.upload_tab):
-            if widget is None:
-                continue
+        for widget in widgets + (self.upload_file_entry, self.upload_drop_hint, self.upload_tab):
             try:
                 widget.drop_target_register(DND_FILES)
                 widget.dnd_bind("<<Drop>>", self.handle_upload_file_drop)

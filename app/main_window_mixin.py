@@ -87,7 +87,6 @@ class MainWindowMixin:
         self.upload_tab = self.make_scrollable_tab(self.upload_tab_container)
         self.viewer_tab = ttk.Frame(notebook, padding=10, style="Viewer.TFrame")
         self.admin_tab = ttk.Frame(notebook, padding=10, style="Admin.TFrame")
-        self.admin_tab_visible = True
 
         notebook.add(self.history_tab, text="Dashboard")
         notebook.add(self.upload_tab_container, text="Dateien hochladen")
@@ -114,8 +113,6 @@ class MainWindowMixin:
         ttk.Label(bar, textvariable=self.nextcloud_status_var).grid(row=0, column=1, sticky="w")
 
     def update_connection_status(self) -> None:
-        if not hasattr(self, "api_status_var"):
-            return
         try:
             status = self.api.status()
             api_version = str(status.get("api_version") or status.get("version") or "?")
@@ -203,10 +200,9 @@ class MainWindowMixin:
             document_points_label = "Sonderpunkte zum ausgewählten Dokument..."
 
             def is_file_view_active() -> bool:
-                try:
-                    return hasattr(self, "notebook") and self.notebook.select() == str(self.viewer_tab)
-                except Exception:
-                    return False
+                notebook = self.notebook
+                viewer_tab = self.viewer_tab
+                return bool(notebook is not None and viewer_tab is not None and str(notebook.select()) == str(viewer_tab))
 
             def update_points_menu() -> None:
                 try:

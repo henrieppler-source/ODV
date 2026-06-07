@@ -74,6 +74,14 @@ def release_single_instance_lock() -> None:
 
 def resource_path(relative_path: str) -> Path:
     """Pfad zu mitgelieferten Ressourcen, kompatibel mit PyInstaller."""
-    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
-        return Path(sys._MEIPASS) / relative_path
+    is_frozen = False
+    try:
+        is_frozen = bool(sys.frozen)
+    except Exception:
+        is_frozen = False
+    if is_frozen:
+        try:
+            return Path(sys._MEIPASS) / relative_path
+        except Exception:
+            return Path(__file__).resolve().parent.parent / relative_path
     return Path(__file__).resolve().parent.parent / relative_path

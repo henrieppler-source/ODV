@@ -186,11 +186,11 @@ class FileViewManagerMixin:
         self.refresh_file_view_destination_choices()
 
     def update_file_view_preview_tab_visibility(self) -> None:
-        notebook = getattr(self, "viewer_right_notebook", None)
-        preview_tab = getattr(self, "file_view_preview_tab", None)
+        notebook = self.viewer_right_notebook
+        preview_tab = self.file_view_preview_tab
         if notebook is None or preview_tab is None:
             return
-        path = getattr(self, "file_view_current_path", None)
+        path = self.file_view_current_path
         show_preview = bool(path and Path(path).exists() and Path(path).is_file() and is_image_file(Path(path)))
         tabs = [str(tab) for tab in notebook.tabs()]
         preview_id = str(preview_tab)
@@ -214,8 +214,7 @@ class FileViewManagerMixin:
                 pass
         if not show_preview:
             self.file_preview_image = None
-            if hasattr(self, "file_preview_label"):
-                self.file_preview_label.configure(image="", text="")
+            self.file_preview_label.configure(image="", text="")
 
     def clear_file_view_selection(self) -> None:
         """Leert Dateiansicht, Vorschau und Metadaten, bis bewusst eine Datei ausgewählt wird."""
@@ -223,32 +222,24 @@ class FileViewManagerMixin:
         self.file_view_current_metadata = None
         self.file_preview_zoom = 1.0
         clear_tree_selection(self.file_tree)
-        if hasattr(self, "file_preview_label"):
-            self.file_preview_image = None
-            self.file_preview_label.configure(image="", text="Keine Datei ausgewählt.")
+        self.file_preview_image = None
+        self.file_preview_label.configure(image="", text="Keine Datei ausgewählt.")
         self.update_file_view_preview_tab_visibility()
-        if hasattr(self, "show_persons_check"):
-            self.show_persons_check.grid_remove()
-        if hasattr(self, "person_legend_frame"):
-            self.person_legend_frame.grid_remove()
-        if hasattr(self, "person_legend_text"):
-            self.person_legend_text.configure(state="normal")
-            self.person_legend_text.delete("1.0", "end")
-            self.person_legend_text.configure(state="disabled")
-        if hasattr(self, "file_view_write_hint_var"):
-            self.file_view_write_hint_var.set("Keine Datei ausgewählt.")
+        self.show_persons_check.grid_remove()
+        self.person_legend_frame.grid_remove()
+        self.person_legend_text.configure(state="normal")
+        self.person_legend_text.delete("1.0", "end")
+        self.person_legend_text.configure(state="disabled")
+        self.file_view_write_hint_var.set("Keine Datei ausgewählt.")
         self.update_file_view_ocr_button()
-        if hasattr(self, "file_view_meta_vars"):
-            for var in self.file_view_meta_vars.values():
-                reset_tk_var(var)
-        for attr in ("file_view_description_text", "file_view_note_text", "file_view_json_text"):
-            widget = getattr(self, attr, None)
-            if widget is not None:
-                clear_text_widget(widget, "Keine Datei ausgewählt." if attr == "file_view_json_text" else None, disable_after=True)
-        for widget in getattr(self, "file_view_meta_widgets", []):
+        for var in self.file_view_meta_vars.values():
+            reset_tk_var(var)
+        clear_text_widget(self.file_view_description_text, disable_after=True)
+        clear_text_widget(self.file_view_note_text, disable_after=True)
+        clear_text_widget(self.file_view_json_text, "Keine Datei ausgewählt.", disable_after=True)
+        for widget in self.file_view_meta_widgets:
             try:
                 widget.configure(state="disabled")
             except Exception:
                 pass
-        if hasattr(self, "update_file_view_admin_actions_for_selection"):
-            self.update_file_view_admin_actions_for_selection()
+        self.update_file_view_admin_actions_for_selection()

@@ -10,10 +10,17 @@ from tkinter import messagebox
 
 from .config import APP_DIR
 
+def _local_meipass_path() -> Path:
+    try:
+        return Path(sys._MEIPASS)
+    except Exception:
+        return Path.cwd()
+
 
 class HelpDocsMixin:
     def project_root_path(self) -> Path:
-        candidates = [Path(__file__).resolve().parent.parent, Path.cwd(), Path(getattr(sys, "_MEIPASS", Path.cwd()))]
+        meipass = _local_meipass_path()
+        candidates = [Path(__file__).resolve().parent.parent, Path.cwd(), meipass]
         for candidate in candidates:
             if (candidate / "Handbuch.md").exists() or (candidate / "README.md").exists():
                 return candidate

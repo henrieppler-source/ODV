@@ -25,9 +25,9 @@ class PointsSpecialManagerMixin:
             messagebox.showwarning("Keine Berechtigung", "Sonderpunkte sind Admins vorbehalten.")
             return
         if item is None:
-            item = getattr(self, "file_view_current_metadata", None) or None
+            item = self.file_view_current_metadata
         if not item or not item.get("upload_id"):
-            path = getattr(self, "file_view_current_path", None)
+            path = self.file_view_current_path
             if path and path.exists() and not path.is_dir():
                 try:
                     item, metadata_file = self.ensure_file_view_metadata_item(path)

@@ -136,6 +136,11 @@ class DocumentPdfManagerMixin:
             linked = self.linked_pdf_paths_for_item(item, path)
             if linked.get("ocr"):
                 menu.add_command(label="OCR anzeigen", command=lambda p=linked["ocr"]: self.open_file_with_default_app(p))
+            elif self.is_current_admin() and self.find_pdf_ocr_backend():
+                menu.add_command(
+                    label="PDF OCR erstellen...",
+                    command=lambda: self.create_ocr_for_document_path(path, item),
+                )
             if linked.get("pdfa"):
                 menu.add_command(label="Original / PDF-A anzeigen", command=lambda p=linked["pdfa"]: self.open_file_with_default_app(p))
             if self.is_current_admin():
@@ -178,19 +183,24 @@ class DocumentPdfManagerMixin:
                 linked = self.linked_pdf_paths_for_item(item, path)
                 if linked.get("ocr"):
                     menu.add_command(label="OCR anzeigen", command=lambda p=linked["ocr"]: self.open_file_with_default_app(p))
+                elif self.find_pdf_ocr_backend():
+                    menu.add_command(
+                        label="PDF OCR erstellen...",
+                        command=lambda: self.create_ocr_for_document_path(path, item),
+                    )
                 if linked.get("pdfa"):
                     menu.add_command(label="Original / PDF-A anzeigen", command=lambda p=linked["pdfa"]: self.open_file_with_default_app(p))
-                if self.is_current_admin():
-                    if self.pdf_size_mb(path) >= self.pdf_optimize_recommend_mb():
-                        menu.add_command(label="PDF optimieren...", command=lambda: self.pdf_action_stub("PDF optimieren", path))
-                    if not linked.get("pdfa"):
-                        menu.add_command(label="PDF/A erzeugen...", command=lambda: self.pdf_action_stub("PDF/A erzeugen", path))
-            if is_image_file(path) and (item.get("persons") or []):
-                menu.add_command(label="Stammdatenblatt als PDF speichern...", command=lambda: self.create_person_master_sheet_pdf(path, item))
-            if is_image_file(path):
-                menu.add_command(label="Bild in PDF umwandeln", command=lambda: self.convert_admin_image_to_pdf(item))
-            if len(self.admin_tree.selection()) >= 2:
-                menu.add_command(label="Ausgewählte PDFs zusammenfassen...", command=self.merge_selected_admin_pdfs)
+                    if self.is_current_admin():
+                        if self.pdf_size_mb(path) >= self.pdf_optimize_recommend_mb():
+                            menu.add_command(label="PDF optimieren...", command=lambda: self.pdf_action_stub("PDF optimieren", path))
+                        if not linked.get("pdfa"):
+                            menu.add_command(label="PDF/A erzeugen...", command=lambda: self.pdf_action_stub("PDF/A erzeugen", path))
+                if is_image_file(path) and (item.get("persons") or []):
+                    menu.add_command(label="Stammdatenblatt als PDF speichern...", command=lambda: self.create_person_master_sheet_pdf(path, item))
+                if is_image_file(path):
+                    menu.add_command(label="Bild in PDF umwandeln", command=lambda: self.convert_admin_image_to_pdf(item))
+                if len(self.admin_tree.selection()) >= 2:
+                    menu.add_command(label="Ausgewählte PDFs zusammenfassen...", command=self.merge_selected_admin_pdfs)
         else:
             menu.add_command(label="Datei nicht gefunden", state="disabled")
         try:

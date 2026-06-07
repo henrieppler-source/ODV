@@ -39,10 +39,7 @@ class FileAccessManagerMixin:
             stem = path.stem.lower()
             if stem.endswith("_pdfa") or stem.endswith("_ocr"):
                 return path
-            pdfa_getter = getattr(self, "pdfa_path_for_document", None)
-            if not callable(pdfa_getter):
-                return path
-            pdfa = pdfa_getter(path)
+            pdfa = self.pdfa_path_for_document(path)
             if pdfa and pdfa.exists() and pdfa.is_file():
                 return pdfa
         except Exception:
@@ -67,13 +64,11 @@ class FileAccessManagerMixin:
         return None
 
     def update_file_view_ocr_button(self) -> None:
-        if not hasattr(self, "file_view_open_ocr_button"):
-            return
-        path = self.resolve_item_ocr_pdf_path(getattr(self, "file_view_current_metadata", None))
+        path = self.resolve_item_ocr_pdf_path(self.file_view_current_metadata)
         self.file_view_open_ocr_button.configure(state=("normal" if path else "disabled"))
 
     def open_file_view_ocr_pdf(self) -> None:
-        path = self.resolve_item_ocr_pdf_path(getattr(self, "file_view_current_metadata", None))
+        path = self.resolve_item_ocr_pdf_path(self.file_view_current_metadata)
         if not path:
             messagebox.showwarning("OCR anzeigen", "Zu diesem Dokument ist kein OCR-PDF verknüpft.")
             return
@@ -83,9 +78,9 @@ class FileAccessManagerMixin:
         """Sucht zu einem lokalen Dateipfad den ODV-Datensatz, falls vorhanden."""
         try:
             key = str(path)
-            if hasattr(self, "file_view_metadata_by_path") and key in self.file_view_metadata_by_path:
+            if key in self.file_view_metadata_by_path:
                 return self.file_view_metadata_by_path.get(key)
-            for item in getattr(self, "admin_uploads", []) or []:
+            for item in self.admin_uploads or []:
                 self.normalize_admin_item_path_for_current_pc(item)
                 candidate = self.resolve_document_local_path(item)
                 if candidate and candidate == path:

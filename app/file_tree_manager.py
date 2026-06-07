@@ -1,31 +1,30 @@
 from __future__ import annotations
 
 from pathlib import Path
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 
-from .app_logging import app_log_exception
 from .config import save_config
-from .file_service import is_image_file, load_metadata_files
+from .file_service import load_metadata_files
 
 
 class FileTreeManagerMixin:
     def on_file_view_meta_mousewheel(self, event) -> None:
-        canvas = getattr(self, "file_view_meta_canvas", None)
-        if canvas is None:
+        try:
+            delta = int(-1 * (event.delta / 120))
+        except Exception:
+            try:
+                delta = 120 if event.num == 4 else -120
+            except Exception:
+                delta = 0
+        if not delta:
             return
-        delta = int(-1 * (event.delta / 120)) if getattr(event, "delta", 0) else 0
-        if delta:
-            canvas.yview_scroll(delta, "units")
+        self.file_view_meta_canvas.yview_scroll(delta, "units")
 
     def clear_file_view_filter(self) -> None:
-        if hasattr(self, "file_view_filter_var"):
-            self.file_view_filter_var.set("")
+        self.file_view_filter_var.set("")
         self.refresh_file_view_tree()
 
     def refresh_file_view_folder_choices(self) -> None:
-        if not hasattr(self, "file_view_combo"):
-            return
         base = self.nextcloud_base_path(show_message=False)
         self.file_view_folder_map = {}
         if base is not None and base.exists():
@@ -97,8 +96,6 @@ class FileTreeManagerMixin:
             self.on_file_view_root_selected()
 
     def refresh_file_view_tree(self) -> None:
-        if not hasattr(self, "file_tree"):
-            return
         root_text = self.file_view_root_var.get().strip() or self.base_folder_var.get().strip()
         if not root_text:
             return
@@ -119,8 +116,6 @@ class FileTreeManagerMixin:
         self._add_file_tree_children(root_id, root, depth=0)
 
     def current_file_view_filter_norm(self) -> str:
-        if not hasattr(self, "file_view_filter_var"):
-            return ""
         return self.normalize_search_text(self.file_view_filter_var.get())
 
     def file_matches_current_filter(self, path: Path) -> bool:
@@ -129,18 +124,17 @@ class FileTreeManagerMixin:
             return True
         hay = [path.name]
         try:
-            item = getattr(self, "file_view_metadata_by_path", {}).get(str(path)) or {}
+            item = self.file_view_metadata_by_path.get(str(path)) or {}
             hay.extend([str(item.get("keywords") or ""), str(item.get("description") or "")])
         except Exception:
             pass
         return any(term in self.normalize_search_text(x) for x in hay)
 
     def file_matches_current_status_filter(self, path: Path) -> bool:
-        status_var = getattr(self, "file_view_status_var", None)
-        wanted = str(status_var.get() if status_var is not None else "alle").strip()
+        wanted = str(self.file_view_status_var.get()).strip()
         if not wanted or wanted == "alle":
             return True
-        item = getattr(self, "file_view_metadata_by_path", {}).get(str(path)) or {}
+        item = self.file_view_metadata_by_path.get(str(path)) or {}
         status = str(item.get("status") or "ohne").strip()
         return status == wanted
 
@@ -163,7 +157,7 @@ class FileTreeManagerMixin:
                 pdfa = path.with_name(f"{path.stem[:-4]}_pdfa.pdf")
                 return base.exists() or pdfa.exists()
             path_text = str(path)
-            for item in getattr(self, "file_view_metadata_items", []) or []:
+            for item in self.file_view_metadata_items or []:
                 ocr_text = str(item.get("ocr_pdf_path") or item.get("ocr_current_path") or "").strip()
                 if ocr_text and str(Path(ocr_text)) == path_text:
                     return True
@@ -199,7 +193,7 @@ class FileTreeManagerMixin:
             return
         base = Path(self.base_folder_var.get().strip()).expanduser()
         filter_active = bool(self.current_file_view_filter_norm())
-        status_filter_active = bool(str(getattr(getattr(self, "file_view_status_var", None), "get", lambda: "alle")() or "alle").strip() != "alle")
+        status_filter_active = str(self.file_view_status_var.get()).strip() != "alle"
         for child in children:
             if self.is_hidden_system_path(child):
                 continue
@@ -223,6 +217,13 @@ class FileTreeManagerMixin:
                     continue
                 display_name = child.name
                 display_name = f"{self.pdf_display_prefix(child)}{display_name}"
+                if child.suffix.lower() == ".pdf":
+                    linked = {}
+                    linked_resolver = getattr(self, "linked_pdf_paths_for_item", None)
+                    if callable(linked_resolver):
+                        linked = linked_resolver(self.file_view_metadata_by_path.get(str(child)), child) or {}
+                    if not linked.get("ocr") and not self.pdf_is_non_searchable_text(child, has_linked_ocr=bool(linked.get("ocr"))):
+                        display_name = f"# {display_name}"
                 if str(child) not in self.file_view_metadata_by_path:
                     display_name = f"* {display_name}"
                 self.file_tree.insert(parent_id, "end", text=display_name, values=(str(child),), open=False, tags=self.pdf_tree_tags(child))
@@ -235,19 +236,16 @@ class FileTreeManagerMixin:
         if not values:
             return
         path = Path(values[0])
-        if path != getattr(self, "file_view_current_path", None):
+        if path != self.file_view_current_path:
             self.file_preview_zoom = 1.0
         self.file_view_current_path = path
         self.file_view_current_metadata = self.file_view_metadata_by_path.get(str(path))
-        if hasattr(self, "update_file_view_preview_tab_visibility"):
-            self.update_file_view_preview_tab_visibility()
+        self.update_file_view_preview_tab_visibility()
         self.show_file_preview()
         self.load_file_view_metadata_form()
         self.update_file_view_ocr_button()
-        if hasattr(self, "update_file_view_admin_actions_for_selection"):
-            self.update_file_view_admin_actions_for_selection()
-        if hasattr(self, "update_admin_openai_controls"):
-            self.update_admin_openai_controls()
+        self.update_file_view_admin_actions_for_selection()
+        self.update_admin_openai_controls()
 
     def open_selected_file_from_tree(self) -> None:
         """Öffnet die aktuell ausgewählte Datei mit der Standardanwendung des Betriebssystems.

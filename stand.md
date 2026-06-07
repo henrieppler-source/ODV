@@ -13,6 +13,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Zentrale App-Konstanten: `app/app_constants.py`
 - Haupt-Launcher: `app/main.py`
 - Versionshistorie: `README.md`
+- Entwickler-Health-Check: `scripts/check_project_health.py` prüft Versionen, doppelte Methoden, alte Statusbegriffe, große Module und Legacy-Marker.
 
 ## Grundregeln für die Weiterentwicklung
 
@@ -56,6 +57,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Zielbild für ODV-Dateiansichten: Angezeigt werden soll grundsätzlich, was zentral in Nextcloud verfügbar ist. Lokale Verfügbarkeit steuert nur, ob lokale Aktionen wie Optimierung, PDF/A oder OCR direkt möglich sind; der Upload erfolgt anschließend über Nextcloud-Sync.
 - Die PDF-Übersicht ist sortierbar und besitzt ein Rechtsklick-Menü für Öffnen, Kopie speichern, OCR/PDF-A anzeigen sowie `PDF optimieren...` und `PDF/A erzeugen...`.
 - Aktionen aus der PDF-Übersicht führen Bestätigungs- und Ergebnisdialoge mit der PDF-Übersicht als Elternfenster; die Übersicht wird danach wieder in den Vordergrund geholt.
+- Letzter abgeschlossener Refactor-Slice: `mail_manager` in Utility-Blöcke (`visibility`, `recipients`) geteilt, ohne Verhaltensänderung.
 - Während `PDF optimieren...` und `PDF/A erzeugen...` läuft ein modaler Fortschrittsdialog mit `Datei wird verarbeitet`; die PDF-Verarbeitung läuft im Hintergrund, damit der Nutzer eine sichtbare Rückmeldung erhält.
 - `Datei öffnen` öffnet bei PDFs bevorzugt eine vorhandene `_pdfa.pdf`-Archivfassung. Die Arbeits-PDF kann daher stärker für PC-Nutzung komprimiert werden.
 - `PDF optimieren...` ist lokal aktiv; Superadmins können das Profil `verlustfrei`, `standard` oder `maximal` wählen. `standard` nutzt Ghostscript mit ca. 144 dpi, `maximal` ca. 120 dpi; ohne Ghostscript nutzt ODV PyMuPDF als Fallback. Die Arbeits-PDF wird nur ersetzt, wenn die optimierte Datei kleiner ist.
@@ -69,6 +71,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Die API-Endpunkte für Ordnerrechte und Ortsordner-Stammdaten müssen aktiv bleiben; fehlende Routen wurden wieder ergänzt.
 - Die Handbücher und die README werden bei Änderungen immer zusammen gedacht, damit die Dokumentation nicht auseinanderläuft.
 - Die aktuelle Versionshistorie in der `README.md` muss immer zum Code- und Handbuchstand passen.
+- Erste kritische Bereinigung nach v121: doppelte Upload-Statusmethoden wurden entfernt; tote UI-Altmarker werden schrittweise abgebaut.
 
 ## Wiederaufnahme bei Fortsetzung
 

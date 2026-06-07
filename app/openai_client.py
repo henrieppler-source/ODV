@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from .config import OPENAI_API_BASE_URL, OPENAI_DEFAULT_MODEL
+
 
 class OpenAIError(RuntimeError):
     def __init__(self, message: str, status: int | None = None, response: Any = None):
@@ -41,9 +43,9 @@ class OpenAIError(RuntimeError):
 
 
 class OpenAIClient:
-    def __init__(self, api_key: str, model: str = "gpt-3.5-turbo", base_url: str = "https://api.openai.com/v1"):
+    def __init__(self, api_key: str, model: str = OPENAI_DEFAULT_MODEL, base_url: str = OPENAI_API_BASE_URL):
         self.api_key = api_key.strip()
-        self.model = model.strip() or "gpt-3.5-turbo"
+        self.model = model.strip() or OPENAI_DEFAULT_MODEL
         self.base_url = base_url.rstrip("/")
 
     def request(self, path: str, data: dict[str, Any] | None = None, method: str = "POST") -> dict[str, Any]:

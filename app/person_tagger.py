@@ -47,6 +47,11 @@ class PersonTagger(tk.Toplevel):
         self._result: list[PersonMark] | None = None
         self.selected_number: int | None = None
         self.pending_mark: PersonMark | None = None
+        self._drag_mark: PersonMark | None = None
+        self._drag_start: tuple[int, int] | None = None
+        self._dragged = False
+        self._drag_threshold = 6
+        self._pending_new: tuple[float, float] | None = None
         self._current_number_var = tk.StringVar(value=f"Nächste Markierung: {self.next_person_number()}")
 
         self.original_image = Image.open(image_path)
@@ -62,7 +67,10 @@ class PersonTagger(tk.Toplevel):
 
         self.canvas = tk.Canvas(self, bg="#222222")
         self.canvas.grid(row=0, column=0, sticky="nsew", padx=8, pady=8)
-        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        self.canvas.bind("<ButtonPress-1>", self.on_canvas_press)
+        self.canvas.bind("<B1-Motion>", self.on_canvas_motion)
+        self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
+        self.canvas.bind("<Double-1>", self.on_canvas_double_click)
 
         side = ttk.Frame(self)
         side.grid(row=0, column=1, sticky="nsew", padx=8, pady=8)
@@ -212,15 +220,77 @@ class PersonTagger(tk.Toplevel):
         dialog.wait_window()
         return result["value"]
 
-    def on_canvas_click(self, event: tk.Event) -> None:
+    def on_canvas_press(self, event: tk.Event) -> None:
         img_w, img_h = self.display_image.size
         if event.x < self.offset_x or event.y < self.offset_y:
             return
         if event.x > self.offset_x + img_w or event.y > self.offset_y + img_h:
             return
 
+        existing_mark = self.find_mark_at_position(event.x, event.y, img_w, img_h)
+        if existing_mark is not None:
+            self.pending_mark = None
+            self.selected_number = existing_mark.number
+            self.update_current_number_hint(existing_mark.number, selected=True)
+            try:
+                self.tree.selection_set(str(existing_mark.number))
+                self.tree.see(str(existing_mark.number))
+            except Exception:
+                pass
+            self.redraw()
+            self._drag_mark = existing_mark
+            self._drag_start = (event.x, event.y)
+            self._dragged = False
+            self._pending_new = None
+            return
+
         rel_x = (event.x - self.offset_x) / img_w
         rel_y = (event.y - self.offset_y) / img_h
+        rel_x = max(0.0, min(1.0, rel_x))
+        rel_y = max(0.0, min(1.0, rel_y))
+        self._pending_new = (rel_x, rel_y)
+        self._drag_mark = None
+        self._drag_start = None
+        self._dragged = False
+
+    def on_canvas_motion(self, event: tk.Event) -> None:
+        if self._drag_mark is None or self._drag_start is None:
+            return
+        dx = event.x - self._drag_start[0]
+        dy = event.y - self._drag_start[1]
+        dist_sq = dx * dx + dy * dy
+        if (not self._dragged) and dist_sq >= self._drag_threshold * self._drag_threshold:
+            self._dragged = True
+        if not self._dragged:
+            return
+
+        img_w, img_h = self.display_image.size
+        if img_w <= 0 or img_h <= 0:
+            return
+
+        self._drag_mark.x = max(0.0, min(1.0, (event.x - self.offset_x) / img_w))
+        self._drag_mark.y = max(0.0, min(1.0, (event.y - self.offset_y) / img_h))
+        self.redraw()
+
+    def on_canvas_release(self, event: tk.Event) -> None:
+        if self._drag_mark is not None:
+            if self._dragged:
+                self._drag_mark = None
+                self._drag_start = None
+                self._dragged = False
+                self.refresh_tree()
+                self.redraw()
+                return
+
+            self._drag_mark = None
+            self._drag_start = None
+            self._dragged = False
+            return
+
+        if self._pending_new is None:
+            return
+        rel_x, rel_y = self._pending_new
+        self._pending_new = None
         number = self.next_person_number()
         self.selected_number = number
         self.pending_mark = PersonMark(number=number, x=rel_x, y=rel_y, display_name="", certainty="unbekannt", note="")
@@ -246,20 +316,18 @@ class PersonTagger(tk.Toplevel):
             pass
         self.redraw()
 
-    def refresh_tree(self) -> None:
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-        for p in sorted(self.persons, key=lambda person: person.number):
-            self.tree.insert("", "end", iid=str(p.number), values=(p.number, p.display_name, p.certainty, p.note))
-        self.update_current_number_hint()
-
-
-    def edit_selected(self) -> None:
-        selected = self.tree.selection()
-        if not selected:
-            messagebox.showwarning("Keine Auswahl", "Bitte zuerst eine Personenmarkierung auswählen.", parent=self)
+    def on_canvas_double_click(self, event: tk.Event) -> None:
+        img_w, img_h = self.display_image.size
+        if event.x < self.offset_x or event.y < self.offset_y:
             return
-        number = int(selected[0])
+        if event.x > self.offset_x + img_w or event.y > self.offset_y + img_h:
+            return
+
+        existing_mark = self.find_mark_at_position(event.x, event.y, img_w, img_h)
+        if existing_mark is not None:
+            self.edit_mark(existing_mark.number)
+
+    def edit_mark(self, number: int) -> None:
         person = next((p for p in self.persons if p.number == number), None)
         if person is None:
             return
@@ -287,6 +355,32 @@ class PersonTagger(tk.Toplevel):
         except Exception:
             pass
         self.redraw()
+
+    def find_mark_at_position(self, x: int, y: int, img_w: int, img_h: int) -> PersonMark | None:
+        """Returns the first mark near a canvas click position."""
+        for person in self.persons:
+            px = self.offset_x + int(person.x * img_w)
+            py = self.offset_y + int(person.y * img_h)
+            hit_radius = 20
+            if (x - px) ** 2 + (y - py) ** 2 <= hit_radius * hit_radius:
+                return person
+        return None
+
+    def refresh_tree(self) -> None:
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+        for p in sorted(self.persons, key=lambda person: person.number):
+            self.tree.insert("", "end", iid=str(p.number), values=(p.number, p.display_name, p.certainty, p.note))
+        self.update_current_number_hint()
+
+
+    def edit_selected(self) -> None:
+        selected = self.tree.selection()
+        if not selected:
+            messagebox.showwarning("Keine Auswahl", "Bitte zuerst eine Personenmarkierung auswählen.", parent=self)
+            return
+        number = int(selected[0])
+        self.edit_mark(number)
 
     def delete_selected(self) -> None:
         selected = self.tree.selection()

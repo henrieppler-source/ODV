@@ -10,50 +10,28 @@ from .file_service import detect_document_type, load_metadata_files
 
 
 class AdminListManagerMixin:
-    def legacy_admin_table_is_active(self) -> bool:
-        """Die alte Tabellenansicht ist nur noch Fallback, wenn sie sichtbar im Notebook hängt."""
-        try:
-            if not hasattr(self, "notebook") or not hasattr(self, "admin_tab"):
-                return False
-            return str(self.admin_tab) in [str(tab) for tab in self.notebook.tabs()]
-        except Exception:
-            return False
-
     def refresh_document_work_area(self, show_message: bool = False) -> None:
-        """Aktualisiert den aktuellen Dokument-Arbeitsbereich, bevorzugt die neue Baumansicht."""
-        if hasattr(self, "refresh_file_view_tree"):
-            try:
-                self.refresh_file_view_tree()
-                return
-            except Exception as exc:
-                app_log_exception("Neue Dateiansicht konnte nicht aktualisiert werden", exc)
-        if self.legacy_admin_table_is_active():
-            self.refresh_admin_uploads(show_message=show_message, force_legacy=True)
+        """Aktualisiert den Dokument-Arbeitsbereich in der Dateiansicht."""
+        try:
+            self.refresh_file_view_tree()
+            return
+        except Exception as exc:
+            app_log_exception("Dateiansicht konnte nicht aktualisiert werden", exc)
 
-    def refresh_admin_uploads(self, show_message: bool = True, force_legacy: bool = False) -> None:
+    def refresh_admin_uploads(self, show_message: bool = True) -> None:
         """Lädt im API-/Produktivmodus ausschließlich aktive MySQL/API-Datensätze.
 
         Lokale JSON-Dateien bleiben Sicherung, werden hier aber nicht mehr als
         aktive Bearbeitungsliste eingemischt. Verwaiste Sicherungen werden über
         Admin > Lokale Sicherungsdateien prüfen/bereinigen geprüft.
         """
-        if not force_legacy and not self.legacy_admin_table_is_active():
-            if hasattr(self, "refresh_file_view_tree"):
-                try:
-                    self.refresh_file_view_tree()
-                except Exception as exc:
-                    app_log_exception("Neue Dateiansicht konnte nicht aktualisiert werden", exc)
-            return
-
         self.configure_admin_actions_for_role()
 
-        if not hasattr(self, "admin_tree"):
-            return
         for row in self.admin_tree.get_children():
             self.admin_tree.delete(row)
 
-        wanted_status = self.admin_status_var.get() if hasattr(self, "admin_status_var") else "alle"
-        wanted_folder = self.admin_folder_var.get().strip() if hasattr(self, "admin_folder_var") else "alle"
+        wanted_status = self.admin_status_var.get()
+        wanted_folder = self.admin_folder_var.get().strip()
         visible: list[dict] = []
         self.admin_uploads = []
 
@@ -118,22 +96,18 @@ class AdminListManagerMixin:
             messagebox.showinfo("Dateien bearbeiten", f"{len(visible)} Uploads aus MySQL/API angezeigt.")
 
     def refresh_admin_folder_choices(self) -> None:
-        if not hasattr(self, "admin_folder_combo"):
-            return
-        folder_names = {str(folder).strip() for folder in getattr(self, "admin_work_folder_names", set()) if str(folder).strip()}
+        folder_names = {str(folder).strip() for folder in self.admin_work_folder_names if str(folder).strip()}
         if self.is_current_admin():
             folder_names.add("00_ORTSCHRONIK")
         values = ["alle"] + sorted(folder_names, key=str.lower)
         self.admin_folder_combo["values"] = values
-        current = self.admin_folder_var.get().strip() if hasattr(self, "admin_folder_var") else "alle"
+        current = self.admin_folder_var.get().strip()
         if current not in values:
             self.admin_folder_var.set("alle")
 
     def selected_admin_upload(self) -> dict | None:
-        if self.is_unified_file_view_active() or not self.legacy_admin_table_is_active():
+        if self.is_unified_file_view_active():
             return self.selected_file_view_item_for_admin_actions()
-        if not hasattr(self, "admin_tree"):
-            return None
         selection = self.admin_tree.selection()
         if not selection:
             return None
@@ -144,19 +118,19 @@ class AdminListManagerMixin:
         return None
 
     def selected_file_view_item_for_admin_actions(self) -> dict | None:
-        path = getattr(self, "file_view_current_path", None)
+        path = self.file_view_current_path
         if path is None or not path.exists() or not path.is_file():
             return None
-        item = getattr(self, "file_view_current_metadata", None) or self.item_for_local_path(path)
+        item = self.file_view_current_metadata or self.item_for_local_path(path)
         if item:
             return item
-        root = Path(self.base_folder_var.get().strip()).expanduser() if hasattr(self, "base_folder_var") else path.parent
+        root = Path(self.base_folder_var.get().strip()).expanduser()
         try:
             rel_parent = str(path.parent.relative_to(root))
         except Exception:
             rel_parent = str(path.parent)
         try:
-            tree_iid = self.file_tree.selection()[0] if hasattr(self, "file_tree") and self.file_tree.selection() else str(path)
+            tree_iid = self.file_tree.selection()[0] if self.file_tree.selection() else str(path)
         except Exception:
             tree_iid = str(path)
         return {
@@ -185,20 +159,20 @@ class AdminListManagerMixin:
 
     def is_unified_file_view_active(self) -> bool:
         try:
-            return hasattr(self, "notebook") and self.notebook.select() == str(self.viewer_tab)
+            return self.notebook.select() == str(self.viewer_tab)
         except Exception:
             return False
 
     def update_admin_tree_headings(self, missing_mode: bool = False) -> None:
-        if not hasattr(self, "admin_tree"):
+        if not self.admin_tree:
             return
-        labels = dict(getattr(self, "admin_tree_heading_labels", {}) or {})
+        labels = dict(self.admin_tree_heading_labels)
         if missing_mode:
             labels.update({"by": "Ordner", "date": ""})
         else:
             labels.update({"by": "Erfasst von", "date": "Datum"})
-        sort_col = getattr(self, "admin_sort_column", "")
-        sort_reverse = bool(getattr(self, "admin_sort_reverse", False))
+        sort_col = self.admin_sort_column
+        sort_reverse = self.admin_sort_reverse
         for col, label in labels.items():
             suffix = " ↓" if col == sort_col and sort_reverse else (" ↑" if col == sort_col else "")
             try:
@@ -222,15 +196,15 @@ class AdminListManagerMixin:
         return ""
 
     def sorted_admin_uploads_for_current_heading(self, items: list[dict]) -> list[dict]:
-        column = getattr(self, "admin_sort_column", "")
+        column = self.admin_sort_column
         if not column:
             return items
-        reverse = bool(getattr(self, "admin_sort_reverse", False))
+        reverse = self.admin_sort_reverse
         return sorted(items, key=lambda item: self.admin_sort_value(item, column).casefold(), reverse=reverse)
 
     def sort_admin_tree_by_column(self, column: str) -> None:
-        current = getattr(self, "admin_sort_column", "")
-        self.admin_sort_reverse = not bool(getattr(self, "admin_sort_reverse", False)) if current == column else False
+        current = self.admin_sort_column
+        self.admin_sort_reverse = not self.admin_sort_reverse if current == column else False
         self.admin_sort_column = column
         self.refresh_admin_uploads(show_message=False)
 
@@ -263,7 +237,7 @@ class AdminListManagerMixin:
             return []
 
         known_paths: set[str] = set()
-        for item in getattr(self, "admin_uploads", []) or []:
+        for item in self.admin_uploads or []:
             path_text = str(item.get("current_path") or "").strip()
             if path_text:
                 try:
@@ -365,13 +339,11 @@ class AdminListManagerMixin:
         return False
 
     def refresh_admin_destination_choices(self) -> None:
-        if not hasattr(self, "admin_destination_combo"):
-            return
         # Zielordner sind die bereits ermittelten, lokal beschreibbaren Nextcloud-Ordner.
         # Wichtig: Hier NICHT erneut load_writable_folders() aufrufen, sonst entsteht beim Start
         # eine Rekursion: load_writable_folders -> refresh_admin_destination_choices -> load_writable_folders.
         base = Path(self.base_folder_var.get().strip()).expanduser()
-        folders = list(getattr(self, "writable_folders", []) or [])
+        folders = list(self.writable_folders or [])
         self.admin_destination_map = {self.display_path_for_folder(path, base): path for path in folders}
         values = sorted(self.admin_destination_map.keys(), key=str.lower)
         self.admin_destination_combo["values"] = values

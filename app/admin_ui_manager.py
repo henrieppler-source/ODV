@@ -8,7 +8,13 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from .app_logging import app_log_exception
-from .config import save_config
+from .config import (
+    OPENAI_DEFAULT_MODEL,
+    OPENAI_MODEL_OPTIONS,
+    OPENAI_PDF_SAMPLE_PAGES,
+    OPENAI_TEXT_SAMPLE_CHARS,
+    save_config,
+)
 from .database import add_history
 from .models import HistoryEntry
 from .openai_client import OpenAIClient, OpenAIError
@@ -48,6 +54,8 @@ class AdminUiManagerMixin:
             show="headings",
             selectmode="extended",
         )
+        self.admin_sort_column = "filename"
+        self.admin_sort_reverse = False
         self.admin_tree_heading_labels = {
             "upload_id": "Upload-ID",
             "status": "Status",
@@ -129,7 +137,6 @@ class AdminUiManagerMixin:
         self.admin_right_pane.bind("<ButtonRelease-1>", lambda _e: self.save_pane_positions())
         self.admin_outer_pane.add(list_frame, weight=1)
         self.admin_outer_pane.add(self.admin_right_pane, weight=2)
-        self.configure_admin_actions_for_role()
 
         admin_preview_frame = ttk.LabelFrame(self.admin_right_pane, text="Vorschau / Personen", padding=8)
         self.admin_preview_frame = admin_preview_frame
@@ -170,6 +177,7 @@ class AdminUiManagerMixin:
         self.admin_note_text = form["note_text"]  # type: ignore[assignment]
         self.admin_json_text = form["json_text"]  # type: ignore[assignment]
         self.refresh_admin_uploaded_by_options()
+        self.configure_admin_actions_for_role()
 
         self.admin_right_pane.add(admin_preview_frame, weight=1)
         self.admin_right_pane.add(detail_outer, weight=3)
@@ -256,7 +264,7 @@ class AdminUiManagerMixin:
             base = self.nextcloud_base_path(show_message=True)
             if base is None:
                 return
-            if not getattr(self, "writable_folders", []):
+            if not self.writable_folders:
                 self.load_writable_folders(show_message=False)
             selected = self.open_folder_tree_dialog("Admin-Bearbeitungsordner auswählen", self.writable_folders, "")
             if not selected:
@@ -332,13 +340,14 @@ class AdminUiManagerMixin:
         openai_key_var = tk.StringVar(value=self.config_data.get("openai_api_key", ""))
         ttk.Entry(api_tab, textvariable=openai_key_var, width=42, show="*").grid(row=7, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
         ttk.Label(api_tab, text="OpenAI-Modell:").grid(row=8, column=0, sticky="w", pady=4)
-        openai_model_var = tk.StringVar(value=self.config_data.get("openai_model", "gpt-3.5-turbo"))
-        openai_model_values = ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"]
+        openai_default_model = OPENAI_DEFAULT_MODEL
+        openai_model_var = tk.StringVar(value=self.config_data.get("openai_model", openai_default_model) or openai_default_model)
+        openai_model_values = list(OPENAI_MODEL_OPTIONS)
         if openai_model_var.get().strip() and openai_model_var.get().strip() not in openai_model_values:
             openai_model_values.append(openai_model_var.get().strip())
         ttk.Combobox(api_tab, textvariable=openai_model_var, values=openai_model_values, state="readonly").grid(row=8, column=1, columnspan=3, sticky="ew", padx=6, pady=4)
-        openai_pdf_pages_var = tk.StringVar(value=str(self.config_data.get("openai_pdf_sample_pages", 10) or 10))
-        openai_text_chars_var = tk.StringVar(value=str(self.config_data.get("openai_text_sample_chars", 4000) or 4000))
+        openai_pdf_pages_var = tk.StringVar(value=str(self.config_data.get("openai_pdf_sample_pages", OPENAI_PDF_SAMPLE_PAGES) or OPENAI_PDF_SAMPLE_PAGES))
+        openai_text_chars_var = tk.StringVar(value=str(self.config_data.get("openai_text_sample_chars", OPENAI_TEXT_SAMPLE_CHARS) or OPENAI_TEXT_SAMPLE_CHARS))
         openai_place_context_chars_var = tk.StringVar(value=str(self.config_data.get("openai_place_context_chars", 650) or 650))
         openai_place_max_contexts_var = tk.StringVar(value=str(self.config_data.get("openai_place_max_contexts", 30) or 30))
         openai_points_var = tk.StringVar(value=str(self.config_data.get("openai_metadata_points", 1) or 1))
@@ -351,8 +360,8 @@ class AdminUiManagerMixin:
         ttk.Spinbox(openai_limits_frame, from_=500, to=100000, increment=500, textvariable=openai_text_chars_var, width=8).pack(side="left", padx=(6, 16))
 
         def reset_openai_limits() -> None:
-            openai_pdf_pages_var.set("10")
-            openai_text_chars_var.set("4000")
+            openai_pdf_pages_var.set(str(OPENAI_PDF_SAMPLE_PAGES))
+            openai_text_chars_var.set(str(OPENAI_TEXT_SAMPLE_CHARS))
             openai_place_context_chars_var.set("650")
             openai_place_max_contexts_var.set("30")
             openai_points_var.set("1")
@@ -367,7 +376,17 @@ class AdminUiManagerMixin:
         ttk.Spinbox(openai_place_frame, from_=100, to=6000, increment=100, textvariable=openai_place_context_chars_var, width=8).pack(side="left", padx=(6, 16))
         ttk.Label(openai_place_frame, text="max. Fundstellen").pack(side="left")
         ttk.Spinbox(openai_place_frame, from_=1, to=200, textvariable=openai_place_max_contexts_var, width=6).pack(side="left", padx=(6, 0))
-        ttk.Label(api_tab, text="Empfohlen: gpt-4o-mini. Für PDFs werden standardmäßig nur die ersten 10 Seiten und maximal 4000 Zeichen an OpenAI gegeben. Bei `Orte prüfen` wird lokal unbegrenzt gesucht; an OpenAI gehen nur die eingestellte Anzahl Fundstellen mit eingestelltem Kontext. OpenAI-Punkte werden je Metadatenfeld in der Punkteverwaltung gepflegt.", wraplength=760).grid(row=11, column=0, columnspan=4, sticky="w", pady=(0, 8))
+        ttk.Label(
+            api_tab,
+            text=(
+                f"Empfohlen: {OPENAI_DEFAULT_MODEL}. Für PDFs werden standardmäßig nur die ersten "
+                f"{OPENAI_PDF_SAMPLE_PAGES} Seiten und maximal {OPENAI_TEXT_SAMPLE_CHARS} Zeichen an OpenAI gegeben. "
+                "Bei `Orte prüfen` wird lokal unbegrenzt gesucht; an OpenAI gehen nur die eingestellte "
+                "Anzahl Fundstellen mit eingestelltem Kontext. "
+                "OpenAI-Punkte werden je Metadatenfeld in der Punkteverwaltung gepflegt."
+            ),
+            wraplength=760,
+        ).grid(row=11, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         openai_test_status_var = tk.StringVar(value="OpenAI-Schlüssel nicht geprüft")
         openai_balance_var = tk.StringVar(value="Guthaben: n.v.")
@@ -393,7 +412,8 @@ class AdminUiManagerMixin:
             openai_balance_var.set("Guthaben: n.v.")
             def run_check() -> None:
                 try:
-                    client = OpenAIClient(openai_key_var.get().strip(), openai_model_var.get().strip() or "gpt-3.5-turbo")
+                    openai_model = openai_model_var.get().strip() or openai_default_model
+                    client = OpenAIClient(openai_key_var.get().strip(), openai_model)
                     client.verify_key()
                     balance_text = "Guthaben: nicht per API abrufbar"
                     try:
@@ -614,7 +634,7 @@ class AdminUiManagerMixin:
             self.refresh_admin_folder_choices()
             self.config_data["api_url"] = api_url_var.get().strip()
             self.config_data["openai_api_key"] = openai_key_var.get().strip()
-            self.config_data["openai_model"] = openai_model_var.get().strip() or "gpt-3.5-turbo"
+            self.config_data["openai_model"] = openai_model_var.get().strip() or openai_default_model
             self.config_data["openai_pdf_sample_pages"] = openai_pdf_pages
             self.config_data["openai_text_sample_chars"] = openai_text_chars
             self.config_data["openai_place_context_chars"] = openai_place_context_chars

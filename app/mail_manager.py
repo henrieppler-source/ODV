@@ -14,33 +14,74 @@ import webbrowser
 from .api_client import ApiError
 from .app_logging import app_log, app_log_exception
 from .config import save_config
+from .mail_manager_utils import (
+    build_stable_user_id as _mm_build_stable_user_id,
+    coerce_user_records as _mm_coerce_user_records,
+    extract_user_active as _mm_extract_user_active,
+    extract_user_email as _mm_extract_user_email,
+    extract_numeric_user_id as _mm_extract_numeric_user_id,
+    normalize_mail_markup as _mm_normalize_mail_markup,
+    render_mail_html as _mm_render_mail_html,
+)
+from .mail_manager_visibility_utils import (
+    mail_group_matches_user as _mmvu_mail_group_matches_user,
+    mail_user_context as _mmvu_mail_user_context,
+)
+from .mail_manager_recipients_utils import (
+    build_mail_attachments as _mmra_build_mail_attachments,
+    collect_mail_recipients as _mmra_collect_mail_recipients,
+)
 from .users import load_users as load_local_users
 
 
 class MailManagerMixin:
+    @staticmethod
+    def _coerce_user_records(payload: object) -> list[dict]:
+        return _mm_coerce_user_records(payload)
+
+    @staticmethod
+    def _extract_user_email(user: dict) -> str:
+        return _mm_extract_user_email(user)
+
+    @staticmethod
+    def _extract_user_active(user: dict) -> bool:
+        return _mm_extract_user_active(user)
+
+    @staticmethod
+    def _build_stable_user_id(item: dict, email: str) -> int:
+        return _mm_build_stable_user_id(item, email)
+
+    @staticmethod
+    def _extract_numeric_user_id(user: dict, keys: tuple[str, ...] = ("id", "user_id", "uid", "userId")) -> int:
+        return _mm_extract_numeric_user_id(user, keys=keys)
+
+    def _maybe_load_users(self, source_callable, *args: object) -> object | None:
+        if not callable(source_callable):
+            return None
+        try:
+            return source_callable(*args)
+        except TypeError:
+            return None
+        except Exception:
+            return None
+
+    def _append_user_source(self, sources: list[object], source_callable, include_token: bool = False) -> None:
+        if include_token and self.api_token:
+            payload = self._maybe_load_users(source_callable, self.api_token)
+            if payload is not None:
+                sources.append(payload)
+                return
+        payload = self._maybe_load_users(source_callable)
+        if payload is not None:
+            sources.append(payload)
+
     def normalize_mail_markup(self, text: str) -> str:
         """Entfernt die leichte /b-Markierung für reine Textausgaben."""
-        import re
-        text = text or ""
-        return re.sub(r"/b(.*?)/b", lambda m: m.group(1), text, flags=re.S)
+        return _mm_normalize_mail_markup(text)
 
     def render_mail_html(self, text: str) -> str:
         """Erzeugt eine sehr leichte HTML-Darstellung mit /b.../b als fett."""
-        import html
-        import re
-        parts: list[str] = []
-        last = 0
-        raw = text or ""
-        for match in re.finditer(r"/b(.*?)/b", raw, flags=re.S):
-            if match.start() > last:
-                parts.append(html.escape(raw[last:match.start()]))
-            parts.append(f"<strong>{html.escape(match.group(1))}</strong>")
-            last = match.end()
-        if last < len(raw):
-            parts.append(html.escape(raw[last:]))
-        html_text = "".join(parts)
-        html_text = html_text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>\n")
-        return f"<html><body>{html_text}</body></html>"
+        return _mm_render_mail_html(text)
 
     def get_mail_text_templates(self) -> list[dict]:
         templates = self.config_data.get("mail_text_templates", [])
@@ -77,81 +118,32 @@ class MailManagerMixin:
         und Aktiv-Status.
         """
         try:
-            def unwrap_users(payload: object) -> list[dict]:
-                if isinstance(payload, list):
-                    return [item for item in payload if isinstance(item, dict)]
-                if isinstance(payload, dict):
-                    for key in ("users", "items", "data", "results"):
-                        value = payload.get(key)
-                        if isinstance(value, list):
-                            return [item for item in value if isinstance(item, dict)]
-                    if any(isinstance(v, (str, int, bool)) for v in payload.values()):
-                        return [payload]
-                return []
-
-            def extract_email(user: dict) -> str:
-                direct_keys = ("email", "mail", "mail_address", "mailadresse", "e_mail", "eMail", "mailAddress")
-                for key in direct_keys:
-                    value = str(user.get(key, "") or "").strip()
-                    if value:
-                        return value
-                nested_paths = (
-                    ("contact", "email"),
-                    ("contact", "mail"),
-                    ("address", "email"),
-                    ("address", "mail"),
-                    ("kontakt", "email"),
-                    ("kontakt", "mail"),
-                )
-                for outer, inner in nested_paths:
-                    nested = user.get(outer)
-                    if isinstance(nested, dict):
-                        value = str(nested.get(inner, "") or "").strip()
-                        if value:
-                            return value
-                return ""
-
-            def extract_active(user: dict) -> bool:
-                active_value = user.get("is_active", user.get("active", user.get("enabled", True)))
-                if isinstance(active_value, str):
-                    return active_value.strip().lower() in {"1", "true", "yes", "ja", "active", "aktiv"}
-                return bool(active_value)
-
             sources: list[object] = []
-            api_loader = getattr(self.api, "list_users", None)
-            if callable(api_loader) and self.api_token:
+            if self.api_token:
                 try:
-                    sources.append(api_loader(self.api_token))
+                    self._append_user_source(sources, self.api.list_users, include_token=True)
                 except Exception:
                     pass
-            for attr_name in ("users", "all_users", "api_users", "user_cache", "cached_users", "mail_users"):
-                value = getattr(self, attr_name, None)
-                if value:
-                    sources.append(value)
-            try:
-                sources.append(load_local_users())
-            except Exception:
-                pass
-            for method_name in ("load_users", "load_all_users", "get_users"):
-                method = getattr(self, method_name, None)
-                if callable(method):
-                    try:
-                        sources.append(method())
-                    except TypeError:
-                        try:
-                            sources.append(method(self.api_token))
-                        except Exception:
-                            pass
+            users_source = self.users
+            if users_source:
+                sources.append(users_source)
+            source_result = self._maybe_load_users(load_local_users)
+            if source_result is not None:
+                sources.append(source_result)
+
+            self._append_user_source(sources, self.load_users, include_token=True)
+            self._append_user_source(sources, self.load_all_users, include_token=True)
+            self._append_user_source(sources, self.get_users, include_token=True)
 
             users: list[dict] = []
             seen_ids: set[str] = set()
 
             for source in sources:
-                for user in unwrap_users(source):
-                    email = extract_email(user)
+                for user in self._coerce_user_records(source):
+                    email = self._extract_user_email(user)
                     if not email:
                         continue
-                    if not extract_active(user):
+                    if not self._extract_user_active(user):
                         continue
 
                     identifier = str(
@@ -168,21 +160,7 @@ class MailManagerMixin:
 
                     item = dict(user)
                     item["email"] = email
-                    if not item.get("id"):
-                        # Lokale Benutzerdateien liefern oft keine echte ID.
-                        # Für die Anzeige im Verteiler-Dialog geben wir ihnen
-                        # eine stabile Platzhalter-ID, damit sie auswählbar
-                        # bleiben.
-                        item["id"] = -abs(hash((item.get("username", ""), email, item.get("display_name", "")))) or -1
-                    for key in ("id", "user_id", "uid", "userId"):
-                        raw_id = item.get(key)
-                        if raw_id is None:
-                            continue
-                        try:
-                            item["id"] = int(raw_id)
-                            break
-                        except Exception:
-                            continue
+                    item["id"] = self._build_stable_user_id(item, email)
                     users.append(item)
 
             users.sort(
@@ -207,36 +185,7 @@ class MailManagerMixin:
             return []
 
     def _mail_user_context(self) -> dict[str, str]:
-        """Ermittelt den aktuellen Benutzerkontext für Mail-Filter.
-
-        Wir lesen mehrere mögliche Attributnamen aus, damit die Filterung
-        unabhängig von der genauen Login-Implementierung funktioniert.
-        """
-        candidates = []
-        for attr_name in ("current_user", "current_user_data", "user_data", "logged_in_user", "session_user"):
-            value = getattr(self, attr_name, None)
-            if value:
-                candidates.append(value)
-
-        def _pick(source: object, *keys: str) -> str:
-            if isinstance(source, dict):
-                for key in keys:
-                    value = str(source.get(key, "") or "").strip()
-                    if value:
-                        return value
-            for key in keys:
-                value = str(getattr(source, key, "") or "").strip()
-                if value:
-                    return value
-            return ""
-
-        source = candidates[0] if candidates else {}
-        return {
-            "username": _pick(source, "username", "user", "login_name"),
-            "display_name": _pick(source, "display_name", "name", "full_name"),
-            "role": _pick(source, "role", "user_role"),
-            "place": _pick(source, "place", "ort", "location", "area"),
-        }
+        return _mmvu_mail_user_context(self, self.config_data)
 
     def load_visible_mail_groups(self) -> list[dict]:
         """Lädt die für den aktuellen Benutzer sichtbaren Verteiler.
@@ -249,53 +198,7 @@ class MailManagerMixin:
             return groups
 
         ctx = self._mail_user_context()
-        current_username = ctx["username"].strip().lower()
-        current_name = ctx["display_name"].strip().lower()
-        current_place = ctx["place"].strip().lower()
-
-        def matches(group: dict) -> bool:
-            creator_values = [
-                str(group.get(key, "") or "").strip().lower()
-                for key in (
-                    "created_by",
-                    "creator",
-                    "owner",
-                    "username",
-                    "created_by_username",
-                    "created_by_name",
-                    "created_by_display_name",
-                    "ersteller",
-                )
-            ]
-            place_values = [
-                str(group.get(key, "") or "").strip().lower()
-                for key in (
-                    "place",
-                    "ort",
-                    "location",
-                    "area",
-                    "region",
-                    "place_name",
-                )
-            ]
-            creator_role = str(
-                group.get("created_by_role")
-                or group.get("creator_role")
-                or group.get("owner_role")
-                or ""
-            ).strip().lower()
-
-            if current_username and current_username in creator_values:
-                return True
-            if current_name and current_name in creator_values:
-                return True
-            if current_place and current_place in place_values:
-                return True
-            if creator_role in {"admin", "superadmin"} and ctx["role"].strip().lower() in {"admin", "superadmin"}:
-                return True
-            return False
-
-        visible = [group for group in groups if isinstance(group, dict) and matches(group)]
+        visible = [group for group in groups if _mmvu_mail_group_matches_user(group, ctx)]
         return visible or groups
 
 
@@ -492,16 +395,6 @@ class MailManagerMixin:
         selected_group = {"id": None}
         member_vars: dict[int, tk.BooleanVar] = {}
 
-        def resolve_user_id(user: dict) -> int:
-            for key in ("id", "user_id", "uid", "userId"):
-                try:
-                    uid = int(user.get(key, 0) or 0)
-                except Exception:
-                    uid = 0
-                if uid != 0:
-                    return uid
-            return 0
-
         ttk.Label(right, text="Name:").grid(row=0, column=0, sticky="w", pady=4)
         ttk.Entry(right, textvariable=name_var).grid(row=0, column=1, sticky="ew", pady=4)
         ttk.Label(right, text="Beschreibung:").grid(row=1, column=0, sticky="w", pady=4)
@@ -522,7 +415,7 @@ class MailManagerMixin:
         members_frame.rowconfigure(0, weight=1)
 
         for idx, user in enumerate(users):
-            uid = resolve_user_id(user)
+            uid = MailManagerMixin._extract_numeric_user_id(user)
             if uid == 0:
                 continue
             var = tk.BooleanVar(value=False)
@@ -606,14 +499,7 @@ class MailManagerMixin:
             for m in g.get("members", []):
                 if not isinstance(m, dict):
                     continue
-                uid = 0
-                for key in ("user_id", "id", "uid", "userId"):
-                    try:
-                        uid = int(m.get(key, 0) or 0)
-                    except Exception:
-                        uid = 0
-                    if uid > 0:
-                        break
+                uid = MailManagerMixin._extract_numeric_user_id(m, ("user_id", "id", "uid", "userId"))
                 if uid > 0:
                     members.add(uid)
             for uid, var in member_vars.items():
@@ -865,6 +751,20 @@ class MailManagerMixin:
         data = base64.b64encode(path.read_bytes()).decode("ascii")
         return {"filename": path.name, "mime_type": mime, "content_base64": data, "size": size}
 
+    def collect_mail_recipients(
+        self,
+        users: list[dict],
+        user_list: tk.Listbox | None,
+        groups: list[dict],
+        group_listbox: tk.Listbox | None,
+        manual_recipients: str,
+    ) -> list[str]:
+        """Ermittelt die Empfängerliste für die Rundmail aus allen Quellen."""
+        return _mmra_collect_mail_recipients(users, user_list, groups, group_listbox, manual_recipients)
+
+    def build_mail_attachments(self, file_paths: list[str]) -> list[dict]:
+        return _mmra_build_mail_attachments(file_paths, self.build_mail_attachment_payload)
+
     def open_information_mail_dialog(self) -> None:
         """Rundmail erstellen und optional direkt über die Server-API versenden."""
         users = self.load_email_users()
@@ -885,9 +785,10 @@ class MailManagerMixin:
         dialog.rowconfigure(7, weight=1)
 
         ttk.Label(dialog, text="Antwort an:").grid(row=0, column=0, sticky="w", padx=10, pady=8)
-        current_username = (self.username_var.get().strip() or (self.current_user.get("username", "") if self.current_user else "")).strip()
-        current_display_name = ((self.current_user.get("display_name", "") if self.current_user else "") or self.display_name_var.get().strip()).strip()
-        current_email = (self.current_user.get("email", "") if self.current_user else "") or self.email_var.get().strip() or str(self.config_data.get("current_email", "") or "")
+        context = self._mail_user_context()
+        current_username = context["username"] or self.username_var.get().strip()
+        current_display_name = context["display_name"] or self.display_name_var.get().strip()
+        current_email = context["email"] or self.email_var.get().strip() or str(self.config_data.get("current_email", "") or "")
         if not current_email and self.api_token:
             try:
                 response = self.api.me(self.api_token)
@@ -1206,46 +1107,29 @@ class MailManagerMixin:
         ttk.Button(expiry_frame, text="Heute", width=7, command=lambda: share_expires_at_var.set(date.today().isoformat())).pack(side="left", padx=(4, 0))
 
         def collect_recipients() -> list[str]:
-            emails: list[str] = []
-            for idx in user_list.curselection():
-                email = str(users[int(idx)].get("email", "") or "").strip()
-                if email:
-                    emails.append(email)
-            selected_indices: set[int] = set(group_listbox.curselection() if group_listbox is not None else [])
-            for idx, group in enumerate(groups):
-                if idx not in selected_indices:
-                    continue
-                for member in list(group.get("members", []) or []) + list(group.get("external_members", []) or []):
-                    email = str(member.get("email", "") or "").strip()
-                    if email:
-                        emails.append(email)
-            for part in manual_var.get().replace(",", ";").split(";"):
-                email = part.strip()
-                if email:
-                    emails.append(email)
-            seen = set()
-            out = []
-            for email in emails:
-                key = email.lower()
-                if key not in seen:
-                    seen.add(key)
-                    out.append(email)
-            return out
+            return self.collect_mail_recipients(users, user_list, groups, group_listbox, manual_var.get())
 
-        def render_body_text() -> str:
+        def build_document_payload_for_body() -> tuple[str, str]:
+            """Berechnet Dokumentname und Anlagenblock konsistent für Text- und HTML-Body."""
             if selected_docs:
                 doc_name = ", ".join(Path(x).name for x in selected_docs)
             else:
                 doc_name = Path(doc_path_var.get()).name if doc_path_var.get().strip() else ""
-            document_block = link_var.get().strip()
+
             current_mode = effective_send_mode()
             if current_mode == "none":
-                document_block = ""
-                doc_name = ""
-            elif selected_docs and current_mode == "link" and not document_block:
+                return "", ""
+
+            document_block = link_var.get().strip()
+            if selected_docs and current_mode == "link" and not document_block:
                 document_block = build_documents_block(force_links=True)
             elif selected_docs and current_mode == "attachment" and not document_block:
                 document_block = "\n".join(f"Datei: {Path(x).name}" for x in selected_docs)
+
+            return doc_name, document_block
+
+        def render_body_text() -> str:
+            doc_name, document_block = build_document_payload_for_body()
             rendered = (body.get("1.0", "end")
                         .replace("{dokumente}", document_block)
                         .replace("{link}", document_block)
@@ -1256,19 +1140,7 @@ class MailManagerMixin:
             return self.normalize_mail_markup(rendered)
 
         def render_body_html() -> str:
-            if selected_docs:
-                doc_name = ", ".join(Path(x).name for x in selected_docs)
-            else:
-                doc_name = Path(doc_path_var.get()).name if doc_path_var.get().strip() else ""
-            document_block = link_var.get().strip()
-            current_mode = effective_send_mode()
-            if current_mode == "none":
-                document_block = ""
-                doc_name = ""
-            elif selected_docs and current_mode == "link" and not document_block:
-                document_block = build_documents_block(force_links=True)
-            elif selected_docs and current_mode == "attachment" and not document_block:
-                document_block = "\n".join(f"Datei: {Path(x).name}" for x in selected_docs)
+            doc_name, document_block = build_document_payload_for_body()
             rendered = (body.get("1.0", "end")
                         .replace("{dokumente}", document_block)
                         .replace("{link}", document_block)
@@ -1358,6 +1230,7 @@ class MailManagerMixin:
                 "document_name": Path(first_doc).name if first_doc else "",
                 "reply_to": reply_to_var.get().strip(),
             }
+
             files_for_attachment: list[str] = []
             if payload_mode == "attachment":
                 files_for_attachment = selected_docs if selected_docs else ([doc_path_var.get().strip()] if doc_path_var.get().strip() else [])
@@ -1372,17 +1245,7 @@ class MailManagerMixin:
                 payload["document_name"] = ""
             if payload_mode == "attachment":
                 try:
-                    attachments = []
-                    total_size = 0
-                    for file_path in files_for_attachment:
-                        item = self.build_mail_attachment_payload(file_path)
-                        if item:
-                            attachments.append(item)
-                            total_size += int(item.get("size", 0) or 0)
-                    if not attachments:
-                        raise ValueError("Es wurde keine gültige Anlage gefunden.")
-                    if total_size > 12 * 1024 * 1024:
-                        raise ValueError("Die Anlagen sind zusammen größer als 12 MB. Bitte besser als Nextcloud-Link versenden.")
+                    attachments = self.build_mail_attachments(files_for_attachment)
                     payload["attachments"] = attachments
                     payload["attachment"] = attachments[0]
                 except Exception as exc:
@@ -1390,18 +1253,9 @@ class MailManagerMixin:
                     return
             elif payload_mode == "link" and files_for_attachment:
                 try:
-                    attachments = []
-                    total_size = 0
-                    for file_path in files_for_attachment:
-                        item = self.build_mail_attachment_payload(file_path)
-                        if item:
-                            attachments.append(item)
-                            total_size += int(item.get("size", 0) or 0)
-                    if attachments:
-                        if total_size > 12 * 1024 * 1024:
-                            raise ValueError("Die Anlagen sind zusammen größer als 12 MB. Bitte besser als Nextcloud-Link versenden.")
-                        payload["attachments"] = attachments
-                        payload["attachment"] = attachments[0]
+                    attachments = self.build_mail_attachments(files_for_attachment)
+                    payload["attachments"] = attachments
+                    payload["attachment"] = attachments[0]
                 except Exception as exc:
                     messagebox.showerror("Anlage", str(exc), parent=dialog)
                     return

@@ -20,6 +20,17 @@ APP_DIR = default_app_dir()
 CONFIG_FILE = APP_DIR / "config.json"
 DB_FILE = APP_DIR / "history.sqlite"
 
+OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
+OPENAI_MODEL_OPTIONS = (OPENAI_DEFAULT_MODEL, "gpt-4o", "gpt-3.5-turbo")
+OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+OPENAI_USAGE_MODELS = {
+    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50, "context": 16385},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "context": 128000},
+    "gpt-4o": {"input": 2.50, "output": 10.00, "context": 128000},
+}
+OPENAI_PDF_SAMPLE_PAGES = 10
+OPENAI_TEXT_SAMPLE_CHARS = 4000
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "display_name": "Ortschronist/in",
     "current_username": "",
@@ -37,9 +48,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "api_token_dpapi": "",
     "openai_api_key": "",
     "openai_api_key_dpapi": "",
-    "openai_model": "gpt-3.5-turbo",
-    "openai_pdf_sample_pages": 10,
-    "openai_text_sample_chars": 4000,
+    "openai_model": OPENAI_DEFAULT_MODEL,
+    "openai_pdf_sample_pages": OPENAI_PDF_SAMPLE_PAGES,
+    "openai_text_sample_chars": OPENAI_TEXT_SAMPLE_CHARS,
     "openai_place_context_chars": 650,
     "openai_place_max_contexts": 30,
     "openai_metadata_points": 1,

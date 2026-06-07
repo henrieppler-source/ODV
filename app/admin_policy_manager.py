@@ -14,8 +14,7 @@ class AdminPolicyManagerMixin:
             if not folder_name.startswith("."):
                 folder_name = "." + folder_name
             folder = base / folder_name
-            if hasattr(self, "metadata_folder_var"):
-                self.metadata_folder_var.set(self.normalize_local_path_text(folder))
+            self.metadata_folder_var.set(self.normalize_local_path_text(folder))
             self.config_data["metadata_folder"] = self.normalize_local_path_text(folder)
             return folder
         text = self.config_data.get("metadata_folder") or ""
@@ -23,7 +22,7 @@ class AdminPolicyManagerMixin:
 
     def is_admin_managed_upload(self, item: dict) -> bool:
         """Admins bearbeiten nur Uploads in den zentral vorgesehenen Arbeitsordnern."""
-        base_text = self.base_folder_var.get().strip() if hasattr(self, "base_folder_var") else ""
+        base_text = self.base_folder_var.get().strip()
         if not base_text:
             return True
         base = Path(base_text).expanduser()
@@ -68,35 +67,24 @@ class AdminPolicyManagerMixin:
 
     def configure_admin_actions_for_role(self) -> None:
         is_admin = self.is_current_admin()
-        if hasattr(self, "admin_actions_frame"):
-            try:
-                self.admin_actions_frame.configure(text="Admin-Aktionen" if is_admin else "Aktionen")
-            except Exception:
-                pass
-        for wname in ("new_status_label", "new_status_combo", "admin_destination_label", "admin_destination_combo", "admin_destination_tree_button", "merge_pdfs_top_button"):
-            widget = getattr(self, wname, None)
-            if not widget:
-                continue
-            try:
-                if is_admin:
-                    widget.grid() if wname != "merge_pdfs_top_button" else widget.pack(side="left", padx=(16, 0))
-                else:
-                    widget.grid_remove() if wname != "merge_pdfs_top_button" else widget.pack_forget()
-            except Exception:
-                pass
-        merge_button = getattr(self, "file_view_merge_pdfs_button", None)
-        if merge_button is not None:
-            try:
-                merge_button.grid() if is_admin else merge_button.grid_remove()
-            except Exception:
-                pass
-        if hasattr(self, "admin_rename_button"):
-            self.admin_rename_button.configure(text="Datei umbenennen / verschieben" if is_admin else "Dateinamen speichern")
-        if hasattr(self, "admin_uploaded_by_combo"):
-            try:
-                self.admin_uploaded_by_combo.configure(state="readonly" if is_admin else "disabled")
-            except Exception:
-                pass
+        self.admin_actions_frame.configure(text="Admin-Aktionen" if is_admin else "Aktionen")
+        for widget in (self.new_status_label, self.new_status_combo, self.admin_destination_label, self.admin_destination_combo, self.admin_destination_tree_button):
+            if is_admin:
+                widget.grid()
+            else:
+                widget.grid_remove()
+        if is_admin:
+            self.merge_pdfs_top_button.pack(side="left", padx=(16, 0))
+        else:
+            self.merge_pdfs_top_button.pack_forget()
+        if is_admin and self.file_view_merge_pdfs_button is not None:
+            self.file_view_merge_pdfs_button.grid()
+            self.admin_rename_button.configure(text="Datei umbenennen / verschieben")
+        else:
+            if self.file_view_merge_pdfs_button is not None:
+                self.file_view_merge_pdfs_button.grid_remove()
+            self.admin_rename_button.configure(text="Dateinamen speichern")
+        self.admin_uploaded_by_combo.configure(state="readonly" if is_admin else "disabled")
 
     def is_path_in_points_eligible_root(self, item: dict) -> bool:
         """Prüft, ob ein Dokument in einem der fachlich relevanten ODV-Hauptbereiche liegt."""

@@ -361,7 +361,7 @@ class UploadManagerMixin:
     def build_upload_metadata_for_source(self, source: Path, target_folder: Path, display_name: str) -> UploadMetadata:
         upload_id = make_upload_id()
         requested_filename = str(self.meta_vars.get("current_filename", tk.StringVar()).get()).strip()
-        if getattr(self, "selected_folder", None) is not None:
+        if self.selected_folder is not None:
             requested_filename = source.name
         stored_filename = self.planned_upload_filename(source, requested_filename)
         current_path = str(target_folder / stored_filename)
@@ -370,9 +370,9 @@ class UploadManagerMixin:
             document_type = detect_document_type(source)
         self.remember_document_type(document_type)
         self.remember_archive_collection(self.meta_vars["archive_name"].get().strip())
-        ocr_source = self.current_upload_ocr_pdf_path() if getattr(self, "selected_file", None) == source else None
+        ocr_source = self.current_upload_ocr_pdf_path() if self.selected_file == source else None
         ocr_planned_path = self.planned_upload_ocr_pdf_path(source, target_folder, stored_filename) if ocr_source else ""
-        openai_fields = list(dict.fromkeys(str(field) for field in (getattr(self, "openai_metadata_applied_fields", []) or []) if str(field).strip()))
+        openai_fields = list(dict.fromkeys(str(field) for field in (self.openai_metadata_applied_fields or []) if str(field).strip()))
         return UploadMetadata(
             upload_id=upload_id,
             original_filename=source.name,
@@ -419,7 +419,7 @@ class UploadManagerMixin:
         )
 
     def planned_upload_ocr_pdf_path(self, source: Path, target_folder: Path, stored_filename: str) -> str:
-        if getattr(self, "selected_file", None) != source:
+        if self.selected_file != source:
             return ""
         ocr_source = self.current_upload_ocr_pdf_path()
         if not ocr_source:
@@ -434,7 +434,7 @@ class UploadManagerMixin:
         with json_file.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
         append_metadata_history(data, display_name, "Datei hochgeladen", f"{source.name} → {target_file}")
-        ocr_source = self.current_upload_ocr_pdf_path() if getattr(self, "selected_file", None) == source else None
+        ocr_source = self.current_upload_ocr_pdf_path() if self.selected_file == source else None
         ocr_target_text = str(data.get("ocr_pdf_path") or "")
         if ocr_source and ocr_target_text:
             ocr_target = Path(ocr_target_text)

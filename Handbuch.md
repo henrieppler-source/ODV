@@ -323,3 +323,4 @@ Seit v82 wurden vor allem folgende bearbeiterrelevante Themen verbessert:
 - Fenstergrößen und UI-Zustand werden zuverlässiger gespeichert.
 - Punkte wurden in v115 feldbezogen und nachvollziehbarer strukturiert.
 - Das Handbuch ist direkt über `Hilfe > Handbuch` erreichbar.
+- Mailbereich intern weiter strukturiert: `mail_manager` wurde in Utility-Blöcke aufgeteilt (Kontext/Sichtbarkeit, Empfänger und Anlagen), damit die Funktionserläuterung stabiler bleibt; Nutzerverhalten bleibt unverändert.

@@ -7,8 +7,6 @@ from .app_logging import app_log_exception
 
 class AdminPointsManagerMixin:
     def update_admin_document_points_display(self, upload_id: str) -> None:
-        if not hasattr(self, "admin_document_points_var"):
-            return
         if not upload_id or not self.api_token:
             self.admin_document_points_var.set("keine Punkte geladen")
             return
@@ -35,23 +33,20 @@ class AdminPointsManagerMixin:
             messagebox.showwarning("Nicht angemeldet", "Für die Punkteberechnung ist eine API-Anmeldung erforderlich.")
             return
         upload_ids: list[str] = []
-        if hasattr(self, "file_tree"):
-            def collect(node: str) -> None:
-                try:
-                    values = self.file_tree.item(node, "values")
-                    path_text = values[0] if values else ""
-                    item = self.item_for_local_path(path_text) if path_text else None
-                    upload_id = str((item or {}).get("upload_id") or "").strip()
-                    if upload_id and not upload_id.startswith("__missing_odv__"):
-                        upload_ids.append(upload_id)
-                    for child in self.file_tree.get_children(node):
-                        collect(child)
-                except Exception:
-                    return
+        def collect(node: str) -> None:
+            values = self.file_tree.item(node, "values")
+            path_text = values[0] if values else ""
+            item = self.item_for_local_path(path_text) if path_text else None
+            upload_id = str((item or {}).get("upload_id") or "").strip()
+            if upload_id and not upload_id.startswith("__missing_odv__"):
+                upload_ids.append(upload_id)
+            for child in self.file_tree.get_children(node):
+                collect(child)
 
+        if self.notebook.select() == str(self.viewer_tab):
             for root in self.file_tree.get_children(""):
                 collect(root)
-        elif hasattr(self, "admin_tree"):
+        else:
             upload_ids = list(self.admin_tree.get_children(""))
         upload_ids = list(dict.fromkeys(upload_ids))
         if not upload_ids:

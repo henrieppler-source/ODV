@@ -139,7 +139,7 @@ class MetadataHelpersMixin:
     def update_document_type_comboboxes(self) -> None:
         values = self.document_type_options()
         for name in ("upload_document_type_combo", "admin_document_type_combo"):
-            widget = getattr(self, name, None)
+            widget = self.upload_document_type_combo if name == "upload_document_type_combo" else self.admin_document_type_combo
             if widget is not None:
                 try:
                     widget["values"] = values
@@ -206,7 +206,7 @@ class MetadataHelpersMixin:
         return [text for text, _count in sorted(counts.items(), key=lambda x: (-x[1], x[0].lower()))[:limit]]
 
     def refresh_upload_metadata_option_comboboxes(self) -> None:
-        for key, widget in getattr(self, "upload_option_comboboxes", {}).items():
+        for key, widget in self.upload_option_comboboxes.items():
             try:
                 widget.configure(values=(self.archive_collection_options() if key == "archive_name" else self.metadata_value_options(key)))
             except Exception:
@@ -221,8 +221,15 @@ class MetadataHelpersMixin:
         try:
             parts = []
             for v in values:
-                if hasattr(v, "numerator") and hasattr(v, "denominator"):
-                    parts.append(float(v.numerator) / float(v.denominator))
+                numerator = None
+                denominator = None
+                try:
+                    numerator = v.numerator
+                    denominator = v.denominator
+                except Exception:
+                    pass
+                if numerator is not None and denominator is not None:
+                    parts.append(float(numerator) / float(denominator))
                 elif isinstance(v, tuple) and len(v) == 2:
                     parts.append(float(v[0]) / float(v[1]))
                 else:
@@ -244,7 +251,11 @@ class MetadataHelpersMixin:
                 date_text = str(tag_map.get("DateTimeOriginal") or tag_map.get("DateTimeDigitized") or tag_map.get("DateTime") or "").strip()
                 if date_text:
                     suggestions["document_date"] = date_text.replace(":", "-", 2)
-                gps_ifd = exif.get_ifd(ExifTags.IFD.GPSInfo) if hasattr(ExifTags, "IFD") else {}
+                try:
+                    ifd = ExifTags.IFD
+                except Exception:
+                    ifd = None
+                gps_ifd = exif.get_ifd(ifd.GPSInfo) if ifd else {}
                 if gps_ifd:
                     gps = {ExifTags.GPSTAGS.get(k, k): v for k, v in gps_ifd.items()}
                     lat = self.exif_gps_decimal(gps.get("GPSLatitude"))
@@ -299,10 +310,11 @@ class MetadataHelpersMixin:
     def apply_image_metadata_suggestions(self, path: Path) -> None:
         suggestions = self.image_metadata_suggestions(path)
         gps_place = str(suggestions.get("gps_place") or "").strip()
-        if gps_place and hasattr(self, "meta_vars") and self.meta_vars.get("place") is not None:
-            self.meta_vars["place"].set(gps_place)
+        meta_vars = self.meta_vars
+        if gps_place and isinstance(meta_vars, dict) and meta_vars.get("place") is not None:
+            meta_vars["place"].set(gps_place)
         for key, value in suggestions.items():
-            var = self.meta_vars.get(key) if hasattr(self, "meta_vars") else None
+            var = meta_vars.get(key) if isinstance(meta_vars, dict) else None
             if var is not None and not str(var.get() or "").strip():
                 var.set(value)
 
@@ -502,7 +514,8 @@ class MetadataHelpersMixin:
                     state = "disabled" if key in {"gps_coordinates", "gps_place", "edited_by", "edited_at"} or (target == "upload" and key in {"status", "current_filename", "uploaded_at"}) else "normal"
                     if target == "upload" and key in METADATA_OPTION_KEYS:
                         widget = ttk.Combobox(parent, textvariable=var, values=self.metadata_value_options(key), state="normal")
-                        self.upload_option_comboboxes = getattr(self, "upload_option_comboboxes", {})
+                        if not isinstance(self.upload_option_comboboxes, dict):
+                            self.upload_option_comboboxes = {}
                         self.upload_option_comboboxes[key] = widget
                     else:
                         widget = ttk.Entry(parent, textvariable=var, state=state)

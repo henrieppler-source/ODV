@@ -42,6 +42,7 @@ class PointsRulesManagerMixin:
             tree.heading(col, text=label, anchor="w", command=lambda c=col: sort_point_rules_tree(c))
             tree.column(col, width=width, anchor="w")
         tree.grid(row=1, column=0, sticky="nsew", padx=8, pady=4)
+        sort_state: dict[str, bool] = {}
         vsb = ttk.Scrollbar(dialog, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         vsb.grid(row=1, column=1, sticky="ns")
@@ -119,18 +120,17 @@ class PointsRulesManagerMixin:
                     label_var.set(f"{label_by_field.get(field_key, field_key)} angegeben")
 
         def sort_point_rules_tree(column: str) -> None:
+            nonlocal sort_state
             rows = [(tree.set(iid, column), iid) for iid in tree.get_children("")]
             numeric = column in {"points", "min"}
-            reverse = getattr(tree, "_sort_reverse", {}).get(column, False)
+            reverse = sort_state.get(column, False)
             if numeric:
                 rows.sort(key=lambda item: int(float(item[0] or 0)), reverse=reverse)
             else:
                 rows.sort(key=lambda item: str(item[0]).lower(), reverse=reverse)
             for index, (_value, iid) in enumerate(rows):
                 tree.move(iid, "", index)
-            sort_state = dict(getattr(tree, "_sort_reverse", {}))
             sort_state[column] = not reverse
-            tree._sort_reverse = sort_state
 
         def load_rules():
             for item in tree.get_children():

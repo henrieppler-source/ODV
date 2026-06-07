@@ -108,7 +108,11 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Ausführlichen Prüf-Testplan mit Ergebnis-/Notizspalte ergänzt: `ODV_Pruef_Testplan_v121.pdf`.
 - Beide PDF-Generatoren verwenden Arial 10 pt.
 - PDF-Optimierung robuster gemacht: Wenn Windows die Arbeits-PDF beim Ersetzen sperrt, versucht ODV den Austausch mehrfach kurz erneut und zeigt danach einen verständlichen Hinweis statt eines rohen `WinError 5`.
+- Erste kritische Stolperstellen bereinigt: doppelte Upload-Statusmethoden entfernt und totes `admin_tab_visible`-Kennzeichen gestrichen.
+- Entwickler-Health-Check `scripts/check_project_health.py` ergänzt; er prüft Versionen, doppelte Klassenmethoden, alte Statusbegriffe, große Module und Legacy-Marker.
 - Handbuch, Admin-Handbuch und Stand-Datei auf `v121` fortgeschrieben.
+- Interne Bereinigungsrunde des Step-3-Hotspot-Refactorings abgeschlossen: `hasattr`/`getattr`-Abhängigkeiten in zentralen Mixins (`admin_*`, `file_tree`, `preview`, `history`) wurden entfernt bzw. reduziert, inklusive Initialisierung der Admin-Sortierflags, um indirekte Zugriffspfadfehler zu vermeiden.
+- Interne Stabilisierung fortgesetzt: `mail_manager` wurde in kleine Utility-Blöcke aufgeteilt (`mail_user_context`, `mail_group_matches_user`, `collect_mail_recipients`, `build_mail_attachments`) ohne sichtbare Funktionsänderung; Slice-Check per `scripts/check_project_health.py`, `scripts/smoke_mail_dialog.py` und `scripts/smoke_core_paths.py` erfolgreich.
 
 ### v120 - Mailrechte und Versionsstand angehoben
 

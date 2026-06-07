@@ -258,8 +258,8 @@ class PathPolicyManagerMixin:
         return self.folder_group_allowed(group, "read")
 
     def can_edit_file_view_metadata(self, path: Path | None = None, item: dict | None = None) -> bool:
-        path = path or getattr(self, "file_view_current_path", None)
-        item = item or getattr(self, "file_view_current_metadata", None) or {}
+        path = path or self.file_view_current_path
+        item = item or self.file_view_current_metadata or {}
         if self.is_current_admin():
             return True
         if not path:

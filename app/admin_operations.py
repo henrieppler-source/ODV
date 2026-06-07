@@ -772,12 +772,9 @@ class AdminOperationsMixin:
                 if isinstance(errors, list) and errors:
                     lines.append(f"Fehler bei JSON-Bereinigung: {len(errors)}")
                 result_var.set("\n".join(lines))
-                if hasattr(self, "refresh_history"):
-                    self.refresh_history()
-                if hasattr(self, "refresh_admin_uploads"):
-                    self.refresh_admin_uploads(show_message=False)
-                if hasattr(self, "refresh_file_view_tree"):
-                    self.refresh_file_view_tree()
+                self.refresh_history()
+                self.refresh_admin_uploads(show_message=False)
+                self.refresh_file_view_tree()
                 messagebox.showinfo("Datenbank zurücksetzen", "Zurücksetzen abgeschlossen. Verwaiste lokale JSON-Sicherungen wurden bereinigt.", parent=dialog)
             except ApiError as exc:
                 messagebox.showerror("Datenbank zurücksetzen", f"Zurücksetzen fehlgeschlagen:\n{exc}", parent=dialog)

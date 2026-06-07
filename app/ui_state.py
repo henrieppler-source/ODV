@@ -15,13 +15,12 @@ class UiStateMixin:
         def scroll_widget(widget, delta: int):
             current = widget
             while current is not None:
-                if hasattr(current, "yview"):
-                    try:
-                        current.yview_scroll(delta, "units")
-                        return "break"
-                    except Exception:
-                        pass
-                current = getattr(current, "master", None)
+                try:
+                    current.yview_scroll(delta, "units")
+                    return "break"
+                except Exception:
+                    pass
+                current = current.master
             return None
 
         def on_mousewheel(event):
@@ -62,8 +61,6 @@ class UiStateMixin:
             pass
 
     def update_tab_labels(self) -> None:
-        if not hasattr(self, "notebook"):
-            return
         names = {
             str(self.history_tab): "Dashboard",
             str(self.upload_tab_container): "Dateien hochladen",
@@ -242,35 +239,30 @@ class UiStateMixin:
 
     def save_pane_positions(self) -> None:
         try:
-            if hasattr(self, "viewer_outer_pane"):
-                self.config_data["viewer_outer_sash"] = int(self.viewer_outer_pane.sashpos(0))
-            if hasattr(self, "viewer_right_pane"):
-                self.config_data["viewer_right_sash"] = int(self.viewer_right_pane.sashpos(0))
-            if hasattr(self, "admin_outer_pane"):
-                self.config_data["admin_outer_sash"] = int(self.admin_outer_pane.sashpos(0))
-            if hasattr(self, "admin_right_pane"):
-                self.config_data["admin_right_sash"] = int(self.admin_right_pane.sashpos(0))
+            self.config_data["viewer_outer_sash"] = int(self.viewer_outer_pane.sashpos(0))
+            self.config_data["viewer_right_sash"] = int(self.viewer_right_pane.sashpos(0))
+            self.config_data["admin_outer_sash"] = int(self.admin_outer_pane.sashpos(0))
+            self.config_data["admin_right_sash"] = int(self.admin_right_pane.sashpos(0))
             save_config(self.config_data)
         except Exception:
             pass
 
     def restore_pane_positions(self) -> None:
         try:
-            if hasattr(self, "viewer_outer_pane") and self.config_data.get("viewer_outer_sash"):
+            if self.config_data.get("viewer_outer_sash"):
                 self.viewer_outer_pane.sashpos(0, int(self.config_data.get("viewer_outer_sash")))
-            if hasattr(self, "viewer_right_pane") and self.config_data.get("viewer_right_sash"):
+            if self.config_data.get("viewer_right_sash"):
                 self.viewer_right_pane.sashpos(0, int(self.config_data.get("viewer_right_sash")))
-            if hasattr(self, "admin_outer_pane") and self.config_data.get("admin_outer_sash"):
+            if self.config_data.get("admin_outer_sash"):
                 self.admin_outer_pane.sashpos(0, int(self.config_data.get("admin_outer_sash")))
-            if hasattr(self, "admin_right_pane") and self.config_data.get("admin_right_sash"):
+            if self.config_data.get("admin_right_sash"):
                 self.admin_right_pane.sashpos(0, int(self.config_data.get("admin_right_sash")))
         except Exception:
             pass
 
     def save_tree_column_widths(self, silent: bool = False) -> None:
         widths = self.config_data.setdefault("tree_column_widths", {})
-        if hasattr(self, "history_tree"):
-            widths["history"] = {col: int(self.history_tree.column(col, "width")) for col in self.history_tree["columns"]}
+        widths["history"] = {col: int(self.history_tree.column(col, "width")) for col in self.history_tree["columns"]}
         save_config(self.config_data)
         if not silent:
             messagebox.showinfo("Ansicht", "Spaltenbreiten wurden gespeichert.")

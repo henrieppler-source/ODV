@@ -30,45 +30,41 @@ class AdminDetailManagerMixin:
                 item["document_type"] = detect_document_type(resolved_path)
             self.update_admin_document_points_display(str(item.get("upload_id", "")))
             self.show_admin_preview(item)
-            if hasattr(self, "admin_meta_vars"):
-                self.refresh_admin_uploaded_by_options()
-                if "uploaded_by" in self.admin_meta_vars and hasattr(self, "admin_uploaded_by_user_map"):
-                    uid = str(item.get("uploaded_by_user_id") or "")
-                    name = str(item.get("uploaded_by") or item.get("uploaded_by_name") or "")
-                    label = next((lbl for lbl, u in self.admin_uploaded_by_user_map.items() if str(u.get("id") or "") == uid), "")
-                    if not label:
-                        label = next((lbl for lbl, u in self.admin_uploaded_by_user_map.items() if str(u.get("display_name") or u.get("name") or "") == name), name)
-                    try:
-                        self.admin_meta_vars["uploaded_by"].set(label)
-                    except Exception:
-                        pass
-                for key, var in self.admin_meta_vars.items():
-                    if key == "uploaded_by" and self.is_current_admin():
-                        continue
-                    value = "neu" if is_missing_odv_entry and key == "upload_id" else item.get(key, "")
-                    if key == "transcription_done" and isinstance(var, tk.BooleanVar):
-                        var.set(str(value).strip().lower() in {"1", "ja", "yes", "true", "x"})
-                    else:
-                        var.set(str(value or ""))
-                self.admin_description_text.delete("1.0", "end")
-                self.admin_description_text.insert("1.0", str(item.get("description", "") or ""))
-                if getattr(self, "admin_description_counter_var", None):
-                    self.update_description_counter(self.admin_description_text, self.admin_description_counter_var)
-                self.admin_note_text.delete("1.0", "end")
-                self.admin_note_text.insert("1.0", str(item.get("note", "") or ""))
+            self.refresh_admin_uploaded_by_options()
+            if "uploaded_by" in self.admin_meta_vars:
+                uid = str(item.get("uploaded_by_user_id") or "")
+                name = str(item.get("uploaded_by") or item.get("uploaded_by_name") or "")
+                label = next((lbl for lbl, u in self.admin_uploaded_by_user_map.items() if str(u.get("id") or "") == uid), "")
+                if not label:
+                    label = next((lbl for lbl, u in self.admin_uploaded_by_user_map.items() if str(u.get("display_name") or u.get("name") or "") == name), name)
+                try:
+                    self.admin_meta_vars["uploaded_by"].set(label)
+                except Exception:
+                    pass
+            for key, var in self.admin_meta_vars.items():
+                if key == "uploaded_by" and self.is_current_admin():
+                    continue
+                value = "neu" if is_missing_odv_entry and key == "upload_id" else item.get(key, "")
+                if key == "transcription_done" and isinstance(var, tk.BooleanVar):
+                    var.set(str(value).strip().lower() in {"1", "ja", "yes", "true", "x"})
+                else:
+                    var.set(str(value or ""))
+            self.admin_description_text.delete("1.0", "end")
+            self.admin_description_text.insert("1.0", str(item.get("description", "") or ""))
+            if self.admin_description_counter_var:
+                self.update_description_counter(self.admin_description_text, self.admin_description_counter_var)
+            self.admin_note_text.delete("1.0", "end")
+            self.admin_note_text.insert("1.0", str(item.get("note", "") or ""))
         finally:
             self._loading_admin_details = False
             self._admin_uploaded_by_user_interaction = False
-        if hasattr(self, "admin_json_text"):
-            self.admin_json_text.configure(state="normal")
-            self.admin_json_text.delete("1.0", "end")
-            view_item = {k: v for k, v in item.items() if k != "_metadata_file"}
-            self.admin_json_text.insert("1.0", self.format_metadata_plain(view_item))
-            self.admin_json_text.configure(state="disabled")
-        if hasattr(self, "new_status_var"):
-            self.new_status_var.set(self.normalize_document_status(item.get("status", "hochgeladen")))
-        if hasattr(self, "admin_destination_combo"):
-            self.refresh_admin_destination_choices()
+        self.admin_json_text.configure(state="normal")
+        self.admin_json_text.delete("1.0", "end")
+        view_item = {k: v for k, v in item.items() if k != "_metadata_file"}
+        self.admin_json_text.insert("1.0", self.format_metadata_plain(view_item))
+        self.admin_json_text.configure(state="disabled")
+        self.new_status_var.set(self.normalize_document_status(item.get("status", "hochgeladen")))
+        self.refresh_admin_destination_choices()
         suggested = make_normalized_archive_filename(item, item.get("current_filename") or item.get("stored_filename") or item.get("original_filename", ""))
         self.admin_new_filename_var.set(suggested)
         self.configure_admin_actions_for_role()
@@ -78,11 +74,11 @@ class AdminDetailManagerMixin:
                 self.api.lock_document(self.api_token, str(item.get("upload_id")))
             except ApiError as exc:
                 can_edit = False
-                if not getattr(self, "_last_lock_warning", "") == str(item.get("upload_id")):
+                if self._last_lock_warning != str(item.get("upload_id")):
                     self._last_lock_warning = str(item.get("upload_id"))
                     messagebox.showinfo("Dokument gesperrt", str(exc), parent=self)
         state = "normal" if can_edit else "disabled"
-        for widget in list(getattr(self, "admin_meta_widgets", [])):
+        for widget in list(self.admin_meta_widgets):
             try:
                 if isinstance(widget, ttk.Combobox) and str(widget.cget("state")) == "readonly":
                     widget.configure(state="readonly" if can_edit else "disabled")
@@ -90,17 +86,15 @@ class AdminDetailManagerMixin:
                     widget.configure(state=state)
             except Exception:
                 pass
-        for widget in (getattr(self, "admin_description_text", None), getattr(self, "admin_note_text", None)):
+        for widget in (self.admin_description_text, self.admin_note_text):
             if widget is not None:
                 try:
                     widget.configure(state=state)
                 except Exception:
                     pass
-        if hasattr(self, "admin_rename_button"):
-            self.admin_rename_button.configure(state=("normal" if can_edit else "disabled"))
+        self.admin_rename_button.configure(state=("normal" if can_edit else "disabled"))
         self.remember_document_type(str(item.get("document_type", "")))
-        if hasattr(self, "update_admin_openai_controls"):
-            self.update_admin_openai_controls()
+        self.update_admin_openai_controls()
 
     def admin_save_metadata_fields(self, auto: bool = False) -> None:
         item = self.selected_admin_upload()
@@ -112,7 +106,7 @@ class AdminDetailManagerMixin:
             return
         changed = []
         technical_edit_keys = {"upload_id", "edited_by", "edited_at"}
-        for key, var in getattr(self, "admin_meta_vars", {}).items():
+        for key, var in self.admin_meta_vars.items():
             if key in technical_edit_keys:
                 continue
             old = str(item.get(key, "") or "")
@@ -121,7 +115,7 @@ class AdminDetailManagerMixin:
             if old != new:
                 item[key] = new
                 changed.append(f"{key}: {old} → {new}")
-        for key, widget in [("description", getattr(self, "admin_description_text", None)), ("note", getattr(self, "admin_note_text", None))]:
+        for key, widget in [("description", self.admin_description_text), ("note", self.admin_note_text)]:
             if widget is None:
                 continue
             old = str(item.get(key, "") or "")
@@ -141,9 +135,9 @@ class AdminDetailManagerMixin:
         edited_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         item["edited_by"] = display_name
         item["edited_at"] = edited_at
-        if "edited_by" in getattr(self, "admin_meta_vars", {}):
+        if "edited_by" in self.admin_meta_vars:
             self.admin_meta_vars["edited_by"].set(display_name)
-        if "edited_at" in getattr(self, "admin_meta_vars", {}):
+        if "edited_at" in self.admin_meta_vars:
             self.admin_meta_vars["edited_at"].set(edited_at)
         append_metadata_history(item, display_name, "Metadaten geändert", "; ".join(changed))
         api_ok, api_msg = self.save_item_to_api(item)
@@ -153,12 +147,11 @@ class AdminDetailManagerMixin:
         self.remember_document_type(str(item.get("document_type", "")))
         if item.get("upload_id"):
             self.update_admin_document_points_display(str(item.get("upload_id")))
-        if hasattr(self, "admin_json_text"):
-            self.admin_json_text.configure(state="normal")
-            self.admin_json_text.delete("1.0", "end")
-            self.admin_json_text.insert("1.0", self.format_metadata_plain({k: v for k, v in item.items() if k != "_metadata_file"}))
-            self.admin_json_text.configure(state="disabled")
-            self.admin_new_filename_var.set(make_normalized_archive_filename(item, self.admin_new_filename_var.get()))
+        self.admin_json_text.configure(state="normal")
+        self.admin_json_text.delete("1.0", "end")
+        self.admin_json_text.insert("1.0", self.format_metadata_plain({k: v for k, v in item.items() if k != "_metadata_file"}))
+        self.admin_json_text.configure(state="disabled")
+        self.admin_new_filename_var.set(make_normalized_archive_filename(item, self.admin_new_filename_var.get()))
         add_history(HistoryEntry.now(display_name, "Metadaten geändert", f"{item.get('upload_id')}: {'; '.join(changed[:3])} | {api_msg}", item.get("upload_id")))
         self.refresh_history()
         if not auto:

@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-import atexit
 import getpass
 import os
 import platform
 import socket
-import sys
-import threading
 import uuid
-from pathlib import Path
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import messagebox, ttk
 
 from .app_logging import app_log_exception
 from .api_client import APIClient, ApiError
@@ -22,6 +18,41 @@ from .users import find_user_by_username, role_allows_admin
 
 
 class SessionManagerMixin:
+    @staticmethod
+    def _api_base_url(config_data: dict) -> str:
+        return str(config_data.get("api_url", "https://ortschronik.info/api"))
+
+    def _apply_login_response(self, response: dict, username: str, parent_for_errors: tk.Misc | None = None) -> bool:
+        try:
+            self.api_token = str(response.get("token", ""))
+            self.config_data["api_token"] = self.api_token
+            self.config_data["api_token_expires_at"] = str(response.get("expires_at", ""))
+            self.config_data["current_username"] = username
+            user = self.api_user_to_local(response.get("user", {}))
+            self.set_current_user(user, persist=True)
+            self.handle_login_session_notice(response)
+            self.report_current_device_version()
+            return True
+        except Exception as exc:
+            if parent_for_errors is not None:
+                messagebox.showerror("Anmeldung", str(exc), parent=parent_for_errors)
+            else:
+                app_log_exception("Login-Nachbearbeitung fehlgeschlagen", exc)
+            return False
+
+    def _submit_login(self, username: str, password: str, parent_for_errors) -> bool:
+        if not username or not password:
+            messagebox.showerror("Anmeldung", "Bitte Benutzername und Passwort eingeben.", parent=parent_for_errors)
+            return False
+        try:
+            self.api = APIClient(self._api_base_url(self.config_data))
+            response = self.api.login(username, password, self.get_device_info())
+            return self._apply_login_response(response, username, parent_for_errors)
+        except ApiError as exc:
+            app_log_exception("Anmeldung fehlgeschlagen", exc, username=username)
+            messagebox.showerror("Anmeldung", str(exc), parent=parent_for_errors)
+            return False
+
     def api_user_to_local(self, user: dict) -> dict:
         return {
             "display_name": user.get("display_name") or user.get("name") or user.get("username") or "Ortschronist/in",
@@ -61,7 +92,7 @@ class SessionManagerMixin:
     def report_current_device_version(self) -> None:
         """Meldet die aktuelle ODV-Version an die API, damit Sitzungen/Geräte nach Updates aktuell bleiben."""
         try:
-            if self.api_token and hasattr(self.api, "update_session_device"):
+            if self.api_token:
                 self.api.update_session_device(self.api_token, self.get_device_info())
         except Exception as exc:
             app_log_exception("Geräte-/Sitzungsversion konnte nicht aktualisiert werden", exc)
@@ -87,7 +118,7 @@ class SessionManagerMixin:
         Ein gültiges Token aus der letzten Anmeldung wird wiederverwendet.
         Ist kein Token vorhanden oder abgelaufen, erscheint der Login-Dialog.
         """
-        self.api = APIClient(self.config_data.get("api_url", "https://ortschronik.info/api"))
+        self.api = APIClient(self._api_base_url(self.config_data))
         self.api_token = str(self.config_data.get("api_token", "") or "")
         self.folder_permissions: dict[str, dict[str, bool]] = {}
         self.place_folder_map: dict[str, str] = {}
@@ -162,25 +193,9 @@ class SessionManagerMixin:
         def do_login(event=None):
             username = username_var.get().strip()
             password = password_var.get()
-            if not username or not password:
-                messagebox.showerror("Anmeldung", "Bitte Benutzername und Passwort eingeben.", parent=self)
-                return
-            try:
-                self.api = APIClient(self.config_data.get("api_url", "https://ortschronik.info/api"))
-                response = self.api.login(username, password, self.get_device_info())
-                self.api_token = str(response.get("token", ""))
-                self.config_data["api_token"] = self.api_token
-                self.config_data["api_token_expires_at"] = str(response.get("expires_at", ""))
-                self.config_data["current_username"] = username
-                user = self.api_user_to_local(response.get("user", {}))
-                self.set_current_user(user, persist=True)
-                self.handle_login_session_notice(response)
-                self.report_current_device_version()
+            if self._submit_login(username, password, self):
                 result["ok"] = True
                 done.set(True)
-            except ApiError as exc:
-                app_log_exception("Anmeldung fehlgeschlagen", exc, username=username)
-                messagebox.showerror("Anmeldung", str(exc), parent=self)
 
         def cancel():
             result["ok"] = False
@@ -245,25 +260,9 @@ class SessionManagerMixin:
         def do_login(event=None):
             username = username_var.get().strip()
             password = password_var.get()
-            if not username or not password:
-                messagebox.showerror("Anmeldung", "Bitte Benutzername und Passwort eingeben.", parent=dialog)
-                return
-            try:
-                self.api = APIClient(self.config_data.get("api_url", "https://ortschronik.info/api"))
-                response = self.api.login(username, password, self.get_device_info())
-                self.api_token = str(response.get("token", ""))
-                self.config_data["api_token"] = self.api_token
-                self.config_data["api_token_expires_at"] = str(response.get("expires_at", ""))
-                self.config_data["current_username"] = username
-                user = self.api_user_to_local(response.get("user", {}))
-                self.set_current_user(user, persist=True)
-                self.handle_login_session_notice(response)
-                self.report_current_device_version()
+            if self._submit_login(username, password, dialog):
                 result["ok"] = True
                 dialog.destroy()
-            except ApiError as exc:
-                app_log_exception("Anmeldung fehlgeschlagen", exc, username=username)
-                messagebox.showerror("Anmeldung", str(exc), parent=dialog)
 
         def cancel():
             result["ok"] = False
@@ -341,7 +340,7 @@ class SessionManagerMixin:
         self.role_label_var.set(self.role_var.get())
         self.place_var.set(user.get("place", ""))
         # Beim Benutzerwechsel muss der Ort im Upload-Formular sofort zum neu angemeldeten Benutzer passen.
-        if hasattr(self, "meta_vars") and "place" in self.meta_vars:
+        if "place" in self.meta_vars:
             self.meta_vars["place"].set(self.place_var.get().strip())
         self.config_data["display_name"] = self.display_name_var.get()
         self.config_data["current_username"] = self.username_var.get()
@@ -433,7 +432,7 @@ class SessionManagerMixin:
         return [str(u.get("display_name", "")) for u in self.users if u.get("active", True)]
 
     def current_role(self) -> str:
-        return self.role_var.get().strip() if hasattr(self, "role_var") else self.config_data.get("current_role", "Ortschronist")
+        return self.role_var.get().strip()
 
     def is_current_admin(self) -> bool:
         return role_allows_admin(self.current_role())
@@ -443,7 +442,7 @@ class SessionManagerMixin:
         # Die frühere lokale users.json darf diese Daten nicht mehr überschreiben.
         if self.current_user:
             self.role_label_var.set(self.role_var.get())
-            if hasattr(self, "meta_vars") and "place" in self.meta_vars:
+            if "place" in self.meta_vars:
                 self.meta_vars["place"].set(self.place_var.get().strip())
         else:
             username = self.username_var.get().strip() or self.config_data.get("current_username", "")
@@ -453,13 +452,13 @@ class SessionManagerMixin:
             else:
                 self.role_label_var.set(self.role_var.get())
         self.refresh_window_title()
-        if hasattr(self, "notebook") and hasattr(self, "admin_tab"):
+        if self.notebook and self.admin_tab:
             try:
                 self.configure_admin_actions_for_role()
             except tk.TclError:
                 pass
         # Menü je nach Rolle neu aufbauen, damit Admin-Menü nur Superadmins sehen.
-        if hasattr(self, "notebook"):
+        if self.notebook:
             self.create_menu()
 
     def require_admin(self) -> bool:

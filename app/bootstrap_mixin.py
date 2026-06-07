@@ -4,6 +4,7 @@ import os
 import sys
 import threading
 from pathlib import Path
+from typing import Any
 
 import tkinter as tk
 
@@ -32,6 +33,7 @@ class BootstrapMixin:
 
         self.selected_file: Path | None = None
         self.selected_folder: Path | None = None
+        self.upload_ocr_pdf_path: Path | None = None
         self.writable_folders: list[Path] = []
         self.persons: list[PersonMark] = []
         self.admin_uploads: list[dict] = []
@@ -40,9 +42,32 @@ class BootstrapMixin:
         self.file_view_folder_map: dict[str, Path] = {}
         self.file_view_current_path: Path | None = None
         self.file_view_current_metadata: dict | None = None
+        self.admin_destination_map: dict[str, Path] = {}
+        self.admin_destination_var = None
+        self.admin_destination_combo = None
+        self.file_view_combo = None
+        self.target_combo = None
+        self.target_folder_var = None
+        self.file_view_merge_pdfs_button = None
+        self._loading_admin_details = False
+        self._last_lock_warning = ""
         self.file_preview_image = None
         self.admin_work_folder_names = set(self.config_data.get("admin_work_folder_names", sorted(self.ADMIN_WORK_FOLDER_NAMES)))
         self.target_folder_map: dict[str, Path] = {}
+        self._loading_writable_folders = False
+        self._file_view_uploaded_by_user_interaction = False
+        self._loading_file_view_metadata = False
+        self._admin_uploaded_by_user_interaction = False
+        self._pdf_text_searchability_cache: dict[str, tuple[str, bool]] = {}
+        self.meta_vars: dict[str, tk.Variable] = {}
+        self.file_view_meta_vars: dict[str, tk.Variable] = {}
+        self.admin_meta_vars: dict[str, tk.Variable] = {}
+        self.admin_detail_vars: dict[str, tk.Variable] = {}
+        self.upload_option_comboboxes: dict[str, tk.Widget] = {}
+        self.upload_document_type_combo = None
+        self.admin_document_type_combo = None
+        self.notebook = None
+        self.viewer_tab = None
         self.users = load_users(self.config_data.get("display_name", ""))
         self.current_user: dict | None = None
         self.api = APIClient(self.config_data.get("api_url", "https://ortschronik.info/api"))
@@ -50,6 +75,8 @@ class BootstrapMixin:
         self.folder_permissions: dict[str, dict[str, bool]] = {}
         self.place_folder_map: dict[str, str] = {}
         self.openai_metadata_applied_fields: list[str] = []
+        self.openai_metadata_suggestions: dict[str, Any] = {}
+        self.openai_metadata_source_model = ""
 
     def bootstrap_tk_variables(self) -> None:
         # Zentrale Tk-Variablen werden einmalig angelegt. Benutzername/Name/Rolle

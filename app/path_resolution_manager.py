@@ -154,7 +154,7 @@ class PathResolutionManagerMixin:
             except Exception:
                 pass
 
-        base_text = self.base_folder_var.get().strip() if hasattr(self, "base_folder_var") else ""
+        base_text = self.base_folder_var.get().strip()
         if not base_text:
             return None
         base = Path(base_text).expanduser()

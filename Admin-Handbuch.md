@@ -513,6 +513,12 @@ Sicherheitsregeln:
 - `Dateien bearbeiten` bietet eine eigene OpenAI-/OCR-Leiste unter der Dokumentliste.
 - PDF-Verwaltung erweitert: Schwellwerte in den Admin-Einstellungen, Baum-Markierung großer PDFs, Kontextmenü für OCR/PDF-A-Begleitfassungen, neue Übersicht `PDF-Dateien`, verlustfreie PyMuPDF-Optimierung und Ghostscript-basierte PDF/A-Erzeugung.
 
+## v121 - Interne Strukturbereinigung
+
+- `mail_manager` wurde in Utility-Module geteilt; Kernlogik für Nutzerkontext, Verteiler-Sichtbarkeit sowie Empfänger- und Anlagen-Helfer liegt jetzt in kleineren Hilfskomponenten zur besseren Wartbarkeit.
+- Der Refactor wurde als Slice durchgeführt; Fachlogik und Verhalten von Rundmail-Dialogen und Verteilerfilterung sind unverändert.
+- Für den Slice wurden `scripts/check_project_health.py` sowie gezielte Smoke-Pfade (`scripts/smoke_mail_dialog.py`, `scripts/smoke_core_paths.py`) erfolgreich ausgeführt.
+
 ## Dokumentationsregel
 
 Künftige Änderungen werden dokumentiert in:

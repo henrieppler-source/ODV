@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 from datetime import datetime
 import importlib.util
 import os
@@ -16,10 +15,37 @@ from tkinter import messagebox, ttk
 from .app_logging import app_log, app_log_exception
 from .config import APP_DIR
 from .file_service import append_metadata_history, load_metadata_files, save_metadata_file
+from .pdf_management_utils import (
+    format_file_size as _pmm_format_file_size,
+    format_size_bytes as _pmm_format_size_bytes,
+    is_linked_pdfa_file_path as _pmm_is_linked_pdfa_file_path,
+    ocr_path_for_document as _pmm_ocr_path_for_document,
+    pdfa_path_for_document as _pmm_pdfa_path_for_document,
+    pdf_display_prefix as _pmm_pdf_display_prefix,
+    pdf_size_mb as _pmm_pdf_size_mb,
+    pdf_tree_tags as _pmm_pdf_tree_tags,
+    visible_pdf_work_file as _pmm_visible_pdf_work_file,
+)
+from .pdf_management_tool_utils import (
+    build_pdf_tool_search_roots as _pmm_build_pdf_tool_search_roots,
+    find_bundled_ghostscript_installer as _pmm_find_bundled_ghostscript_installer,
+    find_ghostscript_command as _pmm_find_ghostscript_command,
+    ghostscript_executable_candidates as _pmm_ghostscript_executable_candidates,
+    ghostscript_installer_candidates as _pmm_ghostscript_installer_candidates,
+    install_bundled_ghostscript as _pmm_install_bundled_ghostscript,
+    run_ghostscript_installer_elevated as _pmm_run_ghostscript_installer_elevated,
+)
+from .pdf_management_report_utils import (
+    build_pdf_report_rows as _pmm_build_pdf_report_rows,
+    write_pdf_size_log as _pmm_write_pdf_size_log,
+)
 
 
 class PdfManagementManagerMixin:
     """PDF-Begleitdateien, Größenhinweise und PDF-Übersichten."""
+
+    def _pdf_action_user_label(self) -> str:
+        return self.display_name_var.get().strip() or self.username_var.get().strip() or "ODV"
 
     def pdf_warning_mb(self) -> int:
         return self._config_int("pdf_warning_mb", 100)
@@ -31,44 +57,40 @@ class PdfManagementManagerMixin:
         return self._config_int("pdf_upload_block_mb", 1000)
 
     def pdf_optimization_profile(self) -> str:
-        profile = str(getattr(self, "config_data", {}).get("pdf_optimization_profile") or "verlustfrei").strip().lower()
+        profile = str(self.config_data.get("pdf_optimization_profile", "verlustfrei")).strip().lower()
         if profile not in {"verlustfrei", "standard", "maximal"}:
             return "verlustfrei"
         return profile
 
     def _config_int(self, key: str, default: int) -> int:
         try:
-            return max(0, int(getattr(self, "config_data", {}).get(key, default) or default))
+            return max(0, int(self.config_data.get(key, default) or default))
         except Exception:
             return default
 
-    def pdf_size_mb(self, path: Path | None) -> float:
+    def _meipass_root(self) -> Path | None:
         try:
-            if path and path.exists() and path.is_file():
-                return path.stat().st_size / (1024 * 1024)
+            return Path(sys._MEIPASS)
         except Exception:
-            pass
-        return 0.0
+            return None
+
+    def _pdf_tool_search_roots(self) -> list[Path]:
+        return _pmm_build_pdf_tool_search_roots(
+            app_dir=APP_DIR,
+            module_file=Path(__file__),
+            executable=sys.executable,
+            cwd=Path.cwd(),
+            meipass_root=self._meipass_root(),
+        )
+
+    def pdf_size_mb(self, path: Path | None) -> float:
+        return _pmm_pdf_size_mb(path)
 
     def format_file_size(self, path: Path | None) -> str:
-        mb = self.pdf_size_mb(path)
-        if mb <= 0:
-            return "-"
-        if mb >= 1024:
-            return f"{mb / 1024:.2f} GB"
-        return f"{mb:.1f} MB"
+        return _pmm_format_file_size(path)
 
     def format_size_bytes(self, size: int | float | str | None) -> str:
-        try:
-            value = float(size or 0)
-        except Exception:
-            return "-"
-        if value <= 0:
-            return "-"
-        mb = value / (1024 * 1024)
-        if mb >= 1024:
-            return f"{mb / 1024:.2f} GB"
-        return f"{mb:.1f} MB"
+        return _pmm_format_size_bytes(size)
 
     def pdf_optimization_info_for_path(self, path: Path | None) -> dict:
         if not path:
@@ -91,50 +113,23 @@ class PdfManagementManagerMixin:
         }
 
     def pdfa_path_for_document(self, path: Path | None) -> Path | None:
-        if not path or path.suffix.lower() != ".pdf":
-            return None
-        if path.stem.lower().endswith("_pdfa"):
-            return path
-        return path.with_name(f"{path.stem}_pdfa.pdf")
+        return _pmm_pdfa_path_for_document(path)
 
     def ocr_path_for_document(self, path: Path | None) -> Path | None:
-        if not path or path.suffix.lower() != ".pdf":
-            return None
-        if path.stem.lower().endswith("_ocr"):
-            return path
-        return path.with_name(f"{path.stem}_ocr.pdf")
+        return _pmm_ocr_path_for_document(path)
 
     def is_linked_pdfa_file_path(self, path: Path) -> bool:
-        return path.suffix.lower() == ".pdf" and path.stem.lower().endswith("_pdfa")
+        return _pmm_is_linked_pdfa_file_path(path)
 
     def pdf_display_prefix(self, path: Path) -> str:
-        if path.suffix.lower() != ".pdf":
-            return ""
-        prefix = ""
-        if self.pdf_size_mb(path) >= self.pdf_optimize_recommend_mb():
-            prefix += "!! "
-        return prefix
+        return _pmm_pdf_display_prefix(path, self.pdf_optimize_recommend_mb())
 
     def pdf_tree_tags(self, path: Path) -> tuple[str, ...]:
-        if path.suffix.lower() != ".pdf":
-            return ()
-        tags: list[str] = []
-        if self.is_linked_pdfa_file_path(path):
-            tags.append("pdfa_file")
-        elif path.stem.lower().endswith("_ocr"):
-            tags.append("ocr_file")
-        if self.pdf_size_mb(path) >= self.pdf_optimize_recommend_mb():
-            tags.append("large_pdf")
-        return tuple(tags)
+        return _pmm_pdf_tree_tags(path, self.pdf_optimize_recommend_mb())
 
     def visible_pdf_work_file(self, path: Path) -> bool:
         """Im Baum wird regulär nur die Arbeitsfassung gezeigt."""
-        if path.suffix.lower() != ".pdf":
-            return True
-        if self.is_linked_pdfa_file_path(path):
-            work = path.with_name(f"{path.stem[:-5]}.pdf")
-            return not work.exists()
-        return True
+        return _pmm_visible_pdf_work_file(path)
 
     def linked_pdf_paths_for_item(self, item: dict | None, document_path: Path | None = None) -> dict[str, Path | None]:
         path = document_path or self.resolve_document_local_path(item or {})
@@ -207,7 +202,7 @@ class PdfManagementManagerMixin:
         threading.Thread(target=run, daemon=True).start()
 
     def open_linked_pdfa_for_current_file(self, path: Path | None = None) -> None:
-        source = path or getattr(self, "file_view_current_path", None)
+        source = path or self.file_view_current_path
         pdfa = self.pdfa_path_for_document(source)
         if not pdfa or not pdfa.exists():
             messagebox.showwarning("PDF/A", "Zu dieser Datei wurde keine PDF/A-Fassung gefunden.")
@@ -216,7 +211,7 @@ class PdfManagementManagerMixin:
 
     def pdf_action_stub(self, action: str, path: Path | None = None, parent=None) -> None:
         self.keep_pdf_overview_front(parent)
-        source = path or getattr(self, "file_view_current_path", None)
+        source = path or self.file_view_current_path
         if not source or source.suffix.lower() != ".pdf":
             messagebox.showwarning("PDF", "Bitte eine PDF-Datei auswählen.", parent=parent)
             self.keep_pdf_overview_front(parent)
@@ -248,25 +243,7 @@ class PdfManagementManagerMixin:
         self.keep_pdf_overview_front(parent)
 
     def find_ghostscript_command(self) -> list[str] | None:
-        for exe in self.ghostscript_executable_candidates():
-            if exe.exists() and exe.is_file():
-                return [str(exe)]
-        for name in ("gswin64c.exe", "gswin32c.exe", "gs"):
-            executable = shutil.which(name)
-            if executable:
-                return [executable]
-        candidates = [
-            Path("C:/Program Files/gs"),
-            Path("C:/Program Files (x86)/gs"),
-        ]
-        for root in candidates:
-            if not root.exists():
-                continue
-            for exe in sorted(root.glob("gs*/bin/gswin64c.exe"), reverse=True):
-                return [str(exe)]
-            for exe in sorted(root.glob("gs*/bin/gswin32c.exe"), reverse=True):
-                return [str(exe)]
-        return None
+        return _pmm_find_ghostscript_command(self._pdf_tool_search_roots())
 
     def ensure_ghostscript_on_startup(self) -> None:
         if self.find_ghostscript_command():
@@ -282,20 +259,23 @@ class PdfManagementManagerMixin:
             if self.find_ghostscript_command():
                 app_log("info", "Ghostscript wurde erfolgreich eingerichtet", installer=str(installer))
                 try:
-                    if hasattr(self, "nextcloud_status_var"):
-                        self.after(0, lambda: self.nextcloud_status_var.set(f"{self.nextcloud_status_var.get()} | Ghostscript: installiert"))
+                    self.after(0, lambda: self.nextcloud_status_var.set(f"{self.nextcloud_status_var.get()} | Ghostscript: installiert"))
                 except Exception:
                     pass
             else:
                 app_log("warning", "Ghostscript-Installer wurde ausgeführt, Ghostscript danach aber nicht gefunden", installer=str(installer))
         except OSError as exc:
-            if getattr(exc, "winerror", None) == 740:
+            win_error = None
+            try:
+                win_error = exc.winerror
+            except Exception:
+                pass
+            if win_error == 740:
                 try:
                     if self.run_ghostscript_installer_elevated(installer):
                         app_log("info", "Ghostscript-Installer erfordert erhöhte Rechte und wurde per UAC gestartet", installer=str(installer))
                         try:
-                            if hasattr(self, "nextcloud_status_var"):
-                                self.after(0, lambda: self.nextcloud_status_var.set(f"{self.nextcloud_status_var.get()} | Ghostscript: UAC-Installation gestartet"))
+                            self.after(0, lambda: self.nextcloud_status_var.set(f"{self.nextcloud_status_var.get()} | Ghostscript: UAC-Installation gestartet"))
                         except Exception:
                             pass
                         return
@@ -307,117 +287,19 @@ class PdfManagementManagerMixin:
             app_log_exception("Mitgeliefertes Ghostscript konnte nicht automatisch installiert werden", exc, installer=str(installer))
 
     def ghostscript_executable_candidates(self) -> list[Path]:
-        roots: list[Path] = []
-        try:
-            roots.append(Path(sys.executable).resolve().parent)
-        except Exception:
-            pass
-        try:
-            frozen_temp = getattr(sys, "_MEIPASS", None)
-            if frozen_temp:
-                roots.append(Path(frozen_temp))
-        except Exception:
-            pass
-        roots.extend([
-            APP_DIR,
-            Path(__file__).resolve().parent.parent,
-            Path.cwd(),
-        ])
-        candidates: list[Path] = []
-        for root in roots:
-            for base in (
-                root / "tools" / "ghostscript",
-                root / "ghostscript",
-            ):
-                candidates.extend([
-                    base / "bin" / "gswin64c.exe",
-                    base / "bin" / "gswin32c.exe",
-                    base / "bin" / "gs.exe",
-                ])
-                try:
-                    candidates.extend(sorted(base.glob("gs*/bin/gswin64c.exe"), reverse=True))
-                    candidates.extend(sorted(base.glob("gs*/bin/gswin32c.exe"), reverse=True))
-                except Exception:
-                    pass
-        seen: set[str] = set()
-        unique: list[Path] = []
-        for candidate in candidates:
-            key = str(candidate).lower()
-            if key not in seen:
-                seen.add(key)
-                unique.append(candidate)
-        return unique
+        return _pmm_ghostscript_executable_candidates(self._pdf_tool_search_roots())
 
     def ghostscript_installer_candidates(self) -> list[Path]:
-        roots: list[Path] = []
-        try:
-            roots.append(Path(sys.executable).resolve().parent)
-        except Exception:
-            pass
-        try:
-            frozen_temp = getattr(sys, "_MEIPASS", None)
-            if frozen_temp:
-                roots.append(Path(frozen_temp))
-        except Exception:
-            pass
-        roots.extend([
-            APP_DIR,
-            Path(__file__).resolve().parent.parent,
-            Path.cwd(),
-        ])
-        candidates: list[Path] = []
-        for root in roots:
-            installer_dir = root / "tools" / "ghostscript_installer"
-            try:
-                candidates.extend(sorted(installer_dir.glob("*.msi"), reverse=True))
-                candidates.extend(sorted(installer_dir.glob("*.exe"), reverse=True))
-            except Exception:
-                pass
-        seen: set[str] = set()
-        unique: list[Path] = []
-        for candidate in candidates:
-            key = str(candidate).lower()
-            if key not in seen:
-                seen.add(key)
-                unique.append(candidate)
-        return unique
+        return _pmm_ghostscript_installer_candidates(self._pdf_tool_search_roots())
 
     def find_bundled_ghostscript_installer(self) -> Path | None:
-        for installer in self.ghostscript_installer_candidates():
-            if installer.exists() and installer.is_file():
-                return installer
-        return None
+        return _pmm_find_bundled_ghostscript_installer(self._pdf_tool_search_roots())
 
     def install_bundled_ghostscript(self, installer: Path) -> None:
-        suffix = installer.suffix.lower()
-        if suffix == ".msi":
-            cmd = ["msiexec.exe", "/i", str(installer), "/quiet", "/norestart"]
-        elif suffix == ".exe":
-            target_dir = APP_DIR / "tools" / "ghostscript"
-            target_dir.mkdir(parents=True, exist_ok=True)
-            cmd = [str(installer), "/S", f"/D={target_dir}"]
-        else:
-            raise RuntimeError(f"Nicht unterstützter Ghostscript-Installer: {installer}")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or f"Exitcode {result.returncode}").strip()
-            raise RuntimeError(message[:1600])
+        _pmm_install_bundled_ghostscript(installer=installer, app_dir=APP_DIR)
 
     def run_ghostscript_installer_elevated(self, installer: Path) -> bool:
-        if os.name != "nt":
-            return False
-        suffix = installer.suffix.lower()
-        if suffix == ".msi":
-            args = f'/i "{installer}" /quiet /norestart'
-            os.startfile("msiexec.exe", "runas", args)  # type: ignore[attr-defined]
-            return True
-        if suffix == ".exe":
-            target_dir = APP_DIR / "tools" / "ghostscript"
-            target_dir.mkdir(parents=True, exist_ok=True)
-            args = f'/S /D={target_dir}'
-            os.startfile(str(installer), "runas", args)  # type: ignore[attr-defined]
-            return True
-        return False
+        return _pmm_run_ghostscript_installer_elevated(installer=installer, app_dir=APP_DIR)
 
     def optimize_pdf_file(self, source: Path, parent=None) -> None:
         self.keep_pdf_overview_front(parent)
@@ -435,6 +317,7 @@ class PdfManagementManagerMixin:
         temp = source.with_name(f"{source.stem}.__odv_optimized_tmp.pdf")
         original_size = source.stat().st_size
         display_name = self.display_name_var.get().strip() or "ODV"
+        display_name = self._pdf_action_user_label()
 
         def worker() -> dict:
             if temp.exists():
@@ -685,7 +568,7 @@ class PdfManagementManagerMixin:
 
     def record_pdf_optimization(self, source: Path, original_size: int, optimized_size: int, tool: str, profile: str, display_name: str | None = None) -> None:
         item, metadata_file = self.ensure_pdf_metadata_item(source)
-        display_name = display_name or self.display_name_var.get().strip() or "ODV"
+        display_name = display_name or self._pdf_action_user_label()
         item["pdf_optimized_at"] = datetime.now().isoformat(timespec="seconds")
         item["pdf_optimization_attempted_at"] = item["pdf_optimized_at"]
         item["pdf_optimized_by"] = display_name
@@ -699,7 +582,7 @@ class PdfManagementManagerMixin:
 
     def record_pdf_optimization_attempt(self, source: Path, original_size: int, attempted_size: int, tool: str, profile: str, display_name: str | None = None) -> None:
         item, metadata_file = self.ensure_pdf_metadata_item(source)
-        display_name = display_name or self.display_name_var.get().strip() or "ODV"
+        display_name = display_name or self._pdf_action_user_label()
         now = datetime.now().isoformat(timespec="seconds")
         item["pdf_optimization_attempted_at"] = now
         item["pdf_optimized_by"] = display_name
@@ -714,7 +597,7 @@ class PdfManagementManagerMixin:
 
     def record_pdfa_creation(self, source: Path, target: Path, tool: str, display_name: str | None = None) -> None:
         item, metadata_file = self.ensure_pdf_metadata_item(source)
-        display_name = display_name or self.display_name_var.get().strip() or "ODV"
+        display_name = display_name or self._pdf_action_user_label()
         item["pdfa_path"] = str(target)
         item["pdfa_filename"] = target.name
         item["pdfa_created_at"] = datetime.now().isoformat(timespec="seconds")
@@ -725,31 +608,24 @@ class PdfManagementManagerMixin:
         item["_metadata_file"] = str(metadata_file)
 
     def ensure_pdf_metadata_item(self, source: Path) -> tuple[dict, Path]:
-        if hasattr(self, "ensure_file_view_metadata_item"):
-            item, metadata_file = self.ensure_file_view_metadata_item(source)
-        else:
-            item = self.item_for_local_path(source) or {}
-            metadata_file = Path(str(item.get("_metadata_file") or ""))
-            if not metadata_file:
-                raise RuntimeError("Metadatenpfad konnte nicht ermittelt werden.")
+        item, metadata_file = self.ensure_file_view_metadata_item(source)
         self.file_view_metadata_by_path[str(source)] = item
         return item, metadata_file
 
     def refresh_pdf_views_after_action(self) -> None:
         try:
-            if hasattr(self, "refresh_file_view_tree"):
-                self.refresh_file_view_tree()
+            self.refresh_file_view_tree()
         except Exception:
             pass
 
     def pdf_report_rows(self, root: Path | None = None) -> list[dict[str, str]]:
-        base = Path(str(getattr(self, "base_folder_var", tk.StringVar(value="")).get() or ""))
+        base = Path(str(self.base_folder_var.get() or ""))
         scan_root = root or base
         if not base.exists() or not base.is_dir():
             return []
         if not scan_root.exists() or not scan_root.is_dir():
             return []
-        if not getattr(self, "file_view_metadata_by_path", None):
+        if not self.file_view_metadata_by_path:
             try:
                 self.file_view_metadata_items = load_metadata_files(self.metadata_folder_path())
                 self.file_view_metadata_by_path = {
@@ -759,61 +635,23 @@ class PdfManagementManagerMixin:
                 }
             except Exception:
                 pass
-        rows = []
-        seen_work: set[str] = set()
-        for path in sorted(scan_root.rglob("*.pdf"), key=lambda p: str(p).lower()):
-            if self.is_hidden_system_path(path):
-                continue
-            stem = path.stem
-            if stem.lower().endswith("_ocr") or stem.lower().endswith("_pdfa"):
-                work = path.with_name(f"{stem[:-4]}.pdf" if stem.lower().endswith("_ocr") else f"{stem[:-5]}.pdf")
-            else:
-                work = path
-            key = str(work)
-            if key in seen_work:
-                continue
-            seen_work.add(key)
-            links = self.linked_pdf_paths_for_item(None, work)
-            work_mb = self.pdf_size_mb(links["work"])
-            pdfa_mb = self.pdf_size_mb(links["pdfa"])
-            ocr_mb = self.pdf_size_mb(links["ocr"])
-            optimization = self.pdf_optimization_info_for_path(work)
-            relative_path = str(work.relative_to(base)) if work.is_relative_to(base) else work.name
-            nextcloud_path = relative_path.replace("\\", "/")
-            rows.append({
-                "name": work.name,
-                "path": str(work),
-                "local_path": str(work),
-                "nextcloud_path": nextcloud_path,
-                "local_available": "ja",
-                "folder": str(work.parent.relative_to(base)) if work.parent != base else "",
-                "work_size_mb": f"{work_mb:.3f}",
-                "original_size_mb": f"{(float(optimization.get('original_size') or 0) / (1024 * 1024)):.3f}" if optimization.get("original_size") else "",
-                "pdfa_size_mb": f"{pdfa_mb:.3f}" if pdfa_mb else "",
-                "ocr_size_mb": f"{ocr_mb:.3f}" if ocr_mb else "",
-                "work_size": self.format_file_size(links["work"]),
-                "original_size": self.format_size_bytes(optimization.get("original_size")),
-                "optimized_by_odv": "ja" if optimization.get("result") == "optimized" else ("X" if optimization else "nein"),
-                "pdfa_size": self.format_file_size(links["pdfa"]),
-                "ocr_size": self.format_file_size(links["ocr"]),
-            })
-        return rows
+        return _pmm_build_pdf_report_rows(
+            base,
+            scan_root,
+            self.is_hidden_system_path,
+            self.linked_pdf_paths_for_item,
+            self.pdf_optimization_info_for_path,
+            lambda path, links: self.pdf_is_non_searchable_text(path, has_linked_ocr=bool(links.get("ocr"))),
+        )
 
     def write_pdf_size_log(self, rows: list[dict[str, str]] | None = None) -> Path:
         rows = rows if rows is not None else self.pdf_report_rows()
-        log_dir = APP_DIR / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        target = log_dir / "pdf_sizes.csv"
-        with target.open("w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=["name", "path", "nextcloud_path", "local_available", "local_path", "folder", "work_size", "original_size", "optimized_by_odv", "pdfa_size", "ocr_size", "work_size_mb", "original_size_mb", "pdfa_size_mb", "ocr_size_mb"])
-            writer.writeheader()
-            writer.writerows(rows)
-        return target
+        return _pmm_write_pdf_size_log(rows, APP_DIR)
 
     def open_pdf_overview_dialog(self) -> None:
         if not self.is_current_admin():
             return
-        base = Path(str(getattr(self, "base_folder_var", tk.StringVar(value="")).get() or ""))
+        base = Path(str(self.base_folder_var.get() or ""))
         root_options: list[tuple[str, Path]] = []
         if base.exists() and base.is_dir():
             root_options.append((str(base), base))
@@ -966,6 +804,11 @@ class PdfManagementManagerMixin:
             menu.add_command(label="Download / Kopie speichern unter...", command=lambda: self.download_file_to_local_folder(path, item))
             if linked.get("ocr"):
                 menu.add_command(label="OCR anzeigen", command=lambda p=linked["ocr"]: self.open_file_with_default_app(p))
+            elif self.find_pdf_ocr_backend():
+                menu.add_command(
+                    label="PDF OCR erstellen...",
+                    command=lambda: self.create_ocr_for_document_path(path, item, on_success=populate),
+                )
             if linked.get("pdfa"):
                 menu.add_command(label="Original / PDF-A anzeigen", command=lambda p=linked["pdfa"]: self.open_file_with_default_app(p))
             menu.add_separator()
