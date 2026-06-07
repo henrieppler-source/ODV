@@ -254,6 +254,7 @@ class UserAdminMixin:
         new_user_button: tk.Button | None = None
         save_user_button: tk.Button | None = None
         deactivate_user_button: tk.Button | None = None
+        users_by_id: dict[str, dict] = {}
 
         labels = [
             ("Name:", name_var),
@@ -460,6 +461,8 @@ class UserAdminMixin:
                         user.get("last_login_at", "") or "",
                     ))
                     users_by_iid[uid] = user
+                    if user_id_text:
+                        users_by_id.setdefault(user_id_text, user)
                 if select_id is not None and tree.exists(str(select_id)):
                     tree.selection_set(str(select_id))
                     tree.see(str(select_id))
@@ -527,10 +530,15 @@ class UserAdminMixin:
             }
 
         def _resolve_user_record(iid: str) -> dict | None:
+            if not iid:
+                return None
+            base_iid = str(iid).split("#", 1)[0].strip()
+            user_by_id = users_by_id.get(base_iid)
+            if isinstance(user_by_id, dict):
+                return user_by_id
             user = users_by_iid.get(iid)
             if isinstance(user, dict):
                 return user
-            base_iid = str(iid).split("#", 1)[0]
             for candidate in api_users:
                 if str(candidate.get("id") or "").strip() == str(iid).strip():
                     return candidate
@@ -547,6 +555,10 @@ class UserAdminMixin:
                 pass
             return None
 
+        def _selected_user_id_as_int(iid: str) -> int:
+            base_iid = str(iid or "").split("#", 1)[0].strip()
+            return _to_int_user_id(base_iid)
+
         def update_selected_user_fields(user: dict) -> None:
             name_var.set(str(user.get("display_name", "") or ""))
             username_var.set(str(user.get("username", "") or ""))
@@ -559,6 +571,46 @@ class UserAdminMixin:
             place_var.set(str(user.get("place", "") or ""))
             active_var.set(to_bool_value(user.get("is_active", 1), default=False))
             load_user_permissions(_to_int_user_id(user.get("id")), role_var.get())
+
+        def _apply_selected_user_record(user: dict | None, item_values: tuple | list | None = None, source_note: str = "") -> None:
+            if not isinstance(user, dict):
+                if not item_values:
+                    return
+                user = _coerce_user_record(None, item_values)
+            update_selected_user_fields(user)
+            if source_note:
+                pass
+            selected_username = ""
+            try:
+                selected_username = str((item_values[1] if isinstance(item_values, (tuple, list)) else user.get("username", "")) or "")
+            except Exception:
+                selected_username = ""
+            if selected_username:
+                users_status_var.set(f"Ausgewählt: {selected_username} {f'({source_note})' if source_note else ''}")
+            else:
+                users_status_var.set(f"Ausgewählt {f'({source_note})' if source_note else ''}".strip())
+
+        def _load_selected_user_detail(user_id: str, fallback_user: dict | None, item_values: tuple | list | None) -> None:
+            resolved_id = _selected_user_id_as_int(user_id)
+            if resolved_id <= 0:
+                if fallback_user is not None:
+                    self.after(0, lambda fallback_user=fallback_user, item_values=item_values: _apply_selected_user_record(fallback_user, item_values, "lokal"))
+                return
+
+            def worker() -> None:
+                try:
+                    payload = self.api.get_user(self.api_token, resolved_id)
+                    user_record = payload.get("user")
+                    if not isinstance(user_record, dict):
+                        raise RuntimeError("Ungültige Benutzerdaten")
+                    self.after(0, lambda user_record=user_record, item_values=item_values: _apply_selected_user_record(user_record, item_values, "Server"))
+                except Exception:
+                    if fallback_user is not None:
+                        self.after(0, lambda fallback_user=fallback_user, item_values=item_values: _apply_selected_user_record(fallback_user, item_values, "lokal"))
+                    else:
+                        self.after(0, lambda: users_status_var.set("Auswahl konnte nicht aufgelöst werden."))
+
+            threading.Thread(target=worker, daemon=True).start()
 
         def load_selected(_event=None):
             iid = None
@@ -575,16 +627,18 @@ class UserAdminMixin:
             user_id = str(iid).strip()
             selected_user_id["id"] = user_id
             user = _resolve_user_record(user_id)
+            item = tree.item(iid, "values")
+            item_values = item if isinstance(item, tuple) else None
             if user is None:
-                item = tree.item(iid, "values")
-                user = _coerce_user_record(None, item if isinstance(item, tuple) else None)
+                if item_values:
+                    user = _coerce_user_record(None, item_values)
+                else:
+                    user = None
             if not user:
                 users_status_var.set("Auswahl konnte nicht aufgelöst werden.")
                 return
             try:
-                item_values = tree.item(iid, "values")
-                users_status_var.set(f"Ausgewählt: {str(item_values[1] if item_values else '')}")
-                update_selected_user_fields(user)
+                _load_selected_user_detail(user_id, user, item_values)
             except Exception as exc:
                 app_log_exception("Benutzerdaten konnten nicht geladen werden", exc)
                 messagebox.showerror("Benutzerverwaltung", f"Ausgewählten Benutzer können nicht geladen werden:\n{exc}", parent=dialog)

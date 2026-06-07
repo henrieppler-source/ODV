@@ -169,6 +169,20 @@ if ($method === 'GET' && $path === '/api/users') {
     json_response(['success' => true, 'users' => $stmt->fetchAll()]);
 }
 
+if ($method === 'GET' && preg_match('#^/api/users/(\\d+)$#', $path, $matches)) {
+    $currentUser = require_role(['superadmin']);
+    $userId = (int)$matches[1];
+    $pdo = db();
+    ensure_user_nextcloud_columns($pdo);
+    $stmt = $pdo->prepare("\n        SELECT id, username, display_name, email, nextcloud_username,\n               CASE WHEN COALESCE(password_hash, '') <> '' THEN 1 ELSE 0 END AS password_saved,\n               CASE WHEN COALESCE(nextcloud_password_enc, '') <> '' THEN 1 ELSE 0 END AS nextcloud_password_saved,\n               role, place, is_active, last_login_at, created_at, updated_at\n        FROM users\n        WHERE id = :id\n        LIMIT 1\n    ");
+    $stmt->execute([':id' => $userId]);
+    $user = $stmt->fetch();
+    if (!$user) {
+        json_response(['success' => false, 'error' => 'Benutzer nicht gefunden'], 404);
+    }
+    json_response(['success' => true, 'user' => $user]);
+}
+
 if ($method === 'POST' && $path === '/api/users') {
     $currentUser = require_role(['superadmin']);
     $input = get_json_input();

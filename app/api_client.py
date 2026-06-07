@@ -111,6 +111,8 @@ class APIClient:
 
     def update_user(self, token: str, user_id: int, payload: dict) -> dict:
         return self.request("PUT", f"/users/{int(user_id)}", payload, token=token)
+    def get_user(self, token: str, user_id: int) -> dict:
+        return self.request("GET", f"/users/{int(user_id)}", token=token)
     def get_folder_permissions(self, token: str, user_id: int | None = None) -> dict:
         if user_id is None:
             return self.request("GET", "/folder-permissions", token=token)
