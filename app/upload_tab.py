@@ -342,7 +342,7 @@ class UploadTabMixin:
         ]
         for widget in widgets:
             widget.grid() if show_ai else widget.grid_remove()
-        self.upload_openai_metadata_button.grid_remove()
+        self.upload_openai_metadata_button.grid() if show_ai else self.upload_openai_metadata_button.grid_remove()
 
         show_ocr_create = self.is_upload_image_pdf() and not self.current_upload_ocr_pdf_path()
         show_ocr_open = self.is_upload_image_pdf() and bool(self.current_upload_ocr_pdf_path())
