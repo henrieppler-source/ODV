@@ -512,6 +512,20 @@ class UserAdminMixin:
                 return text == "true"
             return default
 
+        def _coerce_user_record(user: object, fallback_values: tuple | None = None) -> dict:
+            if isinstance(user, dict):
+                return user
+            if fallback_values is None:
+                return {}
+            return {
+                "display_name": str(fallback_values[0] or ""),
+                "username": str(fallback_values[1] or ""),
+                "email": str(fallback_values[2] or ""),
+                "role": str(fallback_values[3] or ""),
+                "place": str(fallback_values[4] or ""),
+                "is_active": 1 if str(fallback_values[5]).strip().lower() in {"ja", "true", "1", "yes"} else 0,
+            }
+
         def update_selected_user_fields(user: dict) -> None:
             name_var.set(str(user.get("display_name", "") or ""))
             username_var.set(str(user.get("username", "") or ""))
@@ -570,7 +584,8 @@ class UserAdminMixin:
             if not user:
                 return
             try:
-                update_selected_user_fields(user)
+                item_values = tree.item(iid, "values")
+                update_selected_user_fields(_coerce_user_record(user, item_values))
             except Exception as exc:
                 app_log_exception("Benutzerdaten konnten nicht geladen werden", exc)
                 messagebox.showerror("Benutzerverwaltung", f"Ausgewählten Benutzer können nicht geladen werden:\n{exc}", parent=dialog)
