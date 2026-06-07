@@ -190,6 +190,16 @@ class PathPolicyManagerMixin:
         Der lokale Nextcloud-Schreibtest bleibt technische Plausibilitätsprüfung.
         Die fachliche Freigabe erfolgt über Ordnergruppenrechte.
         """
+        try:
+            rel_parts = folder.relative_to(base).parts
+            if (
+                self.current_role() not in {"Admin", "Superadmin"}
+                and rel_parts
+                and self.normalize_folder_token(rel_parts[0]) == self.normalize_folder_token("Ortschronisten_Gemeinsam")
+            ):
+                return False
+        except Exception:
+            pass
         if self.is_odv_update_path(folder) or any(str(part).upper() == "_ARCHIV" for part in folder.parts):
             return False
         if self.current_role() == "Superadmin":
