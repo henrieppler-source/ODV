@@ -4,6 +4,7 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import ttk
 
+from .app_logging import app_log_exception
 from .file_service import is_image_file
 from .ui_helpers import reset_tk_var, clear_text_widget, clear_tree_selection
 
@@ -182,8 +183,17 @@ class FileViewManagerMixin:
 
         self.update_file_view_preview_tab_visibility()
         self.after(200, self.restore_pane_positions)
-        self.refresh_file_view_folder_choices()
-        self.refresh_file_view_destination_choices()
+        self.after(150, self._initialize_file_view_data)
+
+    def _initialize_file_view_data(self) -> None:
+        try:
+            self.refresh_file_view_folder_choices()
+        except Exception as exc:
+            app_log_exception("Dateiansicht Ordnerauswahl konnte nicht initialisiert werden", exc)
+        try:
+            self.refresh_file_view_destination_choices()
+        except Exception as exc:
+            app_log_exception("Dateiansicht Zielauswahl konnte nicht initialisiert werden", exc)
 
     def update_file_view_preview_tab_visibility(self) -> None:
         notebook = self.viewer_right_notebook
