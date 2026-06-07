@@ -269,7 +269,7 @@ class UserAdminMixin:
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=5)
             if label == "Rolle:":
                 ttk.Combobox(form, textvariable=var, values=ROLES, state="readonly", width=28).grid(row=row, column=1, sticky="ew", padx=6, pady=5)
-            elif label == "Passwort:":
+            elif label in ("Passwort:", "Nextcloud-Passwort:"):
                 pw_frame = ttk.Frame(form)
                 pw_frame.grid(row=row, column=1, sticky="ew", padx=6, pady=5)
                 pw_frame.columnconfigure(0, weight=1)
