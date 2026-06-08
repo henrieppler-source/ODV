@@ -1522,7 +1522,6 @@ class UploadTabMixin:
         self._selected_upload_source_sha256 = source_sha256
         if source != "keep_ocr_link":
             self.upload_ocr_pdf_path = None
-        self.file_var.set(self.normalize_local_path_text(path))
         self._set_upload_file_loading_text("Datei wird geladen: Dateivorschau wird geladen", token)
         self.update_idletasks()
         self.update_upload_image_preview(path)
@@ -1551,10 +1550,40 @@ class UploadTabMixin:
         if ocr_path:
             self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name} | OCR: {ocr_path.name}")
         self.clear_pdf_text_searchability_cache(previous_selected)
-        if color == "green":
-            self.after(150, lambda: self.queue_openai_check(auto_apply=True, allow_yellow=True))
+        self._set_upload_file_loading_text("Datei geladen", token)
+        self.update_idletasks()
+        self.after(
+            300,
+            lambda t=token: self._commit_selected_upload_file_text(
+                path=path,
+                source=source,
+                previous_selected=previous_selected,
+                precheck_color=color,
+                token=t,
+            ),
+        )
         self._stop_upload_file_loading_indicator()
         app_log("info", "Upload-Datei ausgewählt", path=str(path), source=source)
+
+    def _commit_selected_upload_file_text(
+        self,
+        path: Path,
+        source: str,
+        previous_selected: Path | None,
+        precheck_color: str,
+        token: int,
+    ) -> None:
+        if token != self._upload_file_selection_token:
+            return
+        self.file_var.set(self.normalize_local_path_text(path))
+        self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name}")
+        if source != "keep_ocr_link":
+            ocr_path = self.current_upload_ocr_pdf_path()
+            if ocr_path:
+                self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name} | OCR: {ocr_path.name}")
+        if precheck_color != "green":
+            return
+        self.after(150, lambda: self.queue_openai_check(auto_apply=True, allow_yellow=True))
 
     def _load_selected_upload_file_async(
         self,
