@@ -1463,12 +1463,17 @@ class UploadTabMixin:
         self._upload_file_selection_token = token
         self._upload_file_loading_active = True
         self._upload_file_loading_dot_count = 0
-        self.file_var.set("Datei wird geladen...")
-        self._tick_upload_file_loading_indicator(token)
+        self._set_upload_file_loading_text("Datei wird geladen: Initialisierung", token)
+
+    def _set_upload_file_loading_text(self, text: str, token: int) -> None:
+        if token != self._upload_file_selection_token or not self._upload_file_loading_active:
+            return
+        self.file_var.set(text)
 
     def _tick_upload_file_loading_indicator(self, token: int) -> None:
         if token != self._upload_file_selection_token or not self._upload_file_loading_active:
             return
+        # Kept for backward compatibility; now we prefer explicit step messages.
         dot_count = self._upload_file_loading_dot_count % 2
         self.file_var.set("Datei wird geladen..." if dot_count == 0 else "Datei wird geladen")
         self._upload_file_loading_dot_count += 1
@@ -1486,7 +1491,7 @@ class UploadTabMixin:
     def _finalize_selected_upload_file(self, path: Path, source: str, previous_selected: Path | None, source_sha256: str, duplicate_documents: list[dict], token: int) -> None:
         if token != self._upload_file_selection_token:
             return
-        self._stop_upload_file_loading_indicator()
+        self._set_upload_file_loading_text("Datei wird geladen: Formular wird vorbereitet", token)
         if not path.exists() or not path.is_file():
             messagebox.showwarning("Datei auswählen", f"Die Datei wurde nicht gefunden oder ist kein Dokument:\n{path}")
             self.clear_upload_form(keep_target_folder=True)
@@ -1535,6 +1540,7 @@ class UploadTabMixin:
         self.clear_pdf_text_searchability_cache(previous_selected)
         if color == "green":
             self.after(150, lambda: self.queue_openai_check(auto_apply=True, allow_yellow=True))
+        self._stop_upload_file_loading_indicator()
         app_log("info", "Upload-Datei ausgewählt", path=str(path), source=source)
 
     def _load_selected_upload_file_async(
@@ -1547,8 +1553,10 @@ class UploadTabMixin:
     ) -> None:
         source_sha256 = source_sha256_hint
         duplicate_documents: list[dict] = []
+        self.after(0, lambda t=token: self._set_upload_file_loading_text("Datei wird geladen: SHA-256 wird berechnet", t))
         if not source_sha256:
             source_sha256 = self.compute_source_sha256(path)
+            self.after(0, lambda t=token: self._set_upload_file_loading_text("Datei wird geladen: Duplikatprüfung läuft", t))
         if source_sha256:
             try:
                 duplicate_documents = self.find_duplicates_by_file_sha256(source_sha256)
