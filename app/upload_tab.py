@@ -1491,13 +1491,16 @@ class UploadTabMixin:
     def _finalize_selected_upload_file(self, path: Path, source: str, previous_selected: Path | None, source_sha256: str, duplicate_documents: list[dict], token: int) -> None:
         if token != self._upload_file_selection_token:
             return
-        self._set_upload_file_loading_text("Datei wird geladen: Formular wird vorbereitet", token)
+        self._set_upload_file_loading_text("Datei wird geladen: Duplikatprüfung ausgewertet", token)
+        self.update_idletasks()
         if not path.exists() or not path.is_file():
             messagebox.showwarning("Datei auswählen", f"Die Datei wurde nicht gefunden oder ist kein Dokument:\n{path}")
             self.clear_upload_form(keep_target_folder=True)
             return
 
         if source_sha256 and duplicate_documents is not None and not self.confirm_upload_for_duplicate(path, source_sha256, duplicate_documents=duplicate_documents):
+            self._set_upload_file_loading_text("Datei wurde bereits hochgeladen", token)
+            self.update_idletasks()
             self.clear_upload_form(keep_target_folder=True)
             self.upload_drop_hint_var.set("Auswahl abgebrochen: Datei wurde bereits in ODV hochgeladen (wurde nicht übernommen).")
             messagebox.showinfo(
@@ -1507,8 +1510,12 @@ class UploadTabMixin:
             )
             return
 
+        self._set_upload_file_loading_text("Datei wird geladen: Formular wird vorbereitet", token)
+        self.update_idletasks()
         self._selected_upload_duplicate_checked = True
         self.reset_upload_metadata_for_new_file()
+        self._set_upload_file_loading_text("Datei wird geladen: Dateityp wird erkannt", token)
+        self.update_idletasks()
         self.selected_file = path
         self.selected_folder = None
         self._selected_upload_source_file = path
@@ -1516,6 +1523,8 @@ class UploadTabMixin:
         if source != "keep_ocr_link":
             self.upload_ocr_pdf_path = None
         self.file_var.set(self.normalize_local_path_text(path))
+        self._set_upload_file_loading_text("Datei wird geladen: Dateivorschau wird geladen", token)
+        self.update_idletasks()
         self.update_upload_image_preview(path)
         self.update_upload_technical_fields(selected_file=path)
         detected_type = detect_document_type(self.selected_file)
@@ -1523,10 +1532,14 @@ class UploadTabMixin:
         self.remember_document_type(detected_type)
         if not self.meta_vars.get("place").get().strip():
             self.meta_vars["place"].set(self.place_var.get().strip())
+        self._set_upload_file_loading_text("Datei wird geladen: Metadaten werden vorbereitet", token)
+        self.update_idletasks()
         self.apply_image_metadata_suggestions(path)
         self.apply_filename_keyword_suggestions(path)
         self.refresh_planned_upload_filename(path)
         self.refresh_upload_metadata_option_comboboxes()
+        self._set_upload_file_loading_text("Datei wird geladen: Formular finalisieren", token)
+        self.update_idletasks()
         self.persons = []
         self.person_status_var.set("none")
         self.person_summary_var.set("Keine Personen markiert.")
@@ -1557,6 +1570,8 @@ class UploadTabMixin:
         if not source_sha256:
             source_sha256 = self.compute_source_sha256(path)
             self.after(0, lambda t=token: self._set_upload_file_loading_text("Datei wird geladen: Duplikatprüfung läuft", t))
+        else:
+            self.after(0, lambda t=token: self._set_upload_file_loading_text("Datei wird geladen: SHA-256 vorhanden – Duplikate prüfen", t))
         if source_sha256:
             try:
                 duplicate_documents = self.find_duplicates_by_file_sha256(source_sha256)
