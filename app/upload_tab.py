@@ -102,6 +102,10 @@ class UploadTabMixin:
         self.upload_filename_var = tk.StringVar()
         self._upload_filename_auto_value = ""
         self._upload_preview_photo = None
+        self._upload_file_selection_token = 0
+        self._upload_file_loading_active = False
+        self._upload_file_loading_job = None
+        self._upload_file_loading_dot_count = 0
 
         file_select_button_width = 16
         upload_button_width = 24
@@ -428,6 +432,8 @@ class UploadTabMixin:
         self.open_selected_upload_file_button.configure(state=("normal" if self.selected_file else "disabled"))
 
     def clear_upload_form(self, keep_target_folder: bool = True) -> None:
+        self._upload_file_selection_token += 1
+        self._stop_upload_file_loading_indicator()
         selected_target = self.target_folder_var.get()
         self.clear_pdf_text_searchability_cache(self.selected_file)
         self.selected_file = None
@@ -1448,23 +1454,45 @@ class UploadTabMixin:
             self.set_selected_upload_file(Path(filename), source="dialog")
 
     def clear_selected_upload_file(self) -> None:
+        self._upload_file_selection_token += 1
+        self._stop_upload_file_loading_indicator()
         self.clear_upload_form(keep_target_folder=True)
         self.upload_drop_hint_var.set("Datei aus dem Explorer hierher ziehen oder über ‚Datei auswählen‘ wählen.")
 
-    def set_selected_upload_file(self, path: Path, source: str = "dialog") -> None:
-        """Übernimmt eine einzelne Datei in den Upload-Reiter.
+    def _start_upload_file_loading_indicator(self, token: int) -> None:
+        self._upload_file_selection_token = token
+        self._upload_file_loading_active = True
+        self._upload_file_loading_dot_count = 0
+        self._tick_upload_file_loading_indicator(token)
 
-        Wird sowohl vom klassischen Datei-Auswahldialog als auch von Drag & Drop
-        genutzt. Drag & Drop startet bewusst keinen Upload, sondern wählt nur die
-        Datei aus; der Benutzer muss weiterhin „Datei hochladen“ klicken.
-        """
-        previous_selected = self.selected_file
-        path = Path(path).expanduser()
+    def _tick_upload_file_loading_indicator(self, token: int) -> None:
+        if token != self._upload_file_selection_token or not self._upload_file_loading_active:
+            return
+        dot_count = self._upload_file_loading_dot_count % 4
+        dot_count = 3 if dot_count == 0 else dot_count
+        self.file_var.set(f"Datei wird geladen{'.' * dot_count}")
+        self._upload_file_loading_dot_count += 1
+        self._upload_file_loading_job = self.after(350, lambda: self._tick_upload_file_loading_indicator(token))
+
+    def _stop_upload_file_loading_indicator(self) -> None:
+        self._upload_file_loading_active = False
+        if self._upload_file_loading_job is not None:
+            try:
+                self.after_cancel(self._upload_file_loading_job)
+            except Exception:
+                pass
+        self._upload_file_loading_job = None
+
+    def _finalize_selected_upload_file(self, path: Path, source: str, previous_selected: Path | None, source_sha256: str, duplicate_documents: list[dict], token: int) -> None:
+        if token != self._upload_file_selection_token:
+            return
+        self._stop_upload_file_loading_indicator()
         if not path.exists() or not path.is_file():
             messagebox.showwarning("Datei auswählen", f"Die Datei wurde nicht gefunden oder ist kein Dokument:\n{path}")
+            self.clear_upload_form(keep_target_folder=True)
             return
-        source_sha256 = self.compute_source_sha256(path)
-        if source_sha256 and not self.confirm_upload_for_duplicate(path, source_sha256):
+
+        if source_sha256 and duplicate_documents is not None and not self.confirm_upload_for_duplicate(path, source_sha256, duplicate_documents=duplicate_documents):
             self.clear_upload_form(keep_target_folder=True)
             self.upload_drop_hint_var.set("Auswahl abgebrochen: Datei wurde bereits in ODV hochgeladen (wurde nicht übernommen).")
             messagebox.showinfo(
@@ -1473,6 +1501,7 @@ class UploadTabMixin:
                 "Der Upload wurde abgebrochen. Bitte eine andere Datei wählen oder im Warnungsdialog \"Trotzdem hochladen\" entscheiden.",
             )
             return
+
         self._selected_upload_duplicate_checked = True
         self.reset_upload_metadata_for_new_file()
         self.selected_file = path
@@ -1507,6 +1536,58 @@ class UploadTabMixin:
         if color == "green":
             self.after(150, lambda: self.queue_openai_check(auto_apply=True, allow_yellow=True))
         app_log("info", "Upload-Datei ausgewählt", path=str(path), source=source)
+
+    def _load_selected_upload_file_async(
+        self,
+        path: Path,
+        source: str,
+        previous_selected: Path | None,
+        source_sha256_hint: str,
+        token: int,
+    ) -> None:
+        source_sha256 = source_sha256_hint
+        duplicate_documents: list[dict] = []
+        if not source_sha256:
+            source_sha256 = self.compute_source_sha256(path)
+        if source_sha256:
+            try:
+                duplicate_documents = self.find_duplicates_by_file_sha256(source_sha256)
+            except Exception as exc:
+                app_log_exception("Datei-Auswahl: Duplikatsprüfung via SHA-256 fehlgeschlagen", exc, path=str(path))
+                duplicate_documents = []
+        self.after(
+            0,
+            lambda: self._finalize_selected_upload_file(
+                path,
+                source,
+                previous_selected,
+                source_sha256,
+                duplicate_documents,
+                token,
+            ),
+        )
+
+    def set_selected_upload_file(self, path: Path, source: str = "dialog") -> None:
+        """Übernimmt eine einzelne Datei in den Upload-Reiter.
+
+        Wird sowohl vom klassischen Datei-Auswahldialog als auch von Drag & Drop
+        genutzt. Drag & Drop startet bewusst keinen Upload, sondern wählt nur die
+        Datei aus; der Benutzer muss weiterhin „Datei hochladen“ klicken.
+        """
+        previous_selected = self.selected_file
+        path = Path(path).expanduser()
+        if not path.exists() or not path.is_file():
+            messagebox.showwarning("Datei auswählen", f"Die Datei wurde nicht gefunden oder ist kein Dokument:\n{path}")
+            return
+        self._upload_file_selection_token += 1
+        token = self._upload_file_selection_token
+        self._start_upload_file_loading_indicator(token)
+        thread = threading.Thread(
+            target=self._load_selected_upload_file_async,
+            args=(path, source, previous_selected, "", token),
+            daemon=True,
+        )
+        thread.start()
 
     def reset_upload_metadata_for_new_file(self) -> None:
         """Leert fachliche Upload-Metadaten beim Wechsel auf ein neues Dokument."""

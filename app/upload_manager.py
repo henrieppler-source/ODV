@@ -476,8 +476,8 @@ class UploadManagerMixin:
             app_log_exception("Fallback-Duplikatprüfung via Dokumentenliste fehlgeschlagen", exc, sha256=normalized_sha256)
             return []
 
-    def confirm_upload_for_duplicate(self, source: Path, sha256: str) -> bool:
-        documents = self.find_duplicates_by_file_sha256(sha256)
+    def confirm_upload_for_duplicate(self, source: Path, sha256: str, duplicate_documents: list[dict] | None = None) -> bool:
+        documents = duplicate_documents if isinstance(duplicate_documents, list) else self.find_duplicates_by_file_sha256(sha256)
         if not documents:
             return True
 
