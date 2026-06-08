@@ -1463,14 +1463,14 @@ class UploadTabMixin:
         self._upload_file_selection_token = token
         self._upload_file_loading_active = True
         self._upload_file_loading_dot_count = 0
+        self.file_var.set("Datei wird geladen...")
         self._tick_upload_file_loading_indicator(token)
 
     def _tick_upload_file_loading_indicator(self, token: int) -> None:
         if token != self._upload_file_selection_token or not self._upload_file_loading_active:
             return
-        dot_count = self._upload_file_loading_dot_count % 4
-        dot_count = 3 if dot_count == 0 else dot_count
-        self.file_var.set(f"Datei wird geladen{'.' * dot_count}")
+        dot_count = self._upload_file_loading_dot_count % 2
+        self.file_var.set("Datei wird geladen..." if dot_count == 0 else "Datei wird geladen")
         self._upload_file_loading_dot_count += 1
         self._upload_file_loading_job = self.after(350, lambda: self._tick_upload_file_loading_indicator(token))
 
