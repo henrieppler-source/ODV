@@ -34,7 +34,7 @@ class ConfigFoldersMixin:
             self.base_folder_var.set(self.normalize_local_path_text(folder))
             self.ensure_standard_metadata_folder()
             self.save_basic_config(show_message=False)
-            self.load_writable_folders()
+            self.load_writable_folders(async_scan=True)
 
     def choose_metadata_folder(self) -> None:
         folder = filedialog.askdirectory(title="Zentralen Metadaten-Ordner auswählen")

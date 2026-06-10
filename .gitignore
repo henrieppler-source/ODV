@@ -13,3 +13,4 @@ dist/
 # Runtime-generated artifacts
 artifacts/
 out/
+tools/ghostscript_installer/gs10071w64.exe

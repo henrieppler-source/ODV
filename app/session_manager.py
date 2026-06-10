@@ -415,7 +415,7 @@ class SessionManagerMixin:
 
         buttons = ttk.Frame(dialog)
         buttons.grid(row=8, column=0, columnspan=3, sticky="e", padx=12, pady=12)
-        ttk.Button(buttons, text="Ordner prüfen", command=lambda: self.load_writable_folders(show_message=True)).pack(side="left", padx=6)
+        ttk.Button(buttons, text="Ordner prüfen", command=lambda: self.load_writable_folders(show_message=True, async_scan=True)).pack(side="left", padx=6)
         ttk.Button(buttons, text="Stammdaten speichern", command=lambda: self.save_masterdata_and_close(dialog)).pack(side="left", padx=6)
         ttk.Button(buttons, text="Schließen", command=dialog.destroy).pack(side="left", padx=6)
 

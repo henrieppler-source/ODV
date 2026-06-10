@@ -106,7 +106,7 @@ class MasterdataManagerMixin:
                 self.place_folder_map = {self.normalize_folder_token(r["place"]): r["folder_name"] for r in rows}
                 self.config_data["place_folder_map"] = self.place_folder_map
                 save_config(self.config_data)
-                self.load_writable_folders(show_message=False)
+                self.load_writable_folders(show_message=False, async_scan=True)
                 messagebox.showinfo("Ortsordner", "Ortsordner-Stammdaten wurden gespeichert.", parent=dialog)
                 dialog.destroy()
             except ApiError as exc:
