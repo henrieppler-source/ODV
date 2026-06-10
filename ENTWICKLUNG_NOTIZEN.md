@@ -1,71 +1,50 @@
 # Entwicklungsnotizen ODV
 
-Dokumentation von Arbeitsschritten, Bugs und Fixes für die Zusammenarbeit über mehrere Rechner hinweg.
-
----
+Dokumentation von Arbeitsschritten, Bugs, Fixes und Wiederaufnahmepunkten für Rechner-übergreifendes Arbeiten.
 
 ## 2026-06-10
 
-### Problem
-- **VS Code Fehlermeldung:** `Default interpreter path '${workspaceFolder}\.venv\Scripts\python.exe' could not be resolved`
-- **UI-Blockade:** Auswählen des Nextcloud-Stammverzeichnisses `C:\Users\heppl\Nextcloud3` führt zu langer Verzögerung; UI friert ein
+### Morgen-Check (Schnellstart nach Rechnerwechsel)
+- Remote prüfen: `git remote -v`, `git pull`, `git status`.
+- Erwarteter Zielstand: Branch `main` trackt `origin/main`; lokale Änderungen prüfen und gezielt fortfahren.
 
-### Behobene Issues
+### Was heute auf diesem Rechner umgesetzt wurde
+- Remote und Branch-Sync repariert: `git remote add origin https://github.com/henrieppler-source/ODV.git`, `git fetch origin`, `git branch --set-upstream-to=origin/main main`, `git pull --rebase origin main` (wegen divergierender Historie).
+- Vor dem Abschluss wurden ausgeführt: `python scripts/check_project_health.py` (OK), `python scripts/smoke_upload_tab.py` (OK).
+- UI/Workflow-Fehlerquelle behoben: OpenAI-Blocker-Text und Precheck-Flow auf Reiter „Dateien hochladen“, letzter standender Commit `e786721`.
+- Bestehende Folgefehler dokumentiert und lokal adressiert: VS Code Interpreter Pfadfehler sowie Freeze beim Nextcloud-Basisordner-Scan in großen Verzeichnissen.
 
-#### 1. Python-Interpreter-Pfad
-**Datei:** `.vscode/settings.json`
-- **Fehler:** Workspace-Variable `${workspaceFolder}` wurde nicht aufgelöst
-- **Grund:** `.venv` war beschädigt (pyvenv.cfg wies auf nicht existierende Python 3.14-Installation)
-- **Lösung:** 
-  - `.venv` gelöscht und neu erstellt mit Python 3.13.13
-  - `python.defaultInterpreterPath` auf absoluten Pfad korrigiert: `c:\ODV\Entwicklung\.venv\Scripts\python.exe`
+### Gefixte Einträge
+- Python-Interpreter: `settings`-Pfad auf `${workspaceFolder}` konnte nicht aufgelöst werden; `.venv` neu aufgebaut; absoluter Interpreter-Pfad gesetzt auf `c:\\ODV\\Entwicklung\\.venv\\Scripts\\python.exe`; Begleitänderung dokumentiert in `ad969a9`.
+- Nextcloud-Scan UI-Blockade: Ursache war synchroner Scan in `find_writable_folders()`, nun asynchron bei allen relevanten Aufrufen. Geänderte Dateien: `app/config_folders.py`, `app/masterdata_manager.py`, `app/session_manager.py`.
 
-#### 2. UI-Blockade beim Nextcloud-Verzeichnisscanning
-**Grund:** `find_writable_folders()` in `app/file_service.py` scannt alle Unterordner rekursiv (bis Tiefe 3) und testet Schreibrechte mit echten Dateien. Bei großen Syncodner-Verzeichnissen dauert das Sekunden.
+### Offene Punkte aus 06-10 (bei der nächsten Sitzung zuerst prüfen)
+- Endgültige Klärung der offenen UI-Performance im Upload-/Metadaten-Flow nach dem letzten Rollback.
+- Weitere Refactor-Slices in großen Modulen noch offen: `mail_manager.py`, `postprocess_manager.py`, `upload_tab.py`, `pdf_management_manager.py`.
+- Tests nach jedem Refactor-Slice ausführen: `python scripts/check_project_health.py` und relevante Smoke-Pfade für betroffene Bereiche.
 
-**Lösung:** Asynchrones Scannen implementiert
-- **Änderung in `app/config_folders.py`:**
-  - `choose_base_folder()` nutzt jetzt `load_writable_folders(async_scan=True)`
-  - Verzeichnisscanning läuft im Hintergrund-Thread, blockiert UI nicht
-  
-- **Änderung in `app/masterdata_manager.py`:**
-  - Nach Speicherung von Ortsordner-Stammdaten: `load_writable_folders(show_message=False, async_scan=True)`
-  
-- **Änderung in `app/session_manager.py`:**
-  - Button "Ordner prüfen" nutzt `load_writable_folders(show_message=True, async_scan=True)`
-
-**Commit:** `ad969a9`
-
-### Auswirkungen auf andere Funktionen
-✅ Keine negativen Auswirkungen – alle Aufrufe von `load_writable_folders()` sind asynchron-sicher:
-- `bootstrap_mixin.py` ruft aus Startup-Worker-Thread auf (bereits async)
-- `admin_ui_manager.py` ruft aus nicht-blockierendem Kontext auf
-- `main_window_mixin.py` nutzt bereits `async_scan=True`
+### 06-10 Schlussstatus
+- Lokale Notizen aktuell: `ENTWICKLUNG_NOTIZEN.md` erweitert und als Leitfaden bereit
+- Erwarteter nächster Wiederaufnahmepunkt: auf funktionale Stabilität in `upload` und Admin-Workflows fokussieren
 
 ---
 
-## Nächste Schritte (falls nötig)
+## Regelwerk für den Rechnerwechsel
 
-- [ ] Testing: Großes Nextcloud-Verzeichnis (`C:\Users\heppl\Nextcloud3`) mehrmals auswählen
-- [ ] Monitoring: Log-Ausgaben auf Performance-Probleme prüfen
-- [ ] Falls weitere UI-Blockaden: Ähnliche Analyse für andere längere Operationen
+### Zielzustand sichern
+- Commit immer mit klarer Message
+- Danach sofort pushen
+- Am nächsten Rechner immer per `git pull` starten
 
----
+### Standard-Befehle
+- `git add .`
+- `git commit -m "kurze Beschreibung"`
+- `git push`
+- `git pull`
+- `git status`
 
-## Git-Workflow
-
-**Bei Fertigstellung eines Arbeitstags:**
-```powershell
-git add .
-git commit -m "Beschreibung"
-git push
-```
-
-**Bei Wiederaufnahme der Arbeit am anderen Rechner:**
-```powershell
-git pull
-git status
-```
-
-**Aktueller Status:** Alle Änderungen gepusht auf `main` (GitHub)
+### Arbeitslogik
+- Bei Fehlern oder unklaren Rückgängen immer auf letzten bekannten Stand verweisen
+- Bei UI- oder Importfehlern erst reproduzieren, dann Slice-weise fixen
+- Nach größeren Slices mindestens einmal: Projekt-Health prüfen und betroffenen Funktions-Smoke ausführen.
 
