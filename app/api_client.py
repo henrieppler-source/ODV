@@ -94,6 +94,10 @@ class APIClient:
         query = ("?" + urllib.parse.urlencode(params)) if params else ""
         return self.request("GET", "/documents" + query, token=token)
 
+    def find_documents_by_sha256(self, token: str, sha256: str) -> dict:
+        params = {"sha256": str(sha256).strip()}
+        return self.request("GET", "/documents/by-sha256?" + urllib.parse.urlencode(params), token=token)
+
     def get_document(self, token: str, upload_id: str) -> dict:
         return self.request("GET", f"/documents/{urllib.parse.quote(upload_id, safe='')}", token=token)
 

@@ -23,6 +23,12 @@ DB_FILE = APP_DIR / "history.sqlite"
 OPENAI_DEFAULT_MODEL = "gpt-4o-mini"
 OPENAI_MODEL_OPTIONS = (OPENAI_DEFAULT_MODEL, "gpt-4o", "gpt-3.5-turbo")
 OPENAI_API_BASE_URL = "https://api.openai.com/v1"
+OPENAI_PRIVACY_BLOCKERS_DEFAULT = {
+    "bankdaten": True,
+    "gesundheitsdaten": True,
+    "ausweis_steuerdaten": True,
+    "zugangsdaten": True,
+}
 OPENAI_USAGE_MODELS = {
     "gpt-3.5-turbo": {"input": 0.50, "output": 1.50, "context": 16385},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60, "context": 128000},
@@ -58,6 +64,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "pdf_optimize_recommend_mb": 250,
     "pdf_upload_block_mb": 1000,
     "pdf_optimization_profile": "verlustfrei",
+    "openai_privacy_blockers": OPENAI_PRIVACY_BLOCKERS_DEFAULT,
     "filename_normalization_template": "{datum}_{ort}_{dateiname}",
     "filename_normalization_rules": [],
     "archive_collection_options": [],

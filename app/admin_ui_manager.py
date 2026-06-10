@@ -11,6 +11,7 @@ from .app_logging import app_log_exception
 from .config import (
     OPENAI_DEFAULT_MODEL,
     OPENAI_MODEL_OPTIONS,
+    OPENAI_PRIVACY_BLOCKERS_DEFAULT,
     OPENAI_PDF_SAMPLE_PAGES,
     OPENAI_TEXT_SAMPLE_CHARS,
     save_config,
@@ -350,6 +351,13 @@ class AdminUiManagerMixin:
         openai_place_context_chars_var = tk.StringVar(value=str(self.config_data.get("openai_place_context_chars", 650) or 650))
         openai_place_max_contexts_var = tk.StringVar(value=str(self.config_data.get("openai_place_max_contexts", 30) or 30))
         openai_points_var = tk.StringVar(value=str(self.config_data.get("openai_metadata_points", 1) or 1))
+        privacy_blockers = self.config_data.get("openai_privacy_blockers", OPENAI_PRIVACY_BLOCKERS_DEFAULT)
+        if not isinstance(privacy_blockers, dict):
+            privacy_blockers = dict(OPENAI_PRIVACY_BLOCKERS_DEFAULT)
+        openai_blocker_bank_var = tk.BooleanVar(value=bool(privacy_blockers.get("bankdaten", True)))
+        openai_blocker_health_var = tk.BooleanVar(value=bool(privacy_blockers.get("gesundheitsdaten", True)))
+        openai_blocker_id_tax_var = tk.BooleanVar(value=bool(privacy_blockers.get("ausweis_steuerdaten", True)))
+        openai_blocker_access_var = tk.BooleanVar(value=True)
         ttk.Label(api_tab, text="OpenAI-Auszug:").grid(row=9, column=0, sticky="w", pady=4)
         openai_limits_frame = ttk.Frame(api_tab)
         openai_limits_frame.grid(row=9, column=1, columnspan=3, sticky="w", padx=6, pady=4)
@@ -375,6 +383,13 @@ class AdminUiManagerMixin:
         ttk.Spinbox(openai_place_frame, from_=100, to=6000, increment=100, textvariable=openai_place_context_chars_var, width=8).pack(side="left", padx=(6, 16))
         ttk.Label(openai_place_frame, text="max. Fundstellen").pack(side="left")
         ttk.Spinbox(openai_place_frame, from_=1, to=200, textvariable=openai_place_max_contexts_var, width=6).pack(side="left", padx=(6, 0))
+        ttk.Label(api_tab, text="Datenschutz-Blocker").grid(row=11, column=0, sticky="w", pady=(8, 2))
+        privacy_blocker_frame = ttk.Frame(api_tab)
+        privacy_blocker_frame.grid(row=11, column=1, columnspan=3, sticky="w", padx=6, pady=(8, 2))
+        ttk.Checkbutton(privacy_blocker_frame, text="Bankdaten", variable=openai_blocker_bank_var).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(privacy_blocker_frame, text="Gesundheitsdaten", variable=openai_blocker_health_var).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(privacy_blocker_frame, text="Ausweis-/Steuerdaten", variable=openai_blocker_id_tax_var).pack(side="left", padx=(0, 14))
+        ttk.Checkbutton(privacy_blocker_frame, text="Zugangsdaten", variable=openai_blocker_access_var, state="disabled").pack(side="left")
         ttk.Label(
             api_tab,
             text=(
@@ -385,7 +400,7 @@ class AdminUiManagerMixin:
                 "OpenAI-Punkte werden je Metadatenfeld in der Punkteverwaltung gepflegt."
             ),
             wraplength=760,
-        ).grid(row=11, column=0, columnspan=4, sticky="w", pady=(0, 8))
+            ).grid(row=12, column=0, columnspan=4, sticky="w", pady=(0, 8))
 
         openai_test_status_var = tk.StringVar(value="OpenAI-Schlüssel nicht geprüft")
         openai_balance_var = tk.StringVar(value="Guthaben: n.v.")
@@ -435,10 +450,10 @@ class AdminUiManagerMixin:
             threading.Thread(target=run_check, daemon=True).start()
 
         openai_actions = ttk.Frame(api_tab)
-        openai_actions.grid(row=12, column=0, columnspan=4, sticky="ew", pady=4)
+        openai_actions.grid(row=13, column=0, columnspan=4, sticky="ew", pady=4)
         ttk.Button(openai_actions, text="OpenAI-Schlüssel prüfen", command=check_openai_key).pack(side="left")
         ttk.Label(openai_actions, textvariable=openai_test_status_var, wraplength=520, foreground="#555555").pack(side="left", padx=(12, 0))
-        ttk.Label(api_tab, textvariable=openai_balance_var, wraplength=520, foreground="#555555").grid(row=13, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
+        ttk.Label(api_tab, textvariable=openai_balance_var, wraplength=520, foreground="#555555").grid(row=14, column=1, columnspan=3, sticky="w", padx=6, pady=(0, 4))
 
         ttk.Label(ftp_tab, text="FTP-Deployment", font=("", 10, "bold")).grid(row=0, column=0, columnspan=4, sticky="w", pady=(0, 8))
         ttk.Label(ftp_tab, text="FTP-Server:").grid(row=1, column=0, sticky="w", pady=4)
@@ -586,6 +601,7 @@ class AdminUiManagerMixin:
         tracked_vars = [
             folder_name_var, api_url_var, openai_key_var, openai_model_var,
             openai_pdf_pages_var, openai_text_chars_var, openai_place_context_chars_var, openai_place_max_contexts_var, openai_points_var,
+            openai_blocker_bank_var, openai_blocker_health_var, openai_blocker_id_tax_var, openai_blocker_access_var,
             pdf_warning_mb_var, pdf_optimize_mb_var, pdf_block_mb_var, pdf_optimization_profile_var,
             mysql_host_var, mysql_port_var, mysql_database_var, mysql_user_var,
             ftp_host_var, ftp_port_var, ftp_user_var, ftp_password_var,
@@ -639,6 +655,12 @@ class AdminUiManagerMixin:
             self.config_data["openai_place_context_chars"] = openai_place_context_chars
             self.config_data["openai_place_max_contexts"] = openai_place_max_contexts
             self.config_data["openai_metadata_points"] = openai_points
+            self.config_data["openai_privacy_blockers"] = {
+                "bankdaten": bool(openai_blocker_bank_var.get()),
+                "gesundheitsdaten": bool(openai_blocker_health_var.get()),
+                "ausweis_steuerdaten": bool(openai_blocker_id_tax_var.get()),
+                "zugangsdaten": True,
+            }
             self.config_data["pdf_warning_mb"] = pdf_warning_mb
             self.config_data["pdf_optimize_recommend_mb"] = pdf_optimize_mb
             self.config_data["pdf_upload_block_mb"] = pdf_block_mb

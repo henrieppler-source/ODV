@@ -56,6 +56,7 @@ class UploadMetadata:
     ocr_pdf_filename: str = ""
     ocr_source_filename: str = ""
     ocr_created_at: str = ""
+    source_sha256: str = ""
     openai_metadata_fields: list[str] = field(default_factory=list)
     openai_metadata_model: str = ""
     openai_metadata_applied_at: str = ""

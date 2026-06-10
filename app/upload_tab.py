@@ -165,14 +165,14 @@ class UploadTabMixin:
         ttk.Label(status_container, textvariable=self.upload_openai_text_var, foreground="#555555").grid(row=0, column=2, sticky="w", padx=(8, 8))
         self.upload_openai_usage_var = tk.StringVar(value="Verbrauch: k.A.")
         ttk.Label(status_container, textvariable=self.upload_openai_usage_var, foreground="#555555").grid(row=0, column=3, sticky="w", padx=(8, 0))
-
-        precheck_container = ttk.Frame(upload_left)
-        self.upload_precheck_container = precheck_container
-        precheck_container.grid(row=3, column=2, sticky="nw", padx=(0, 6), pady=(0, 6))
-        self.upload_openai_precheck_canvas = tk.Canvas(precheck_container, width=14, height=14, highlightthickness=0)
-        self.upload_openai_precheck_canvas.grid(row=0, column=0, sticky="w")
-        self.upload_openai_precheck_var = tk.StringVar(value="OpenAI-Ampel: keine Datei")
-        ttk.Label(precheck_container, textvariable=self.upload_openai_precheck_var, foreground="#555555", wraplength=760).grid(row=0, column=1, sticky="w", padx=(6, 0))
+        self.upload_openai_precheck_var = tk.StringVar(value="OpenAI-Prüfung: keine Datei")
+        self.upload_openai_precheck_label = ttk.Label(
+            status_container,
+            textvariable=self.upload_openai_precheck_var,
+            foreground="#555555",
+            wraplength=760,
+        )
+        self.upload_openai_precheck_label.grid(row=1, column=0, columnspan=4, sticky="w", padx=(0, 0), pady=(4, 0))
 
         self.upload_ocr_progress_var = tk.StringVar(value="")
         self.upload_ocr_progress_frame = ttk.Frame(upload_left)
@@ -274,6 +274,20 @@ class UploadTabMixin:
 
     def openai_available(self) -> bool:
         return bool(self.config_data.get("openai_api_key", "").strip())
+
+    def _openai_privacy_blockers(self) -> dict[str, bool]:
+        defaults = {
+            "bankdaten": True,
+            "gesundheitsdaten": True,
+            "ausweis_steuerdaten": True,
+            "zugangsdaten": True,
+        }
+        blockers = self.config_data.get("openai_privacy_blockers", defaults)
+        if not isinstance(blockers, dict):
+            return defaults
+        merged = {key: bool(blockers.get(key, value)) for key, value in defaults.items()}
+        merged["zugangsdaten"] = True
+        return merged
 
     def _read_int_config(self, key: str, default: int, min_value: int = 0, max_value: int | None = None) -> int:
         try:
@@ -419,7 +433,6 @@ class UploadTabMixin:
         widgets = [
             self.open_file_openai_button,
             self.upload_status_container,
-            self.upload_precheck_container,
         ]
         for widget in widgets:
             widget.grid() if show_ai else widget.grid_remove()
@@ -502,11 +515,24 @@ class UploadTabMixin:
         self.openai_metadata_applied_fields = []
         self.openai_metadata_source_model = ""
         self.upload_openai_metadata_button.configure(state="disabled")
+        precheck_color, precheck_text = self.evaluate_openai_precheck()
+        manual_hint = self._needs_manual_metadata_hint(precheck_color, precheck_text)
 
         if not self.openai_available():
             status = "OpenAI: nicht konfiguriert"
         elif not self.selected_file:
             status = "OpenAI: keine Einzeldatei ausgewählt"
+        elif precheck_color == "red":
+            reason = self._clean_openai_label_text(precheck_text)
+            status = f"OpenAI: blockiert ({reason})"
+            if manual_hint:
+                status = f"{status} – Metadaten bitte manuell ergänzen."
+        elif precheck_color == "yellow":
+            if message is None:
+                detail = self._clean_openai_label_text(precheck_text)
+                status = f"OpenAI: nicht geprüft – {detail}" if detail else "OpenAI: nicht geprüft"
+            else:
+                status = message
         else:
             status = message or "OpenAI: nicht geprüft"
 
@@ -514,10 +540,32 @@ class UploadTabMixin:
         self.upload_openai_usage_var.set("Verbrauch: k.A.")
         self.update_openai_precheck_indicator()
 
+    def _clean_openai_label_text(self, text: str) -> str:
+        text = (text or "").strip()
+        if text.lower().startswith("openai:"):
+            text = text[7:].strip()
+        return text
+
+    def _needs_manual_metadata_hint(self, color: str, text: str) -> bool:
+        if color != "red":
+            return False
+        lowered = (text or "").lower()
+        if not lowered:
+            return False
+        return (
+            "mögliche" in lowered
+            and "erkannt" in lowered
+            and "nicht an openai senden" in lowered
+        ) or "technische/archivdatei" in lowered
+
     def set_openai_precheck_status(self, color: str, text: str) -> None:
-        self.upload_openai_precheck_canvas.delete("all")
-        self.upload_openai_precheck_canvas.create_oval(1, 1, 13, 13, fill=color, outline=color)
         self.upload_openai_precheck_var.set(text)
+        color_map = {
+            "red": "#d9534f",
+            "yellow": "#f0ad4e",
+            "green": "#5cb85c",
+        }
+        self.upload_openai_precheck_label.configure(foreground=color_map.get(color, "#555555"))
 
     def update_openai_precheck_indicator(self) -> tuple[str, str]:
         color, text = self.evaluate_openai_precheck()
@@ -532,11 +580,11 @@ class UploadTabMixin:
     def evaluate_openai_precheck(self) -> tuple[str, str]:
         path = self.selected_file
         if self.selected_folder is not None:
-            return "yellow", "OpenAI-Ampel gelb: Ordnerupload - OpenAI-Prüfung nur für einzelne Dateien."
+            return "yellow", "OpenAI: Ordnerupload - Prüfung nur für einzelne Dateien möglich."
         if path is None:
-            return "red", "OpenAI-Ampel rot: keine Datei ausgewählt."
+            return "red", "OpenAI: keine Datei ausgewählt."
         if not path.exists() or not path.is_file():
-            return "red", "OpenAI-Ampel rot: Datei fehlt oder ist nicht lesbar."
+            return "red", "OpenAI: Datei fehlt oder ist nicht lesbar."
 
         suffix = path.suffix.lower()
         blocked_extensions = {
@@ -544,7 +592,7 @@ class UploadTabMixin:
             ".zip", ".7z", ".rar", ".tar", ".gz", ".db", ".sqlite", ".sqlite3",
         }
         if suffix in blocked_extensions:
-            return "red", "OpenAI-Ampel rot: technische/Archivdatei - nicht an OpenAI senden."
+            return "red", "OpenAI: technische/Archivdatei - nicht an OpenAI senden."
 
         ocr_path = self.current_upload_ocr_pdf_path()
         sample = self.extract_upload_text_sample(
@@ -556,25 +604,28 @@ class UploadTabMixin:
         lower_text = text.lower()
         lower_name = path.name.lower()
 
+        blockers = self._openai_privacy_blockers()
         sensitive_patterns = [
-            (r"\biban\b|\bde\d{20}\b", "Bankdaten"),
-            (r"\bdiagnose\b|\bpatient\b|\bkrankenkasse\b|\bmedikation\b|\bbefund\b", "Gesundheitsdaten"),
-            (r"\bpersonalausweis\b|\bausweisnummer\b|\bsteuer-id\b|\bsteuernummer\b", "Ausweis-/Steuerdaten"),
-            (r"\bpasswort\b|\bkennwort\b|\bapi[_ -]?key\b|\btoken\b", "Zugangsdaten"),
+            (r"\biban\b|\bde\d{20}\b", "Bankdaten", "bankdaten"),
+            (r"\bdiagnose\b|\bpatient\b|\bkrankenkasse\b|\bmedikation\b|\bbefund\b", "Gesundheitsdaten", "gesundheitsdaten"),
+            (r"\bpersonalausweis\b|\bausweisnummer\b|\bsteuer-id\b|\bsteuernummer\b", "Ausweis-/Steuerdaten", "ausweis_steuerdaten"),
+            (r"\bpasswort\b|\bkennwort\b|\bapi[_ -]?key\b|\btoken\b", "Zugangsdaten", "zugangsdaten"),
         ]
-        for pattern, label in sensitive_patterns:
+        for pattern, label, blocker_key in sensitive_patterns:
+            if not blockers.get(blocker_key, True):
+                continue
             if re.search(pattern, lower_text) or re.search(pattern, lower_name):
-                return "red", f"OpenAI-Ampel rot: mögliche {label} erkannt - nicht an OpenAI senden."
+                return "red", f"OpenAI: mögliche {label} erkannt - nicht an OpenAI senden."
 
         if not sample:
             if suffix in {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp", ".bmp"}:
                 if suffix == ".pdf":
-                    return "yellow", "OpenAI-Ampel gelb: PDF enthält lokal keinen lesbaren Text - bitte ggf. zuerst PDF OCR erstellen."
-                return "yellow", "OpenAI-Ampel gelb: kein lokaler Textauszug - Prüfung wäre nur eingeschränkt möglich."
-            return "yellow", "OpenAI-Ampel gelb: Inhalt lokal nicht auslesbar - OpenAI-Prüfung möglich, aber unsicher."
+                    return "yellow", "OpenAI: PDF enthält lokal keinen lesbaren Text - bitte ggf. zuerst PDF OCR erstellen."
+                return "yellow", "OpenAI: kein lokaler Textauszug - Prüfung wäre nur eingeschränkt möglich."
+            return "yellow", "OpenAI: Inhalt lokal nicht auslesbar - OpenAI-Prüfung möglich, aber unsicher."
 
         if len(text.strip()) < 120:
-            return "yellow", "OpenAI-Ampel gelb: sehr wenig Text - OpenAI kann prüfen, Ergebnis kann dünn sein."
+            return "yellow", "OpenAI: sehr wenig Text - OpenAI kann prüfen, Ergebnis kann dünn sein."
 
         archive_terms = [
             "ortschron", "niederschrift", "protokoll", "chronik", "geschichte",
@@ -582,9 +633,9 @@ class UploadTabMixin:
             "gemeinde", "archiv", "quelle", "veranstaltung",
         ]
         if any(term in lower_text or term in lower_name for term in archive_terms):
-            return "green", "OpenAI-Ampel grün: Text ist lokal lesbar und wirkt für Metadatenprüfung geeignet."
+            return "green", "OpenAI: Text ist lokal lesbar und wirkt für Metadatenprüfung geeignet."
 
-        return "yellow", "OpenAI-Ampel gelb: Prüfung mit OpenAI möglich, Archivbezug ist lokal nicht eindeutig."
+        return "yellow", "OpenAI: Prüfung möglich, Archivbezug lokal nicht eindeutig."
 
     def current_upload_ocr_pdf_path(self) -> Path | None:
         path = self.upload_ocr_pdf_path
@@ -1086,13 +1137,16 @@ class UploadTabMixin:
         self.upload_openai_metadata_button.configure(state="disabled")
         color, precheck_text = self.update_openai_precheck_indicator()
         if color == "red":
-            self.upload_openai_text_var.set("OpenAI: durch Ampel gesperrt")
+            status = f"OpenAI: blockiert ({self._clean_openai_label_text(precheck_text)})"
+            if self._needs_manual_metadata_hint(color, precheck_text):
+                status = f"{status} – Metadaten bitte manuell ergänzen."
+            self.upload_openai_text_var.set(status)
             self.upload_openai_usage_var.set("Verbrauch: k.A.")
             if not auto_apply:
-                messagebox.showwarning("OpenAI-Ampel", precheck_text)
+                messagebox.showwarning("OpenAI-Prüfung", precheck_text)
             return
         if color == "yellow" and not allow_yellow:
-            if not messagebox.askyesno("OpenAI-Ampel", f"{precheck_text}\n\nTrotzdem mit OpenAI prüfen?"):
+            if not messagebox.askyesno("OpenAI-Prüfung", f"{precheck_text}\n\nTrotzdem mit OpenAI prüfen?"):
                 self.upload_openai_text_var.set("OpenAI: Prüfung durch Benutzer abgebrochen")
                 self.upload_openai_usage_var.set("Verbrauch: k.A.")
                 return
@@ -1544,7 +1598,7 @@ class UploadTabMixin:
         self.person_summary_var.set("Keine Personen markiert.")
         self.upload_drop_hint_var.set(f"Ausgewählte Datei: {path.name}")
         self.update_upload_status_indicator()
-        self.reset_openai_status("OpenAI: nicht geprüft – Button „OpenAI prüfen“ drücken")
+        self.reset_openai_status()
         color, _text = self.update_openai_precheck_indicator()
         ocr_path = self.current_upload_ocr_pdf_path()
         if ocr_path:
