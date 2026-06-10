@@ -7,6 +7,7 @@ Dokumentation von Arbeitsschritten, Bugs, Fixes und Wiederaufnahmepunkten für R
 ### Bei Fertigstellung eines Arbeitstags
 ```powershell
 git add .
+git status   # optional zur Kontrolle vor Commit
 git commit -m "Beschreibung"
 git push
 ```
@@ -16,6 +17,16 @@ git push
 git pull
 git status
 ```
+
+### Abkürzung für den Chat: „fertig für heute“
+Wenn du mir jetzt „fertig für heute“ schreibst, führe ich als Nächstes aus:
+1. `git status` (prüfen, was lokal geändert wurde)
+2. `git add .`
+3. `git commit -m "<kurze tägliche Zusammenfassung>"`
+4. `git push`
+5. `git status` (zur finalen Kontrolle)
+
+Danach solltest du auf dem anderen Rechner `weiter gehjts heute` sagen, damit wir mit einem synchronen Stand weitermachen.
 
 ## 2026-06-10
 
