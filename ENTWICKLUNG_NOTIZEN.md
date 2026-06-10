@@ -9,7 +9,8 @@ Dokumentation von Arbeitsschritten, Bugs, Fixes und Wiederaufnahmepunkten für R
 git add .
 git status   # optional zur Kontrolle vor Commit
 git commit -m "Beschreibung"
-git push
+git push    # erst dann ist der Stand auf allen Rechnern verfügbar
+git status --short --branch
 ```
 
 ### Bei Wiederaufnahme der Arbeit am anderen Rechner
@@ -24,7 +25,8 @@ Wenn du mir jetzt „fertig für heute“ schreibst, führe ich als Nächstes au
 2. `git add .`
 3. `git commit -m "<kurze tägliche Zusammenfassung>"`
 4. `git push`
-5. `git status` (zur finalen Kontrolle)
+5. `git status --short --branch` (warten bis `main` nicht mehr voraus ist: `[ahead 0]`)
+6. Ergebnis vermerken, wenn `git push` nicht erfolgreich war (z. B. wegen Netzwerk/Authentifizierung), damit wir es im nächsten Schritt zuerst nachholen.
 
 Danach solltest du auf dem anderen Rechner `weiter gehts heute` sagen, damit wir mit einem synchronen Stand weitermachen.
 
