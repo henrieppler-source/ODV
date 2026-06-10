@@ -26,7 +26,7 @@ Wenn du mir jetzt „fertig für heute“ schreibst, führe ich als Nächstes au
 4. `git push`
 5. `git status` (zur finalen Kontrolle)
 
-Danach solltest du auf dem anderen Rechner `weiter gehjts heute` sagen, damit wir mit einem synchronen Stand weitermachen.
+Danach solltest du auf dem anderen Rechner `weiter gehts heute` sagen, damit wir mit einem synchronen Stand weitermachen.
 
 ## 2026-06-10
 
