@@ -2,6 +2,21 @@
 
 Dokumentation von Arbeitsschritten, Bugs, Fixes und Wiederaufnahmepunkten für Rechner-übergreifendes Arbeiten.
 
+## Git-Workflow (festgelegt)
+
+### Bei Fertigstellung eines Arbeitstags
+```powershell
+git add .
+git commit -m "Beschreibung"
+git push
+```
+
+### Bei Wiederaufnahme der Arbeit am anderen Rechner
+```powershell
+git pull
+git status
+```
+
 ## 2026-06-10
 
 ### Morgen-Check (Schnellstart nach Rechnerwechsel)
