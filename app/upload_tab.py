@@ -516,6 +516,7 @@ class UploadTabMixin:
         self.openai_metadata_source_model = ""
         self.upload_openai_metadata_button.configure(state="disabled")
         precheck_color, precheck_text = self.evaluate_openai_precheck()
+        clean_precheck = self._clean_openai_label_text(precheck_text)
         manual_hint = self._needs_manual_metadata_hint(precheck_color, precheck_text)
 
         if not self.openai_available():
@@ -523,18 +524,20 @@ class UploadTabMixin:
         elif not self.selected_file:
             status = "OpenAI: keine Einzeldatei ausgewählt"
         elif precheck_color == "red":
-            reason = self._clean_openai_label_text(precheck_text)
-            status = f"OpenAI: blockiert ({reason})"
+            status = f"OpenAI-Prüfung: nicht möglich"
             if manual_hint:
-                status = f"{status} – Metadaten bitte manuell ergänzen."
+                detail = clean_precheck or "Datenschutz- oder technische Regel greift"
+                status = f"{status} ({detail}). Metadaten bitte manuell ergänzen."
+            elif clean_precheck:
+                status = f"{status} ({clean_precheck})."
         elif precheck_color == "yellow":
             if message is None:
-                detail = self._clean_openai_label_text(precheck_text)
-                status = f"OpenAI: nicht geprüft – {detail}" if detail else "OpenAI: nicht geprüft"
+                detail = clean_precheck
+                status = f"OpenAI-Prüfung: eingeschränkt ({detail})" if detail else "OpenAI-Prüfung: eingeschränkt"
             else:
                 status = message
         else:
-            status = message or "OpenAI: nicht geprüft"
+            status = message or "OpenAI-Prüfung: bitte starten"
 
         self.upload_openai_text_var.set(status)
         self.upload_openai_usage_var.set("Verbrauch: k.A.")
@@ -559,7 +562,7 @@ class UploadTabMixin:
         ) or "technische/archivdatei" in lowered
 
     def set_openai_precheck_status(self, color: str, text: str) -> None:
-        self.upload_openai_precheck_var.set(text)
+        self.upload_openai_precheck_var.set(self._clean_openai_label_text(text))
         color_map = {
             "red": "#d9534f",
             "yellow": "#f0ad4e",
@@ -1136,10 +1139,16 @@ class UploadTabMixin:
         self.openai_metadata_suggestions = {}
         self.upload_openai_metadata_button.configure(state="disabled")
         color, precheck_text = self.update_openai_precheck_indicator()
+        clean_precheck = self._clean_openai_label_text(precheck_text)
         if color == "red":
-            status = f"OpenAI: blockiert ({self._clean_openai_label_text(precheck_text)})"
-            if self._needs_manual_metadata_hint(color, precheck_text):
-                status = f"{status} – Metadaten bitte manuell ergänzen."
+            manual_hint = self._needs_manual_metadata_hint(color, precheck_text)
+            if manual_hint:
+                reason = clean_precheck or "Datenschutz- oder technische Regel greift"
+                status = f"OpenAI-Prüfung: nicht möglich ({reason}). Metadaten bitte manuell ergänzen."
+            elif clean_precheck:
+                status = f"OpenAI-Prüfung: nicht möglich ({clean_precheck})."
+            else:
+                status = "OpenAI-Prüfung: nicht möglich."
             self.upload_openai_text_var.set(status)
             self.upload_openai_usage_var.set("Verbrauch: k.A.")
             if not auto_apply:
