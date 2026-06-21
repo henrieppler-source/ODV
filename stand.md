@@ -57,7 +57,24 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Zielbild für ODV-Dateiansichten: Angezeigt werden soll grundsätzlich, was zentral in Nextcloud verfügbar ist. Lokale Verfügbarkeit steuert nur, ob lokale Aktionen wie Optimierung, PDF/A oder OCR direkt möglich sind; der Upload erfolgt anschließend über Nextcloud-Sync.
 - Die PDF-Übersicht ist sortierbar und besitzt ein Rechtsklick-Menü für Öffnen, Kopie speichern, OCR/PDF-A anzeigen sowie `PDF optimieren...` und `PDF/A erzeugen...`.
 - Aktionen aus der PDF-Übersicht führen Bestätigungs- und Ergebnisdialoge mit der PDF-Übersicht als Elternfenster; die Übersicht wird danach wieder in den Vordergrund geholt.
-- Letzter abgeschlossener Refactor-Slice: `mail_manager` in Utility-Blöcke (`visibility`, `recipients`) geteilt, ohne Verhaltensänderung.
+- Upload-Reiter entlastet: OCR-Pfad und Textauszüge für den OpenAI-/Metadaten-Flow werden pro Datei zwischengespeichert, damit wiederholte Statusaktualisierungen den Ordner nicht erneut scannen.
+- Der `mail_manager`-Refactor ist angelaufen: die Historien-Datenaufbereitung liegt jetzt in `app/mail_manager_history_utils.py`; die Dialoge werden nacheinander in weitere Slices zerlegt.
+- Die Verteilerverwaltung wurde weiter zerlegt: Parsing, Anzeige und Payload-Bildung liegen jetzt zusätzlich in `app/mail_manager_groups_utils.py`.
+- Die Standard-Mail-Texte sind ebenfalls ausgelagert; Vorlagen-Laden und -Speichern liegen jetzt in `app/mail_manager_templates_utils.py`.
+- Der Versanddialog liegt jetzt in `app/mail_manager_send_dialog_utils.py`; `mail_manager.py` ruft ihn nur noch auf.
+- Letzter abgeschlossener Refactor-Slice: der Versanddialog liegt jetzt in `app/mail_manager_send_dialog_utils.py`; `mail_manager.py` ruft ihn nur noch auf, ohne Verhaltensänderung.
+- Der `postprocess_manager`-Refactor ist gestartet: die gemeinsame OpenAI-Dialogschicht liegt jetzt in `app/postprocess_dialog_utils.py`; Modelldialog, schreibgeschützte Textwidgets und Auswahlhilfe sind ausgelagert.
+- Der OpenAI-Dokument-Slice wurde weiter zerlegt: die komplette Dokumentprüfung mit Modellwahl, feldweiser Übernahme und Speicherlogik liegt jetzt in `app/postprocess_openai_document_utils.py`.
+- Der OpenAI-Form- und Persistenzblock wurde weiter ausgelagert: Feldwerte, Speichern, Tabellenzeilen und Aktionslogik liegen jetzt in `app/postprocess_openai_form_utils.py`.
+- Die Ortsanalyse wurde als eigener Slice ausgelagert; lokale Fundstellensuche, Orts-Fundstellen-Dialog und Ortsanalyse-Ergebnisdialog liegen jetzt in `app/postprocess_place_scan_utils.py`.
+- Der OCR-Slice wurde ausgelagert; die beiden OCR-Einstiege für die Admin-Ansicht und einzelne Dateien liegen jetzt in `app/postprocess_ocr_utils.py`.
+- Die OpenAI-/OCR-/Ortsanalyse-Statuslogik in `Dateien bearbeiten` liegt jetzt in `app/postprocess_control_utils.py`.
+- Der Upload-Dateiauswahl- und Lade-Workflow liegt jetzt in `app/upload_file_selection_utils.py`.
+- Der Upload-OCR-Block liegt jetzt in `app/upload_ocr_utils.py`.
+- Der Upload-Textauszug- und Metadatenblock liegt jetzt in `app/upload_text_utils.py`.
+- Der OpenAI-Precheck-, Modellwahl- und Übernahmedialog liegt jetzt in `app/upload_openai_utils.py`.
+- Der OpenAI-Cache und die Cache-Übernahme liegen jetzt in `app/upload_openai_cache_utils.py`.
+- Statusanzeige, Bildvorschau und Personenmarkierung liegen jetzt in `app/upload_status_utils.py`.
 - Während `PDF optimieren...` und `PDF/A erzeugen...` läuft ein modaler Fortschrittsdialog mit `Datei wird verarbeitet`; die PDF-Verarbeitung läuft im Hintergrund, damit der Nutzer eine sichtbare Rückmeldung erhält.
 - `Datei öffnen` öffnet bei PDFs bevorzugt eine vorhandene `_pdfa.pdf`-Archivfassung. Die Arbeits-PDF kann daher stärker für PC-Nutzung komprimiert werden.
 - `PDF optimieren...` ist lokal aktiv; Superadmins können das Profil `verlustfrei`, `standard` oder `maximal` wählen. `standard` nutzt Ghostscript mit ca. 144 dpi, `maximal` ca. 120 dpi; ohne Ghostscript nutzt ODV PyMuPDF als Fallback. Die Arbeits-PDF wird nur ersetzt, wenn die optimierte Datei kleiner ist.
@@ -66,6 +83,7 @@ Diese Datei sammelt die wichtigsten Vereinbarungen und den aktuellen Arbeitsstan
 - Falls Ghostscript beim Start fehlt, kann ODV einen mitgelieferten Installer aus `tools\ghostscript_installer` automatisch starten; verlangt Windows erhöhte Rechte, erscheint eine UAC-Bestätigung. Ohne mitgelieferte Dateien erfolgt kein Internetdownload.
 - Ergibt der Optimierungsversuch keine kleinere Datei, wird dies als Versuch ohne Verkleinerung gespeichert und in der PDF-Übersicht bei `Optimiert durch ODV` mit `X` angezeigt.
 - `PDF/A erzeugen...` ist Ghostscript-basiert und bricht mit Hinweis ab, wenn Ghostscript nicht verfügbar ist.
+- `pdf_management_manager.py` ist intern in vier Slices aufgeteilt: Dialog/UI, PDF-Optimierung, PDF/A-Erzeugung sowie Metadaten-/Verknüpfungsreste.
 - Wiederholte PDF-Optimierung ist geregelt: Admin/Superadmin bekommen bei bereits durch ODV optimierten PDFs eine ausdrückliche Qualitätswarnung mit Bestätigung; Bearbeiter erhalten nur den Hinweis, dass keine weitere Optimierung möglich ist.
 - Lokale PDF-Aktionen schreiben Metadaten zur Nachvollziehbarkeit: Optimierungszeitpunkt, Bearbeiter, Originalgröße, optimierte Größe, Werkzeug und Profil bzw. PDF/A-Pfad und Werkzeug.
 - Die API-Endpunkte für Ordnerrechte und Ortsordner-Stammdaten müssen aktiv bleiben; fehlende Routen wurden wieder ergänzt.

@@ -110,7 +110,25 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - PDF-Optimierung robuster gemacht: Wenn Windows die Arbeits-PDF beim Ersetzen sperrt, versucht ODV den Austausch mehrfach kurz erneut und zeigt danach einen verständlichen Hinweis statt eines rohen `WinError 5`.
 - Erste kritische Stolperstellen bereinigt: doppelte Upload-Statusmethoden entfernt und totes `admin_tab_visible`-Kennzeichen gestrichen.
 - Entwickler-Health-Check `scripts/check_project_health.py` ergänzt; er prüft Versionen, doppelte Klassenmethoden, alte Statusbegriffe, große Module und Legacy-Marker.
-- Handbuch, Admin-Handbuch und Stand-Datei auf `v121` fortgeschrieben.
+- Upload-Reiter entlastet: OCR-Pfad und Textauszüge für den OpenAI-/Metadaten-Flow werden pro Datei zwischengespeichert, damit wiederholte Statusaktualisierungen den Ordner nicht erneut scannen.
+- `mail_manager`-Refactor gestartet: die Historien-Datenaufbereitung liegt jetzt in `mail_manager_history_utils.py`; der Dialog bleibt zunächst noch in der Hauptdatei.
+- Die Verteilerverwaltung wurde in einen weiteren Slice zerlegt: Parsing, Anzeige und Payload-Bildung liegen jetzt zusätzlich in `mail_manager_groups_utils.py`.
+- Die Standard-Mail-Texte wurden ebenfalls ausgelagert; Vorlagen-Laden und -Speichern liegen jetzt in `mail_manager_templates_utils.py`.
+- Der Versanddialog liegt jetzt in `mail_manager_send_dialog_utils.py`; `mail_manager.py` ruft ihn nur noch auf.
+- Letzter abgeschlossener Mail-Slice: der Versanddialog liegt jetzt in `mail_manager_send_dialog_utils.py`; `mail_manager.py` ruft ihn nur noch auf.
+- `postprocess_manager`-Refactor gestartet: die gemeinsame OpenAI-Dialogschicht liegt jetzt in `postprocess_dialog_utils.py`; Modelldialog, schreibgeschützte Textwidgets und Auswahlhilfe sind ausgelagert.
+- Der OpenAI-Dokument-Slice wurde weiter zerlegt: die komplette Dokumentprüfung mit Modellwahl, feldweiser Übernahme und Speicherlogik liegt jetzt in `postprocess_openai_document_utils.py`.
+- Der OpenAI-Form- und Persistenzblock wurde weiter ausgelagert: Feldwerte, Speichern, Tabellenzeilen und Aktionslogik liegen jetzt in `postprocess_openai_form_utils.py`.
+- Die Ortsanalyse wurde als eigener Slice ausgelagert; lokale Fundstellensuche, Orts-Fundstellen-Dialog und Ortsanalyse-Ergebnisdialog liegen jetzt in `postprocess_place_scan_utils.py`.
+- Der OCR-Slice wurde ausgelagert; die beiden OCR-Einstiege für die Admin-Ansicht und einzelne Dateien liegen jetzt in `postprocess_ocr_utils.py`.
+- Die OpenAI-/OCR-/Ortsanalyse-Statuslogik in `Dateien bearbeiten` liegt jetzt in `postprocess_control_utils.py`.
+- Der Upload-Dateiauswahl- und Lade-Workflow wurde in `upload_file_selection_utils.py` gezogen.
+- Der Upload-OCR-Block wurde in `upload_ocr_utils.py` gezogen.
+- Der Upload-Textauszug- und Metadatenblock wurde in `upload_text_utils.py` gezogen.
+- Der OpenAI-Precheck-, Modellwahl- und Übernahmedialog liegt jetzt in `upload_openai_utils.py`.
+- Der OpenAI-Cache und die Cache-Übernahme liegen jetzt in `upload_openai_cache_utils.py`.
+- Statusanzeige, Bildvorschau und Personenmarkierung im Upload-Reiter liegen jetzt in `upload_status_utils.py`.
+  - Handbuch, Admin-Handbuch und Stand-Datei auf `v121` fortgeschrieben.
 - Interne Bereinigungsrunde des Step-3-Hotspot-Refactorings abgeschlossen: `hasattr`/`getattr`-Abhängigkeiten in zentralen Mixins (`admin_*`, `file_tree`, `preview`, `history`) wurden entfernt bzw. reduziert, inklusive Initialisierung der Admin-Sortierflags, um indirekte Zugriffspfadfehler zu vermeiden.
 - Interne Stabilisierung fortgesetzt: `mail_manager` wurde in kleine Utility-Blöcke aufgeteilt (`mail_user_context`, `mail_group_matches_user`, `collect_mail_recipients`, `build_mail_attachments`) ohne sichtbare Funktionsänderung; Slice-Check per `scripts/check_project_health.py`, `scripts/smoke_mail_dialog.py` und `scripts/smoke_core_paths.py` erfolgreich.
 
@@ -176,6 +194,7 @@ Wichtige SQL-/Reset-Hinweise aus den Versionsständen:
 - Falls Ghostscript beim Start nicht gefunden wird, sucht ODV nach einem mitgelieferten Installer unter `tools\ghostscript_installer` und startet diesen automatisch. Wenn Windows erhöhte Rechte verlangt, erscheint eine UAC-Bestätigung. Ohne mitgelieferte Dateien erfolgt kein Internetdownload; ODV arbeitet dann mit PyMuPDF-Fallback weiter.
 - Ergibt eine Optimierung keine kleinere Datei, bleibt die Arbeitsdatei unverändert; der Versuch wird in den Metadaten protokolliert und in der PDF-Übersicht bei `Optimiert durch ODV` mit `X` angezeigt.
 - `PDF/A erzeugen...` erzeugt eine separate `_pdfa.pdf`-Archivfassung über Ghostscript. Wenn Ghostscript nicht installiert oder nicht im PATH auffindbar ist, zeigt ODV einen klaren Hinweis und erzeugt keine Schein-PDF/A-Datei.
+- `pdf_management_manager.py` ist dafür jetzt in vier interne Slices aufgeteilt: Dialog/UI, PDF-Optimierung, PDF/A-Erzeugung sowie Metadaten-/Verknüpfungsreste.
 - PDF-Optimierung wird künftig in den Metadaten nachvollziehbar gespeichert. Wurde ein PDF bereits durch ODV optimiert, dürfen Admin/Superadmin eine erneute Optimierung nur nach ausdrücklicher Qualitätswarnung starten; Bearbeiter erhalten in diesem Fall nur den Hinweis, dass keine weitere Optimierung möglich ist.
 - Mailhistorie ist benutzerbezogen und zeigt immer nur die eigenen Versandvorgänge.
 - Verteiler speichern den Ersteller mit; normale Nutzer sehen ihre eigenen und ortsbezogenen Verteiler, Admin/Superadmin nur Verteiler, die von Admin/Superadmin angelegt wurden.

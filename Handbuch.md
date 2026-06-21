@@ -138,6 +138,8 @@ Wenn PDF-Aktionen wie Optimierung oder PDF/A-Erzeugung länger dauern, zeigt ODV
 
 Falls eine optimierte PDF nicht ersetzt werden kann, ist die Datei meist noch geöffnet oder durch Nextcloud-Sync bzw. die Explorer-Vorschau gesperrt. Schließen Sie die Vorschau oder das PDF-Programm, warten Sie kurz auf den Sync und starten Sie die Aktion erneut.
 
+Intern ist `pdf_management_manager.py` für diese Funktionen inzwischen in vier Slices zerlegt: Dialog/UI, PDF-Optimierung, PDF/A-Erzeugung sowie Metadaten-/Verknüpfungsreste.
+
 # 8. Bilder und Personenmarkierung
 
 Bei Bildern können Personen markiert und benannt werden. Die Markierung dient späterer Wiedererkennung und Dokumentation.
@@ -219,6 +221,10 @@ Grundlogik seit v116:
 - Die längere Metadatenansicht und die große Bildvorschau laufen intern über ein eigenes Darstellungsmodul.
 - Das Laden und Speichern der Dateiansichts-Metadaten läuft intern über ein eigenes Metadatenformular-Modul.
 - Upload- und API-Payloads werden intern in einem eigenen Upload-Modul verarbeitet.
+- Die Upload-Teillogik ist intern weiter aufgeteilt: Datei-Auswahl, OCR und Textauszug/Metadaten liegen in kleineren Hilfsmodulen.
+- Die OpenAI-Prüfung im Upload-Reiter ist intern zusätzlich in einen eigenen Dialog-/Precheck-Block ausgelagert.
+- Der Cache für OpenAI-Vorschläge wird intern getrennt verwaltet, damit Übernahmen bei gleicher Datei ohne erneuten Lauf möglich sind.
+- Statusanzeige, Bildvorschau und Personenmarkierung im Upload-Reiter sind ebenfalls intern ausgelagert.
 - Admin-Tabs und Admin-Einstellungen werden intern über ein eigenes Admin-UI-Modul aufgebaut.
 - Admin-Listen und Zielordnerauswahl laufen intern über ein eigenes Admin-Listen-Modul.
 - Dateibaum, Filter und Datei-Auswahl laufen intern über ein eigenes Dateibaum-Modul.
@@ -323,4 +329,4 @@ Seit v82 wurden vor allem folgende bearbeiterrelevante Themen verbessert:
 - Fenstergrößen und UI-Zustand werden zuverlässiger gespeichert.
 - Punkte wurden in v115 feldbezogen und nachvollziehbarer strukturiert.
 - Das Handbuch ist direkt über `Hilfe > Handbuch` erreichbar.
-- Mailbereich intern weiter strukturiert: `mail_manager` wurde in Utility-Blöcke aufgeteilt (Kontext/Sichtbarkeit, Empfänger und Anlagen), damit die Funktionserläuterung stabiler bleibt; Nutzerverhalten bleibt unverändert.
+- Mailbereich intern weiter strukturiert: `mail_manager` wurde in Utility-Blöcke aufgeteilt (Kontext/Sichtbarkeit, Historie, Verteiler, Standardtexte, Versanddialog, Empfänger und Anlagen), damit die Funktionserläuterung stabiler bleibt; Nutzerverhalten bleibt unverändert.

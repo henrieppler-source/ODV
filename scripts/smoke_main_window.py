@@ -330,6 +330,14 @@ class MainWindowSmokeOwner(MainWindowMixin):
     def rowconfigure(self, *_args, **_kwargs):
         return None
 
+    def after(self, *_args, **_kwargs):
+        if len(_args) >= 2 and callable(_args[1]):
+            return _args[1]()
+        return None
+
+    def wait_window(self, *_args, **_kwargs):
+        return None
+
     def create_styles(self):
         return None
 

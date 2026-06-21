@@ -48,12 +48,42 @@ Danach solltest du auf dem anderen Rechner `weiter gehts heute` sagen, damit wir
 
 ### Offene Punkte aus 06-10 (bei der nächsten Sitzung zuerst prüfen)
 - Endgültige Klärung der offenen UI-Performance im Upload-/Metadaten-Flow nach dem letzten Rollback.
-- Weitere Refactor-Slices in großen Modulen noch offen: `mail_manager.py`, `postprocess_manager.py`, `upload_tab.py`, `pdf_management_manager.py`.
+- Weitere Refactor-Slices in großen Modulen noch offen: `mail_manager.py`, `upload_tab.py`.
 - Tests nach jedem Refactor-Slice ausführen: `python scripts/check_project_health.py` und relevante Smoke-Pfade für betroffene Bereiche.
 
 ### 06-10 Schlussstatus
 - Lokale Notizen aktuell: `ENTWICKLUNG_NOTIZEN.md` erweitert und als Leitfaden bereit
 - Erwarteter nächster Wiederaufnahmepunkt: auf funktionale Stabilität in `upload` und Admin-Workflows fokussieren
+
+### Vor dem Test: fertig / offen
+
+#### Fertig
+- Remote und Branch-Sync repariert.
+- Python-Interpreter-Pfad bereinigt und `.venv` wieder lauffähig.
+- OpenAI-Blocker-Text und Precheck-Flow im Reiter `Dateien hochladen` behoben.
+- Nextcloud-Basisordner-Scan auf asynchron umgestellt, damit die UI nicht mehr blockiert.
+- Upload-/Metadaten-Flow im Reiter `Dateien hochladen` mit Cache für OCR-Pfad und Textauszüge entlastet.
+- Erste Mail-Manager-Zerlegung begonnen: Historien-Datenaufbereitung in Hilfsmodul ausgelagert.
+- Versanddialog als eigener Helper ausgelagert und per Smoke getestet.
+- Erste Postprocess-Zerlegung begonnen: die gemeinsame OpenAI-Dialogschicht liegt jetzt in `app/postprocess_dialog_utils.py`.
+- OpenAI-Dokument-Slice als nächster Schritt ausgelagert: Modellwahl, feldweise Übernahme und Speicherlogik liegen jetzt in `app/postprocess_openai_document_utils.py`.
+- OpenAI-Form- und Persistenzblock ausgelagert: Feldwerte, Speichern, Tabellenzeilen und Aktionslogik liegen jetzt in `app/postprocess_openai_form_utils.py`.
+- Ortsanalyse-Slice direkt danach ausgelagert: Fundstellensuche, Fundstellen-Dialog und Ergebnisdialog liegen jetzt in `app/postprocess_place_scan_utils.py`.
+- OCR-Slice ebenfalls ausgelagert: die beiden OCR-Einstiege liegen jetzt in `app/postprocess_ocr_utils.py`.
+- OpenAI-/OCR-/Ortsanalyse-Statuslogik ausgelagert: `update_admin_openai_controls()` liegt jetzt in `app/postprocess_control_utils.py`.
+- Upload-Dateiauswahl- und Lade-Workflow ausgelagert: die Datei-Initialisierung liegt jetzt in `app/upload_file_selection_utils.py`.
+- Upload-OCR-Block ausgelagert: OCR-Start, Fortschritt und Backend-Auswahl liegen jetzt in `app/upload_ocr_utils.py`.
+- Upload-Textauszug- und Metadatenblock ausgelagert: Textprobe, lokale Ableitung und Metadatenhilfen liegen jetzt in `app/upload_text_utils.py`.
+- OpenAI-Precheck-, Modellwahl- und Übernahmedialog ausgelagert: die UI- und Laufsteuerung liegt jetzt in `app/upload_openai_utils.py`.
+- OpenAI-Cache- und Übernahmeblock ausgelagert: Cache-Pfad, Laden/Speichern und Wiederverwendung liegen jetzt in `app/upload_openai_cache_utils.py`.
+- Statusanzeige-, Bildvorschau- und Personenmarkierungsblock ausgelagert: die letzten Upload-Hilfen liegen jetzt in `app/upload_status_utils.py`.
+- PDF-Verwaltung intern zerlegt: `pdf_management_manager.py` ist jetzt in Dialog/UI, PDF-Optimierung, PDF/A-Erzeugung sowie Metadaten-/Verknüpfungsreste aufgeteilt.
+- `python scripts/check_project_health.py` lief bereits erfolgreich durch.
+- `python scripts/smoke_upload_tab.py` lief bereits erfolgreich durch.
+
+#### Offen
+- Die übrigen Refactor-Slices in `mail_manager.py` und `upload_tab.py` sind noch nicht abgearbeitet.
+- Nach jedem weiteren Slice erneut `python scripts/check_project_health.py` und den passenden Smoke-Test ausführen.
 
 ---
 

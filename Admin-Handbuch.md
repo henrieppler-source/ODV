@@ -166,6 +166,7 @@ PDF-Verwaltung:
 - Ist Ghostscript beim Programmstart nicht vorhanden, sucht ODV zusätzlich unter `tools\ghostscript_installer` nach einem mitgelieferten MSI-/EXE-Installer und startet diesen automatisch. Wenn Windows erhöhte Rechte verlangt, erscheint eine UAC-Bestätigung. ODV lädt Ghostscript nicht eigenständig aus dem Internet herunter; die Quelle bleibt dadurch kontrollierbar.
 - Wenn keine kleinere Datei entsteht, bleibt die Arbeitsdatei unverändert. Der Versuch wird trotzdem protokolliert und in der PDF-Übersicht bei `Optimiert durch ODV` mit `X` angezeigt.
 - `PDF/A erzeugen...` nutzt Ghostscript und erzeugt eine separate `_pdfa.pdf`-Archivfassung. Ohne Ghostscript wird die Aktion mit Hinweis abgebrochen, damit keine nicht-konforme PDF/A-Datei entsteht.
+- Intern ist `pdf_management_manager.py` für die PDF-Verwaltung jetzt in vier Slices aufgeteilt: Dialog/UI, PDF-Optimierung, PDF/A-Erzeugung sowie Metadaten-/Verknüpfungsreste.
 - Eine ODV-Optimierung soll technisch nachvollziehbar in den Metadaten gespeichert werden (`pdf_optimized_at`, `pdf_optimized_by`, Originalgröße, optimierte Größe, Werkzeug und Profil). Bereits durch ODV optimierte PDFs werden nicht unbemerkt erneut optimiert: Admin/Superadmin erhalten die Warnung `Dieses PDF wurde bereits am ... durch ... optimiert. Erneute Optimierung kann Qualität verschlechtern. Trotzdem erneut optimieren?`; Bearbeiter erhalten `Dieses PDF wurde bereits am ... durch ... optimiert. Keine weitere Optimierung möglich.`
 
 Statuslogik:
@@ -455,7 +456,7 @@ Sicherheitsregeln:
 - Technischer Strukturumbau begonnen: Hilfe-/Markdown-Anzeige liegt in `app/help_docs.py`, Updateprüfung und Updatefreigabe liegen in `app/update_manager.py`.
 - Datenbank-/Serverbetrieb ausgelagert: Backup, Rücksicherung, Migrationen, Wartungsmodus und `routes.php`-Deployment liegen in `app/admin_operations.py`.
 - Punkteverwaltung aufgeteilt: Jahresauswertung, Sonderpunkte sowie Punkteregeln und `Mein Punktestand` liegen in `app/points_year_manager.py`, `app/points_special_manager.py` und `app/points_rules_manager.py`.
-- Mailbereich ausgelagert: Rundmail, Verteilerverwaltung, Versandhistorie, Nextcloud-Mail-Links und Mailanhänge liegen in `app/mail_manager.py`.
+- Mailbereich ausgelagert: Rundmail, Verteilerverwaltung, Versandhistorie, Nextcloud-Mail-Links und Mailanhänge liegen in `app/mail_manager.py`; die Historien-Datenaufbereitung ist zusätzlich in `app/mail_manager_history_utils.py` gezogen.
 - Benutzerverwaltung ausgelagert: Benutzer, Rechte sowie Sitzungen/Geräte liegen in `app/user_admin.py`.
 - Stammdatenbereich ausgelagert: Ortsordner, Archiv/Sammlung, vorhandene Dateien einlesen und lokale Sicherungsdateien bereinigen liegen in `app/masterdata_manager.py`.
 - Ordner-/Konfigurationslogik ausgelagert: Nextcloud-/Metadatenordner, Zielordnerauswahl, Ordnerbaum und Schreibordnerprüfung liegen in `app/config_folders.py`.
@@ -515,7 +516,19 @@ Sicherheitsregeln:
 
 ## v121 - Interne Strukturbereinigung
 
-- `mail_manager` wurde in Utility-Module geteilt; Kernlogik für Nutzerkontext, Verteiler-Sichtbarkeit sowie Empfänger- und Anlagen-Helfer liegt jetzt in kleineren Hilfskomponenten zur besseren Wartbarkeit.
+- `mail_manager` wurde in Utility-Module geteilt; Kernlogik für Nutzerkontext, Verteiler-Sichtbarkeit, Versandhistorie, Verteiler-Payloads, Standardtext-Vorlagen, Versanddialog sowie Empfänger- und Anlagen-Helfer liegt jetzt in kleineren Hilfskomponenten zur besseren Wartbarkeit.
+- `postprocess_manager` hat den ersten internen Slice erhalten: die gemeinsame OpenAI-Dialogschicht liegt jetzt in `app/postprocess_dialog_utils.py`; damit sind Modellwahl-Dialog, schreibgeschützte Textfelder und Auswahlhilfe sauber getrennt.
+- Der OpenAI-Dokument-Slice wurde weiter zerlegt: Dokumentprüfung, Modellwahl, feldweise Übernahme und Speichern liegen jetzt in `app/postprocess_openai_document_utils.py`.
+- Der OpenAI-Form- und Persistenzblock wurde weiter ausgelagert: Feldwerte, Speichern, Tabellenzeilen und Aktionslogik liegen jetzt in `app/postprocess_openai_form_utils.py`.
+- Die Ortsanalyse wurde als eigener interner Slice ausgelagert; lokale Fundstellensuche, Orts-Fundstellen-Dialog und Ortsanalyse-Ergebnisdialog liegen jetzt in `app/postprocess_place_scan_utils.py`.
+- Der OCR-Slice wurde ebenfalls ausgelagert; die OCR-Einstiege für die Admin-Ansicht und einzelne Dateien liegen jetzt in `app/postprocess_ocr_utils.py`.
+- Die gemeinsame OpenAI-/OCR-/Ortsanalyse-Statuslogik in `Dateien bearbeiten` liegt jetzt in `app/postprocess_control_utils.py`.
+- Der Upload-Dateiauswahl- und Lade-Workflow liegt jetzt in `app/upload_file_selection_utils.py`.
+- Der Upload-OCR-Block liegt jetzt in `app/upload_ocr_utils.py`.
+- Der Upload-Textauszug- und Metadatenblock liegt jetzt in `app/upload_text_utils.py`.
+- Der OpenAI-Precheck-, Modellwahl- und Übernahmedialog liegt jetzt in `app/upload_openai_utils.py`.
+- Der OpenAI-Cache und die Cache-Übernahme liegen jetzt in `app/upload_openai_cache_utils.py`.
+- Statusanzeige, Bildvorschau und Personenmarkierung liegen jetzt in `app/upload_status_utils.py`.
 - Der Refactor wurde als Slice durchgeführt; Fachlogik und Verhalten von Rundmail-Dialogen und Verteilerfilterung sind unverändert.
 - Für den Slice wurden `scripts/check_project_health.py` sowie gezielte Smoke-Pfade (`scripts/smoke_mail_dialog.py`, `scripts/smoke_core_paths.py`) erfolgreich ausgeführt.
 

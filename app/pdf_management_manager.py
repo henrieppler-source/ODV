@@ -39,6 +39,34 @@ from .pdf_management_report_utils import (
     build_pdf_report_rows as _pmm_build_pdf_report_rows,
     write_pdf_size_log as _pmm_write_pdf_size_log,
 )
+from .pdf_management_dialog_utils import (
+    keep_pdf_overview_front as _pmd_keep_pdf_overview_front,
+    open_linked_pdfa_for_current_file as _pmd_open_linked_pdfa_for_current_file,
+    open_pdf_overview_dialog as _pmd_open_pdf_overview_dialog,
+    pdf_action_stub as _pmd_pdf_action_stub,
+    run_pdf_processing_dialog as _pmd_run_pdf_processing_dialog,
+)
+from .pdf_management_metadata_utils import (
+    ensure_pdf_metadata_item as _pmmu_ensure_pdf_metadata_item,
+    linked_pdf_paths_for_item as _pmmu_linked_pdf_paths_for_item,
+    pdf_optimization_info_for_path as _pmmu_pdf_optimization_info_for_path,
+    pdf_report_rows as _pmmu_pdf_report_rows,
+    refresh_pdf_views_after_action as _pmmu_refresh_pdf_views_after_action,
+    write_pdf_size_log as _pmmu_write_pdf_size_log,
+)
+from .pdf_management_optimization_utils import (
+    optimize_pdf_file as _pmo_optimize_pdf_file,
+    record_pdf_optimization as _pmo_record_pdf_optimization,
+    record_pdf_optimization_attempt as _pmo_record_pdf_optimization_attempt,
+    run_ghostscript_pdf_optimization as _pmo_run_ghostscript_pdf_optimization,
+    run_lossless_pdf_optimization as _pmo_run_lossless_pdf_optimization,
+)
+from .pdf_management_pdfa_utils import (
+    create_pdfa_file as _pmp_create_pdfa_file,
+    ensure_local_pdf_available as _pmp_ensure_local_pdf_available,
+    record_pdfa_creation as _pmp_record_pdfa_creation,
+    run_ghostscript_pdfa as _pmp_run_ghostscript_pdfa,
+)
 
 
 class PdfManagementManagerMixin:
@@ -93,24 +121,7 @@ class PdfManagementManagerMixin:
         return _pmm_format_size_bytes(size)
 
     def pdf_optimization_info_for_path(self, path: Path | None) -> dict:
-        if not path:
-            return {}
-        item = self.item_for_local_path(path) or {}
-        optimized_at = str(item.get("pdf_optimized_at") or "").strip()
-        attempted_at = str(item.get("pdf_optimization_attempted_at") or "").strip()
-        if not optimized_at and not attempted_at:
-            return {}
-        optimized_by = str(item.get("pdf_optimized_by") or item.get("edited_by") or item.get("uploaded_by") or "ODV").strip()
-        return {
-            "optimized_at": optimized_at,
-            "attempted_at": attempted_at,
-            "optimized_by": optimized_by,
-            "original_size": item.get("pdf_original_size_bytes") or "",
-            "optimized_size": item.get("pdf_optimized_size_bytes") or "",
-            "tool": str(item.get("pdf_optimization_tool") or "").strip(),
-            "profile": str(item.get("pdf_optimization_profile") or "").strip(),
-            "result": str(item.get("pdf_optimization_result") or ("optimized" if optimized_at else "no_gain")).strip(),
-        }
+        return _pmmu_pdf_optimization_info_for_path(self, path)
 
     def pdfa_path_for_document(self, path: Path | None) -> Path | None:
         return _pmm_pdfa_path_for_document(path)
@@ -132,115 +143,19 @@ class PdfManagementManagerMixin:
         return _pmm_visible_pdf_work_file(path)
 
     def linked_pdf_paths_for_item(self, item: dict | None, document_path: Path | None = None) -> dict[str, Path | None]:
-        path = document_path or self.resolve_document_local_path(item or {})
-        ocr_path = None
-        if item:
-            ocr_text = str(item.get("ocr_pdf_path") or item.get("ocr_current_path") or "").strip()
-            if ocr_text:
-                candidate = Path(ocr_text)
-                if candidate.exists():
-                    ocr_path = candidate
-        if not ocr_path:
-            ocr_candidate = self.ocr_path_for_document(path)
-            if ocr_candidate and ocr_candidate.exists():
-                ocr_path = ocr_candidate
-        pdfa_path = None
-        pdfa_candidate = self.pdfa_path_for_document(path)
-        if pdfa_candidate and pdfa_candidate.exists():
-            pdfa_path = pdfa_candidate
-        return {"work": path, "pdfa": pdfa_path, "ocr": ocr_path}
+        return _pmmu_linked_pdf_paths_for_item(self, item, document_path=document_path)
 
     def keep_pdf_overview_front(self, parent=None) -> None:
-        """Bring the PDF overview back after child dialogs/actions."""
-        if not parent:
-            return
-        try:
-            parent.lift()
-            parent.focus_force()
-            parent.attributes("-topmost", True)
-            parent.after(250, lambda: parent.attributes("-topmost", False))
-        except Exception:
-            pass
+        _pmd_keep_pdf_overview_front(self, parent=parent)
 
     def run_pdf_processing_dialog(self, title: str, text: str, worker, finish, parent=None) -> None:
-        dialog = tk.Toplevel(parent or self)
-        dialog.title(title)
-        dialog.transient(parent or self)
-        dialog.resizable(False, False)
-        dialog.columnconfigure(0, weight=1)
-        ttk.Label(dialog, text=text, padding=(18, 14, 18, 8)).grid(row=0, column=0, sticky="ew")
-        progress = ttk.Progressbar(dialog, mode="indeterminate", length=360)
-        progress.grid(row=1, column=0, sticky="ew", padx=18, pady=(0, 14))
-        ttk.Label(dialog, text="Bitte warten. Große PDFs können mehrere Minuten dauern.", foreground="#555555").grid(row=2, column=0, sticky="ew", padx=18, pady=(0, 14))
-        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-        try:
-            dialog.grab_set()
-        except Exception:
-            pass
-        progress.start(12)
-        self.keep_pdf_overview_front(dialog)
-
-        def run() -> None:
-            try:
-                result = worker()
-                self.after(0, lambda result=result: close_and_finish(result=result, error=None))
-            except Exception as exc:
-                self.after(0, lambda error=exc: close_and_finish(result=None, error=error))
-
-        def close_and_finish(result=None, error=None) -> None:
-            try:
-                progress.stop()
-                dialog.grab_release()
-            except Exception:
-                pass
-            try:
-                dialog.destroy()
-            except Exception:
-                pass
-            finish(result, error)
-
-        threading.Thread(target=run, daemon=True).start()
+        _pmd_run_pdf_processing_dialog(self, title, text, worker, finish, parent=parent)
 
     def open_linked_pdfa_for_current_file(self, path: Path | None = None) -> None:
-        source = path or self.file_view_current_path
-        pdfa = self.pdfa_path_for_document(source)
-        if not pdfa or not pdfa.exists():
-            messagebox.showwarning("PDF/A", "Zu dieser Datei wurde keine PDF/A-Fassung gefunden.")
-            return
-        self.open_file_with_default_app(pdfa)
+        _pmd_open_linked_pdfa_for_current_file(self, path=path)
 
     def pdf_action_stub(self, action: str, path: Path | None = None, parent=None) -> None:
-        self.keep_pdf_overview_front(parent)
-        source = path or self.file_view_current_path
-        if not source or source.suffix.lower() != ".pdf":
-            messagebox.showwarning("PDF", "Bitte eine PDF-Datei auswählen.", parent=parent)
-            self.keep_pdf_overview_front(parent)
-            return
-        if action == "PDF optimieren":
-            info = self.pdf_optimization_info_for_path(source)
-            if info:
-                timestamp = info.get("optimized_at") or info.get("attempted_at") or "unbekannt"
-                result_hint = "optimiert" if info.get("optimized_at") else "ohne kleinere Datei geprüft"
-                detail = f"Dieses PDF wurde bereits am {timestamp} durch {info['optimized_by']} {result_hint}."
-                if self.is_current_admin():
-                    if not messagebox.askyesno("PDF optimieren", f"{detail}\nErneute Optimierung kann Qualität verschlechtern.\n\nTrotzdem erneut optimieren?", parent=parent):
-                        self.keep_pdf_overview_front(parent)
-                        return
-                else:
-                    messagebox.showwarning("PDF optimieren", f"{detail}\nKeine weitere Optimierung möglich.", parent=parent)
-                    self.keep_pdf_overview_front(parent)
-                    return
-            self.optimize_pdf_file(source, parent=parent)
-            return
-        if action == "PDF/A erzeugen":
-            self.create_pdfa_file(source, parent=parent)
-            return
-        messagebox.showinfo(
-            "PDF",
-            f"{action} ist vorbereitet, aber die eigentliche Verarbeitung wird im nächsten Schritt angebunden.\n\nDatei:\n{source}",
-            parent=parent,
-        )
-        self.keep_pdf_overview_front(parent)
+        _pmd_pdf_action_stub(self, action, path=path, parent=parent)
 
     def find_ghostscript_command(self) -> list[str] | None:
         return _pmm_find_ghostscript_command(self._pdf_tool_search_roots())
@@ -302,269 +217,22 @@ class PdfManagementManagerMixin:
         return _pmm_run_ghostscript_installer_elevated(installer=installer, app_dir=APP_DIR)
 
     def optimize_pdf_file(self, source: Path, parent=None) -> None:
-        self.keep_pdf_overview_front(parent)
-        if not self.ensure_local_pdf_available(source, parent=parent):
-            return
-        profile = self.pdf_optimization_profile()
-        if not messagebox.askyesno(
-            "PDF optimieren",
-            f"PDF mit Optimierungsprofil '{profile}' optimieren?\n\nDatei:\n{source}\n\n"
-            "ODV erstellt zuerst eine temporäre Datei und ersetzt die Arbeitsdatei nur, wenn die optimierte Datei kleiner ist.",
-            parent=parent,
-        ):
-            self.keep_pdf_overview_front(parent)
-            return
-        temp = source.with_name(f"{source.stem}.__odv_optimized_tmp.pdf")
-        original_size = source.stat().st_size
-        display_name = self.display_name_var.get().strip() or "ODV"
-        display_name = self._pdf_action_user_label()
-
-        def worker() -> dict:
-            if temp.exists():
-                temp.unlink()
-            tool = "pymupdf"
-            if profile in {"standard", "maximal"}:
-                gs = self.find_ghostscript_command()
-                if gs:
-                    self.run_ghostscript_pdf_optimization(source, temp, gs, profile)
-                    tool = "ghostscript"
-                else:
-                    self.run_lossless_pdf_optimization(source, temp, profile)
-            else:
-                self.run_lossless_pdf_optimization(source, temp, profile)
-            optimized_size = temp.stat().st_size if temp.exists() else 0
-            if optimized_size <= 0:
-                raise RuntimeError("Optimierte PDF-Datei wurde nicht erstellt.")
-            if optimized_size >= original_size:
-                try:
-                    temp.unlink()
-                except Exception:
-                    pass
-                self.record_pdf_optimization_attempt(source, original_size, optimized_size, tool, profile, display_name=display_name)
-                return {"changed": False, "original_size": original_size, "optimized_size": optimized_size, "tool": tool}
-            replace_error = None
-            for _attempt in range(5):
-                try:
-                    os.replace(str(temp), str(source))
-                    replace_error = None
-                    break
-                except PermissionError as exc:
-                    replace_error = exc
-                    time.sleep(0.8)
-            if replace_error is not None:
-                raise PermissionError(
-                    "Die optimierte PDF wurde erzeugt, aber die Originaldatei konnte nicht ersetzt werden.\n\n"
-                    "Wahrscheinlich ist die Datei gerade geöffnet oder gesperrt, z. B. durch Adobe Reader, "
-                    "Explorer-Vorschau, Windows-Suche oder Nextcloud-Sync.\n\n"
-                    "Bitte Datei schließen, kurz auf den Nextcloud-Sync warten und die Optimierung erneut starten."
-                ) from replace_error
-            self.record_pdf_optimization(source, original_size, optimized_size, tool, profile, display_name=display_name)
-            return {"changed": True, "original_size": original_size, "optimized_size": optimized_size, "tool": tool}
-
-        def finish(result, error) -> None:
-            if error:
-                try:
-                    if temp.exists():
-                        temp.unlink()
-                except Exception:
-                    pass
-                app_log_exception("PDF konnte nicht optimiert werden", error, source=str(source))
-                messagebox.showerror("PDF optimieren", f"PDF konnte nicht optimiert werden:\n{error}", parent=parent)
-                self.keep_pdf_overview_front(parent)
-                return
-            self.refresh_pdf_views_after_action()
-            if not result.get("changed"):
-                messagebox.showinfo(
-                    "PDF optimieren",
-                    "Die PDF-Optimierung hat keine kleinere Datei ergeben.\n"
-                    f"Arbeitsdatei bleibt unverändert: {self.format_size_bytes(result.get('original_size'))}\n\n"
-                    "Der Optimierungsversuch wird in der PDF-Übersicht mit X dokumentiert.",
-                    parent=parent,
-                )
-                self.keep_pdf_overview_front(parent)
-                return
-            saved = int(result.get("original_size") or 0) - int(result.get("optimized_size") or 0)
-            messagebox.showinfo(
-                "PDF optimieren",
-                f"PDF wurde mit Profil '{profile}' optimiert.\n\n"
-                f"Vorher: {self.format_size_bytes(result.get('original_size'))}\n"
-                f"Nachher: {self.format_size_bytes(result.get('optimized_size'))}\n"
-                f"Ersparnis: {self.format_size_bytes(saved)}\n\n"
-                "Die Änderung wird über den Nextcloud-Sync hochgeladen.",
-                parent=parent,
-            )
-            self.keep_pdf_overview_front(parent)
-
-        self.run_pdf_processing_dialog(
-            "PDF optimieren",
-            f"Datei wird verarbeitet...\n\n{source.name}",
-            worker,
-            finish,
-            parent=parent,
-        )
+        _pmo_optimize_pdf_file(self, source, parent=parent)
 
     def run_lossless_pdf_optimization(self, source: Path, target: Path, profile: str | None = None) -> None:
-        if importlib.util.find_spec("fitz") is None:
-            raise RuntimeError("PyMuPDF ist nicht verfügbar. Verlustfreie PDF-Optimierung kann nicht ausgeführt werden.")
-        import fitz
-
-        selected_profile = (profile or self.pdf_optimization_profile()).strip().lower()
-        save_options = {"garbage": 4, "deflate": True, "clean": True}
-        if selected_profile == "standard":
-            save_options.update({"deflate_images": True, "deflate_fonts": True})
-        elif selected_profile == "maximal":
-            save_options.update({"deflate_images": True, "deflate_fonts": True, "use_objstms": 1, "compression_effort": 9})
-        doc = fitz.open(str(source))
-        try:
-            doc.save(str(target), **save_options)
-        finally:
-            doc.close()
+        _pmo_run_lossless_pdf_optimization(self, source, target, profile=profile)
 
     def run_ghostscript_pdf_optimization(self, source: Path, target: Path, gs_command: list[str], profile: str) -> None:
-        selected_profile = (profile or "standard").strip().lower()
-        if selected_profile == "maximal":
-            dpi = 120
-            mono_dpi = 200
-            jpeg_quality = 65
-        else:
-            dpi = 144
-            mono_dpi = 300
-            jpeg_quality = 75
-        cmd = gs_command + [
-            "-dBATCH",
-            "-dNOPAUSE",
-            "-dSAFER",
-            "-sDEVICE=pdfwrite",
-            "-dCompatibilityLevel=1.4",
-            "-dDetectDuplicateImages=true",
-            "-dCompressFonts=true",
-            "-dSubsetFonts=true",
-            "-dEmbedAllFonts=true",
-            "-dAutoRotatePages=/None",
-            "-dDownsampleColorImages=true",
-            "-dDownsampleGrayImages=true",
-            "-dDownsampleMonoImages=true",
-            "-dColorImageDownsampleType=/Bicubic",
-            "-dGrayImageDownsampleType=/Bicubic",
-            "-dMonoImageDownsampleType=/Subsample",
-            "-dColorImageDownsampleThreshold=1.0",
-            "-dGrayImageDownsampleThreshold=1.0",
-            "-dMonoImageDownsampleThreshold=1.0",
-            f"-dColorImageResolution={dpi}",
-            f"-dGrayImageResolution={dpi}",
-            f"-dMonoImageResolution={mono_dpi}",
-            "-dAutoFilterColorImages=false",
-            "-dAutoFilterGrayImages=false",
-            "-dColorImageFilter=/DCTEncode",
-            "-dGrayImageFilter=/DCTEncode",
-            f"-dJPEGQ={jpeg_quality}",
-            f"-sOutputFile={target}",
-            str(source),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=7200)
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or "Ghostscript konnte PDF nicht optimieren.").strip()
-            raise RuntimeError(message[:1600])
-        if not target.exists() or target.stat().st_size <= 0:
-            raise RuntimeError("Ghostscript hat keine gültige optimierte PDF-Datei erzeugt.")
+        _pmo_run_ghostscript_pdf_optimization(self, source, target, gs_command, profile)
 
     def create_pdfa_file(self, source: Path, parent=None) -> None:
-        self.keep_pdf_overview_front(parent)
-        if not self.ensure_local_pdf_available(source, parent=parent):
-            return
-        target = self.pdfa_path_for_document(source)
-        if not target:
-            messagebox.showwarning("PDF/A", "Bitte eine PDF-Datei auswählen.", parent=parent)
-            self.keep_pdf_overview_front(parent)
-            return
-        if target.exists():
-            messagebox.showinfo("PDF/A", f"PDF/A-Fassung ist bereits vorhanden:\n{target}", parent=parent)
-            self.keep_pdf_overview_front(parent)
-            return
-        gs = self.find_ghostscript_command()
-        if not gs:
-            messagebox.showwarning(
-                "PDF/A",
-                "Ghostscript wurde nicht gefunden.\n\n"
-                "PDF/A-Erzeugung wird erst aktiviert, wenn Ghostscript installiert bzw. im PATH verfügbar ist.",
-                parent=parent,
-            )
-            self.keep_pdf_overview_front(parent)
-            return
-        if not messagebox.askyesno("PDF/A erzeugen", f"PDF/A-Archivfassung erzeugen?\n\nQuelle:\n{source}\n\nZiel:\n{target}", parent=parent):
-            self.keep_pdf_overview_front(parent)
-            return
-        temp = target.with_name(f"{target.stem}.__odv_pdfa_tmp.pdf")
-        display_name = self.display_name_var.get().strip() or "ODV"
-
-        def worker() -> dict:
-            if temp.exists():
-                temp.unlink()
-            self.run_ghostscript_pdfa(source, temp, gs)
-            shutil.move(str(temp), str(target))
-            self.record_pdfa_creation(source, target, gs[0], display_name=display_name)
-            return {"target": target}
-
-        def finish(result, error) -> None:
-            if error:
-                try:
-                    if temp.exists():
-                        temp.unlink()
-                except Exception:
-                    pass
-                app_log_exception("PDF/A konnte nicht erzeugt werden", error, source=str(source), target=str(target))
-                messagebox.showerror("PDF/A", f"PDF/A konnte nicht erzeugt werden:\n{error}", parent=parent)
-                self.keep_pdf_overview_front(parent)
-                return
-            messagebox.showinfo(
-                "PDF/A",
-                f"PDF/A-Fassung wurde erzeugt:\n{target}\n\nDie Datei wird über den Nextcloud-Sync hochgeladen.",
-                parent=parent,
-            )
-            self.refresh_pdf_views_after_action()
-            self.keep_pdf_overview_front(parent)
-
-        self.run_pdf_processing_dialog(
-            "PDF/A erzeugen",
-            f"Datei wird verarbeitet...\n\n{source.name}",
-            worker,
-            finish,
-            parent=parent,
-        )
+        _pmp_create_pdfa_file(self, source, parent=parent)
 
     def run_ghostscript_pdfa(self, source: Path, target: Path, gs_command: list[str]) -> None:
-        cmd = gs_command + [
-            "-dPDFA=2",
-            "-dBATCH",
-            "-dNOPAUSE",
-            "-dNOOUTERSAVE",
-            "-sDEVICE=pdfwrite",
-            "-dPDFACompatibilityPolicy=1",
-            "-sColorConversionStrategy=RGB",
-            "-sProcessColorModel=DeviceRGB",
-            "-dEmbedAllFonts=true",
-            "-dSubsetFonts=true",
-            f"-sOutputFile={target}",
-            str(source),
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
-        if result.returncode != 0:
-            message = (result.stderr or result.stdout or "Ghostscript konnte PDF/A nicht erzeugen.").strip()
-            raise RuntimeError(message[:1600])
-        if not target.exists() or target.stat().st_size <= 0:
-            raise RuntimeError("Ghostscript hat keine gültige PDF/A-Datei erzeugt.")
+        _pmp_run_ghostscript_pdfa(self, source, target, gs_command)
 
     def ensure_local_pdf_available(self, source: Path, parent=None) -> bool:
-        if source.exists() and source.is_file() and source.suffix.lower() == ".pdf":
-            return True
-        messagebox.showwarning(
-            "PDF",
-            "Diese PDF ist in Nextcloud vorgesehen, aber lokal nicht verfügbar.\n"
-            "Bitte die Datei zuerst synchronisieren/herunterladen.",
-            parent=parent,
-        )
-        self.keep_pdf_overview_front(parent)
-        return False
+        return _pmp_ensure_local_pdf_available(self, source, parent=parent)
 
     def record_pdf_optimization(self, source: Path, original_size: int, optimized_size: int, tool: str, profile: str, display_name: str | None = None) -> None:
         item, metadata_file = self.ensure_pdf_metadata_item(source)
@@ -649,6 +317,7 @@ class PdfManagementManagerMixin:
         return _pmm_write_pdf_size_log(rows, APP_DIR)
 
     def open_pdf_overview_dialog(self) -> None:
+        return _pmd_open_pdf_overview_dialog(self)
         if not self.is_current_admin():
             return
         base = Path(str(self.base_folder_var.get() or ""))
